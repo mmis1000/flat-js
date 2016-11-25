@@ -55,7 +55,7 @@ function transformFunction(path) {
       return;
   }
   
-  let newTree = t.BlockStatement(makeNewTree(parts, nameContext.get('_'), true));
+  let newTree = t.BlockStatement(makeNewTree(parts, nameContext.get('_'), false));
   
   path.get('body').replaceWith(newTree)
 }
@@ -361,7 +361,7 @@ function transform(part, nameContext) {
                 )
             }
             var lastCase = cases[cases.length - 1];
-            lastCase.casePart.setNext(exitPart);
+            lastCase.casePart.setNext(lastCase.caseBodys[0]);
             if (lastCase.casePart.condition) {
                 lastCase.casePart.setAlt(
                    exitPart
