@@ -1,5 +1,5 @@
 {
-  "name": "flat-js",
+  "name": "babel-plugin-control-flow-flattening",
   "version": "0.0.1",
   "description": "babel plugin for flow flattening",
   "main": "index.js",
