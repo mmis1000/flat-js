@@ -1,151 +1,64 @@
-var esprima = require('esprima');
-var escodegen = require('escodegen');
-var babel = require('babel-core');
+let t;
+module.exports = function(babel) {
+  t = babel.types;
+  return {
+    visitor: {
+      /*
+      BinaryExpression(path) {
+        let node = path.node
+          path.replaceWith(
+            t.callExpression(t.Identifier("binaryOperate"), [t.stringLiteral(node.operator) ,node.left, node.right])
+          );
+      },
+      Program(path) {
+        // console.log(path);
+        console.log(babel.transform('function binaryOperate() {}').ast)
+        path.node.body.unshift(babel.transform('function binaryOperate() {}').ast.program.body[0]);
+      },*/
+      FunctionDeclaration(path) {
+        transformFunction(path)
+      },
+      FunctionExpression(path) {
+        transformFunction(path)
+      }
+    }
+  }
+}
 
 var Part = require("./lib/part");
 var LoopContext = require("./lib/loop-context");
 var NameContext = require("./lib/name-context");
 
-function gen(code) {
-    code = babel
-        .transform(code, {
-            presets: ['es2015']
-        })
-        .code;
-    
-    var ast = esprima.parse(code);
-    
-    var names = findDeclarations(ast);
-    var nameContext = new NameContext(names);
-    var flowName = nameContext.get('__flow');
-    
-    
-    findScopes(ast).forEach(function(i) {
-        i.body.body = trasformLeaf(i.body.body, nameContext, flowName);
-    })
-    //var parts = split(ast.body);
-    var newAst = {
-        "type": "Program",
-        "body": trasformLeaf(ast.body, nameContext, flowName),
-        "sourceType": "script"
-    }
-    return {
-        ast: ast,
-        newAst: newAst,
-        test: escodegen.generate(ast),
-        newText: escodegen.generate(newAst)
-    };
+function transformFunction(path) {
+  let name = path.scope.generateUidIdentifier("_");
+  let statements = path.node.body.body;
+  let parts = split(statements);
+  let nameContext = new NameContext(path);
+  
+  var prevLength = -1;
+  while (prevLength !== parts.length) {
+      prevLength = parts.length;
+      for (var i = parts.length - 1; i >= 0; i--) {
+          [].splice.apply(parts, [i, 1].concat(transform(parts[i], nameContext)))
+      }
+  }
+  fixBreakAndContinueStatement(parts)
+  
+  for (var i = 0; i < parts.length; i++) {
+      parts[i].originalIndex = i;
+  }
+  
+  collapesParts(parts)
+  
+  // for too mini function
+  if (parts.length <= 3) {
+      return;
+  }
+  
+  let newTree = t.BlockStatement(makeNewTree(parts, nameContext.get('_'), true));
+  
+  path.get('body').replaceWith(newTree)
 }
-
-function findScopes(ast) {
-    var current;
-    var scopes = [];
-    var todo = [ast];
-    for (current = todo[0]; todo.length > 0; current = todo.pop()) {
-        if (!current) continue;
-        if (['FunctionExpression', 'FunctionDeclaration'].indexOf(current.type) >= 0) {
-            scopes.push(current);
-        }
-        if (Array.isArray(current)) {
-            todo = todo.concat(current);
-            continue;
-        }
-        if ('object' === typeof current) {
-            for (var key in current) {
-                todo.push(current[key])
-            }
-        }
-    }
-    return scopes;
-}
-
-function findDeclarations(ast) {
-    var current;
-    var names = [];
-    var todo = [ast];
-    for (current = todo[0]; todo.length > 0; current = todo.pop()) {
-        if (!current) continue;
-        
-        if ('VariableDeclaration' === current.type) {
-            current.declarations.forEach(function (declaration) {
-                names.push(declaration.id.name);
-            })
-            continue;
-        } else if ('FunctionDeclaration' === current.type) {
-            names.push(current.id.name)
-        }
-        if (Array.isArray(current)) {
-            todo = todo.concat(current);
-            continue;
-        }
-        if ('object' === typeof current) {
-            for (var key in current) {
-                todo.push(current[key])
-            }
-        }
-    }
-    var newNames = [];
-    var temp = {};
-    
-    for (var i = 0; i < names.length; i++) {
-        if (!temp[names[i]]) {
-            newNames.push(names[i]);
-            temp[names[i]] = true;
-        }
-    }
-    
-    return newNames;
-}
-
-function trasformLeaf(nodes, nameContext, flowName) {
-    var parts = split(nodes);
-    
-    var prevLength = -1;
-    while (prevLength !== parts.length) {
-        prevLength = parts.length;
-        for (var i = parts.length - 1; i >= 0; i--) {
-            [].splice.apply(parts, [i, 1].concat(transform(parts[i], nameContext)))
-        }
-    }
-    fixBreakAndContinueStatement(parts)
-    
-    for (var i = 0; i < parts.length; i++) {
-        parts[i].originalIndex = i;
-    }
-    
-    collapesParts(parts)
-    
-    // for too mini function
-    if (parts.length <= 3) {
-        return nodes;
-    }
-    
-    return makeNewTree(parts, flowName, true);
-}
-
-function split(nodes) {
-    var parts = [];
-    parts = nodes.slice(0);
-    parts = parts.map(function (i) {
-        return new Part([i]);
-    })
-    for (var i = 0; i < parts.length; i++) {
-        if (i !== 0) {
-            parts[i].prevs.push(parts[i - 1]);
-        }
-        if (i !== parts.length - 1) {
-            parts[i].next = parts[i + 1];
-        }
-    }
-    /*
-    parts.forEach(function(i) {
-        console.log(JSON.stringify(i.nodes, 0, 4))
-    })
-    */
-    
-    return parts;
-}
-
 function fixBreakAndContinueStatement(parts) {
     var part, loopContexts, targetContext;
     for (var i = 0; i < parts.length; i++) {
@@ -203,6 +116,23 @@ function collapesParts(parts) {
             
         }
     }
+}
+function split(nodes) {
+    var parts = [];
+    parts = nodes.slice(0);
+    parts = parts.map(function (i) {
+        return new Part([i]);
+    })
+    for (var i = 0; i < parts.length; i++) {
+        if (i !== 0) {
+            parts[i].prevs.push(parts[i - 1]);
+        }
+        if (i !== parts.length - 1) {
+            parts[i].next = parts[i + 1];
+        }
+    }
+    
+    return parts;
 }
 
 function unwrapLabel(labeldStatement) {
@@ -368,22 +298,24 @@ function transform(part, nameContext) {
             
             return newNodes
         case 'SwitchStatement':
-            var tempName = nameContext.get('__switch');
+            var tempIdentifier = nameContext.get('__switch');
             var discriminant = node.discriminant;
-            var entryPart = new Part([createAssignmentExpressionStatement(tempName, discriminant)]);
-            var exitPart = new Part([createAssignmentExpressionStatement(tempName, {
-                "type": "Literal",
-                "value": null,
-                "raw": "null"
-            })]);
+            var entryPart = new Part([
+                /*t.expressionStatement(t.assignmentExpression('=', tempIdentifier, discriminant))*/
+              
+                t.variableDeclaration('var', [
+                  t.VariableDeclarator(tempIdentifier, discriminant)
+                ])
+              ]);
+            var exitPart = new Part([t.expressionStatement(t.assignmentExpression('=', tempIdentifier, t.nullLiteral()))]);
             
             var cases = node.cases.map(function (i) {
                 var casePart = new Part([]);
                 if (i.test) {
-                    casePart.setCondition(createEqualExpression({
-                        "type": "Identifier",
-                        "name": tempName
-                    }, i.test))
+                    casePart.setCondition(t.BinaryExpression(
+                      '===', 
+                      tempIdentifier,
+                      i.test))
                 }
                 var caseBodys = i.consequent.map(function (i) {
                     return new Part([i]);
@@ -468,46 +400,22 @@ function transform(part, nameContext) {
     }
 }
 
-function makeNewTree(parts, flowName, shuffle) {
-    var pointerName = flowName;
-    var mainBody = [{
-            "type": "VariableDeclaration",
-            "declarations": [
-                {
-                    "type": "VariableDeclarator",
-                    "id": {
-                        "type": "Identifier",
-                        "name": pointerName
-                    },
-                    "init": {
-                        "type": "Literal",
-                        "value": 1,
-                        "raw": "1"
-                    }
-                }
-            ],
-            "kind": "var"
-        },
-        {
-            "type": "WhileStatement",
-            "test": {
-                "type": "Identifier",
-                "name": "$_"
-            },
-            "body": {
-                "type": "BlockStatement",
-                "body": [
-                    {
-                        "type": "SwitchStatement",
-                        "discriminant": {
-                            "type": "Identifier",
-                            "name": pointerName
-                        },
-                        "cases": []
-                    }
-                ]
-            }
-    }]
+function makeNewTree(parts, flowIdentifier, shuffle) {
+    var mainBody = [
+      t.variableDeclaration('var', [
+          t.VariableDeclarator(flowIdentifier, t.numericLiteral(1))
+        ])
+      ,
+        t.WhileStatement(
+          flowIdentifier,
+          t.BlockStatement([
+            t.SwitchStatement(
+              flowIdentifier,
+              []
+            )
+          ])
+        )
+      ]
     
     if (parts.length === 0) {
         return [];
@@ -547,11 +455,11 @@ function makeNewTree(parts, flowName, shuffle) {
             next = part.next ? part.next.label : 0;
             alt = part.alt ? part.alt.label : 0;
             condition = part.condition
-            jump = createLiteralAssignmentExpressionStatement(pointerName, next, condition, alt);
+            jump = createLiteralAssignmentExpressionStatement(flowIdentifier, next, condition, alt);
             part.body = part.nodes.concat([jump])
         } else {
             next = part.next ? part.next.label : 0;
-            jump = createLiteralAssignmentExpressionStatement(pointerName, next);
+            jump = createLiteralAssignmentExpressionStatement(flowIdentifier, next);
             part.body = part.nodes.concat([jump])
         }
     })
@@ -564,70 +472,35 @@ function makeNewTree(parts, flowName, shuffle) {
     return mainBody;
 }
 
-function makeCase(body, test) {
-    return {
-        "type": "SwitchCase",
-        "test": {
-            "type": "Literal",
-            "value": test,
-            "raw": test.toString()
-        },
-        "consequent": body.concat([
-            {
-                "type": "BreakStatement",
-                "label": null
-            }
-        ])
-    }
-}
-
 function createAssignmentExpressionStatement(name, expression) {
-    return {
-        "type": "ExpressionStatement",
-        "expression": {
-            "type": "AssignmentExpression",
-            "operator": "=",
-            "left": {
-                "type": "Identifier",
-                "name": name
-            },
-            "right": expression
-        }
-    }
+    return t.ExpressionStatement(
+      t.assignmentExpression(
+        '=',
+        name,
+        expression
+      )
+    )
 }
 
 function createLiteralAssignmentExpressionStatement(name, val, condition, alt) {
     if (!condition) {
-        return createAssignmentExpressionStatement(name, {
-            "type": "Literal",
-            "value": val,
-            "raw": val.toString()
-        })
+        return createAssignmentExpressionStatement(name, 
+          t.numericLiteral(val)
+        )
     } else {
-        return createAssignmentExpressionStatement(name, {
-            "type": "ConditionalExpression",
-            "test": condition,
-            "consequent": {
-                "type": "Literal",
-                "value": val,
-                "raw": val.toString()
-            },
-            "alternate": {
-                "type": "Literal",
-                "value": alt,
-                "raw": alt.toString()
-            }
-        });
+        return createAssignmentExpressionStatement(name, 
+          t.conditionalExpression(
+            condition,
+            t.numericLiteral(val),
+            t.numericLiteral(alt)
+          )
+        );
     }
 }
 
-function createEqualExpression(from, to) {
-    return {
-        "type": "BinaryExpression",
-        "operator": "===",
-        "left": from,
-        "right": to
-    }
+function makeCase(body, test) {
+    return t.switchCase(
+      t.numericLiteral(test),
+      body.concat(t.breakStatement())
+    )
 }
-
-module.exports = gen;
