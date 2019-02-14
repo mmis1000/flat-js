@@ -1,21 +1,50 @@
 (function () {
-    const codes = ["putNumber", 0, "initScope", "putNumber", 6, "jump", "putUndefined", "putString", "test", "newVar", "putUndefined", "putString", "res", "newVar", "putNumber", 17, "jump", "getScope", "putString", "test", "createFunction", 68, "setVal", "pop", "putNumber", 27, "jump", "getScope", "putString", "res", "getScope", "dupeVal", 0, "putString", "test", "getVal", "putString", "a", "putNumber", 1, "call", "setVal", "pop", "putNumber", 46, "jump", "getScope", "putString", "console", "getVal", "dupeVal", 0, "putString", "log", "getVal", "getScope", "putString", "res", "getVal", "putNumber", 1, "call", "pop", "putNumber", 66, "jump", "putUndefined", "leaveScope", "putString", "a", "putNumber", 1, "initScope", "putNumber", 76, "jump", "getScope", "putString", "console", "getVal", "dupeVal", 0, "putString", "log", "getVal", "getScope", "putString", "a", "getVal", "putString", "test", "putNumber", 1, "putNumber", 3, "call", "pop", "putNumber", 100, "jump", "getScope", "putString", "console", "getVal", "dupeVal", 0, "putString", "log", "getVal", "getScope", "putString", "arguments", "getVal", "putNumber", 1, "call", "pop", "putNumber", 120, "jump", "getScope", "putString", "a", "getVal", "leaveScope"];
+    const codes = ["putNumber", 0, "initScope", "putNumber", 6, "jump", "putUndefined", "putString", "test", "newVar", "putUndefined", "putString", "res", "newVar", "putNumber", 17, "jump", "putNumber", 3, "putString", "b", "newVar", "putNumber", 25, "jump", "getScope", "putString", "test", "createFunction", 81, "setVal", "pop", "putNumber", 35, "jump", "createFunction", 161, "putNumber", 2, "putNumber", 1, "callIntr", "pop", "putNumber", 46, "jump", "getScope", "putString", "res", "getScope", "putString", "test", "putString", "a", "putNumber", 1, "call", "setVal", "pop", "putNumber", 62, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "res", "getVal", "putNumber", 1, "call", "pop", "putNumber", 79, "jump", "putUndefined", "leaveScope", "putString", "a", "putNumber", 1, "initScope", "putNumber", 89, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "b", "getVal", "getScope", "putString", "a", "getVal", "putString", "test", "putNumber", 1, "putNumber", 4, "call", "pop", "putNumber", 114, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "arguments", "getVal", "putNumber", 1, "call", "pop", "putNumber", 131, "jump", "putNumber", 139, "putNumber", 156, "putBoolean", true, "condition", "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "a", "getVal", "putNumber", 1, "call", "pop", "putNumber", 156, "jump", "getScope", "putString", "a", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 169, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "putString", "iife", "getScope", "putString", "val", "getVal", "putNumber", 2, "call", "pop", "putNumber", 188, "jump", "putUndefined", "leaveScope"];
     const globalScope = this || (typeof global !== "undefined" ? global : null) || (typeof window !== "undefined" ? window : null) || (typeof self !== "undefined" ? self : null);
     const IS_SCOPE = Symbol("is scope");
     const PARENT_SCOPE = Symbol("parent_scope");
     const THIS = Symbol("this");
+    const RETURN_POINTER = Symbol("return_pointer");
+    const IS_RECORD = Symbol("is_record");
+    const STACK = Symbol("stack");
 
     function CreateChildScope(scope) {
-        const obj = Object.create(scope);
-        Object.defineProperty(obj, PARENT_SCOPE, {
-            configurable: false,
-            enumerable: true,
-            value: scope
-        });
+        let obj;
+
+        if (scope[IS_SCOPE]) {
+            obj = Object.create(null);
+            Object.defineProperty(obj, PARENT_SCOPE, {
+                configurable: false,
+                enumerable: true,
+                value: scope
+            });
+        } else {
+            obj = Object.create(scope);
+            Object.defineProperty(obj, PARENT_SCOPE, {
+                configurable: false,
+                enumerable: true,
+                value: {
+                    [IS_SCOPE]: true,
+                    [IS_RECORD]: true,
+                    [STACK]: []
+                }
+            });
+        }
+
         Object.defineProperty(obj, IS_SCOPE, {
             configurable: false,
             enumerable: true,
             value: true
+        });
+        Object.defineProperty(obj, IS_RECORD, {
+            configurable: false,
+            enumerable: true,
+            value: true
+        });
+        Object.defineProperty(obj, STACK, {
+            configurable: false,
+            enumerable: true,
+            value: []
         });
         return obj;
     }
@@ -39,7 +68,79 @@
     }
 
     function HasVariable(scope, name) {
-        return name in scope;
+        if (!scope[IS_SCOPE]) {
+            return name in scope;
+        }
+
+        for (;;) {
+            if (name in scope) {
+                return true;
+            }
+
+            if (!scope[PARENT_SCOPE]) {
+                break;
+            } else {
+                scope = scope[PARENT_SCOPE];
+            }
+        }
+
+        return false;
+    }
+
+    function SetVariable(scope, name, value) {
+        if (!scope[IS_SCOPE]) {
+            scope[name] = value;
+        }
+
+        for (;;) {
+            if (name in scope) {
+                scope[name] = value;
+            }
+
+            if (!scope[PARENT_SCOPE]) {
+                break;
+            } else {
+                scope = scope[PARENT_SCOPE];
+            }
+        }
+
+        return false;
+    }
+
+    function GetVariable(scope, name) {
+        if (!scope[IS_SCOPE]) {
+            return scope[name];
+        }
+
+        for (;;) {
+            if (name in scope) {
+                return scope[name];
+            }
+
+            if (!scope[PARENT_SCOPE]) {
+                break;
+            } else {
+                scope = scope[PARENT_SCOPE];
+            }
+        }
+
+        throw new ReferenceError("variable " + name + " not exist");
+    }
+
+    function GetSelf(scope, name) {
+        for (;;) {
+            if (name in scope) {
+                return scope;
+            }
+
+            if (!scope[PARENT_SCOPE]) {
+                break;
+            } else {
+                scope = scope[PARENT_SCOPE];
+            }
+        }
+
+        throw new ReferenceError("variable " + name + " not exist");
     }
 
     function InitScope(scope, self, names, fn, out_args) {
@@ -160,6 +261,20 @@
             };
         },
 
+        putBoolean(opcodes, index, skip) {
+            skip(1);
+            const bool = opcodes[index + 1];
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump
+            }) => {
+                stack.push(bool);
+            };
+        },
+
         dupeVal(opcodes, index, skip) {
             skip(1);
             const offset = opcodes[index + 1];
@@ -183,6 +298,26 @@
                 jump
             }) => {
                 stack.pop();
+            };
+        },
+
+        condition() {
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump
+            }) => {
+                var cond = stack.pop();
+                var alt = stack.pop();
+                var org = stack.pop();
+
+                if (cond) {
+                    stack.push(org);
+                } else {
+                    stack.push(alt);
+                }
             };
         },
 
@@ -210,7 +345,7 @@
                 var name = stack.pop();
                 var value = stack.pop();
                 DefineVariable(scope, name);
-                scope[name] = value;
+                SetVariable(scope, name, value);
             };
         },
 
@@ -226,12 +361,7 @@
                 var name = stack.pop();
                 var self = stack.pop();
                 stack.push(value);
-
-                if (self[IS_SCOPE] && !HasVariable(self, name)) {
-                    throw new Error("unknown variable " + name);
-                }
-
-                self[name] = value;
+                SetVariable(self, name, value);
             };
         },
 
@@ -245,12 +375,7 @@
             }) => {
                 var name = stack.pop();
                 var self = stack.pop();
-
-                if (self[IS_SCOPE] && !HasVariable(self, name)) {
-                    throw new Error("unknown variable " + name);
-                }
-
-                stack.push(self[name]);
+                stack.push(GetVariable(self, name));
             };
         },
 
@@ -291,8 +416,8 @@
                 jump
             }) => {
                 var argument = stack.pop();
-                var returnPoint = stack.pop();
-                stack.push(argument);
+                var returnPoint = scope[RETURN_POINTER];
+                scope[PARENT_SCOPE][STACK].push(argument);
                 jump(returnPoint);
                 leave();
             };
@@ -315,29 +440,72 @@
                     args.unshift(stack.pop());
                 }
 
-                var fn = stack.pop();
+                var identifier = stack.pop();
                 var self = stack.pop();
-                var info = getInfo(fn);
+                var indeedSelf = GetSelf(self, identifier);
+                var func = indeedSelf[identifier];
+                var info = getInfo(func);
 
                 if (!info) {
-                    if (self[IS_SCOPE]) {
+                    if (indeedSelf[IS_RECORD]) {
                         self = globalScope;
                     }
 
-                    var res = fn.apply(self, args);
+                    var res = func.apply(self, args);
                     stack.push(res);
                 } else {
-                    stack.push(currentIndex + 1);
-                    stack.push(self);
-                    stack.push(fn);
+                    var newScope = CreateChildScope(info.scope);
+                    newScope[RETURN_POINTER] = currentIndex + 1;
+                    newScope[STACK].push(self);
+                    newScope[STACK].push(func);
                     var original_length = args.length;
 
                     while (args.length) {
-                        stack.push(args.shift());
+                        newScope[STACK].push(args.shift());
                     }
 
-                    stack.push(original_length);
+                    newScope[STACK].push(original_length);
+                    enter(newScope);
+                    jump(info.index);
+                }
+            };
+        },
+
+        callIntr() {
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump,
+                getInfo,
+                currentIndex
+            }) => {
+                var args_length = stack.pop();
+                var args = [];
+
+                while (args_length--) {
+                    args.unshift(stack.pop());
+                }
+
+                var func = stack.pop();
+                var info = getInfo(func);
+
+                if (!info) {
+                    var res = func.apply(globalScope, args);
+                    stack.push(res);
+                } else {
                     var newScope = CreateChildScope(info.scope);
+                    newScope[RETURN_POINTER] = currentIndex + 1;
+                    newScope[STACK].push(globalScope);
+                    newScope[STACK].push(func);
+                    var original_length = args.length;
+
+                    while (args.length) {
+                        newScope[STACK].push(args.shift());
+                    }
+
+                    newScope[STACK].push(original_length);
                     enter(newScope);
                     jump(info.index);
                 }
@@ -378,13 +546,14 @@
 
     function run(scope, self, fn, index, args) {
         var callStack = [scope];
-        var stack = [-1, self, fn, ...args, args.length];
+        scope[STACK] = scope[STACK].concat([-1, self, fn, ...args, args.length]);
 
         function enter(scope) {
             callStack.push(scope);
         }
 
         function leave() {
+            if (callStack.length === 1) return;
             callStack.pop();
         }
 
@@ -398,7 +567,7 @@
 
         var ctx = {
             scope: currentScope(),
-            stack,
+            stack: currentScope()[STACK],
             leave,
             enter,
             jump,
@@ -423,11 +592,12 @@
         while (baked[ctx.currentIndex]) {
             nextIndex = baked[ctx.currentIndex].nextIndex;
             ctx.scope = currentScope();
+            ctx.stack = currentScope()[STACK];
             baked[ctx.currentIndex](ctx);
             ctx.currentIndex = nextIndex;
         }
 
-        return ctx.stack.pop();
+        return currentScope()[STACK][0];
     }
 
     run(CreateChildScope(globalScope), globalScope, undefined, 0, []);
