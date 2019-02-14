@@ -5,14 +5,23 @@ function test(a) {
     console.log(arguments)
     
     if (true) {
-        console.log(a)
+        console.log(a, 'cond')
     }
     
     return a
 }
 
-(function(val){ console.log("iife", val) })(2)
+
+function closureTest(val) {
+    return function () {
+        return val
+    }
+}
+
+;(function(val){ console.log("iife", val) })(2)
 
 var res = test("a")
 
 console.log(res)
+
+console.log(closureTest('closure value')())

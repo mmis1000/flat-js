@@ -1,8 +1,9 @@
 (function () {
-    const codes = ["putNumber", 0, "initScope", "putNumber", 6, "jump", "putUndefined", "putString", "test", "newVar", "putUndefined", "putString", "res", "newVar", "putNumber", 17, "jump", "putNumber", 3, "putString", "b", "newVar", "putNumber", 25, "jump", "getScope", "putString", "test", "createFunction", 81, "setVal", "pop", "putNumber", 35, "jump", "createFunction", 161, "putNumber", 2, "putNumber", 1, "callIntr", "pop", "putNumber", 46, "jump", "getScope", "putString", "res", "getScope", "putString", "test", "putString", "a", "putNumber", 1, "call", "setVal", "pop", "putNumber", 62, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "res", "getVal", "putNumber", 1, "call", "pop", "putNumber", 79, "jump", "putUndefined", "leaveScope", "putString", "a", "putNumber", 1, "initScope", "putNumber", 89, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "b", "getVal", "getScope", "putString", "a", "getVal", "putString", "test", "putNumber", 1, "putNumber", 4, "call", "pop", "putNumber", 114, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "arguments", "getVal", "putNumber", 1, "call", "pop", "putNumber", 131, "jump", "putNumber", 139, "putNumber", 156, "putBoolean", true, "condition", "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "a", "getVal", "putNumber", 1, "call", "pop", "putNumber", 156, "jump", "getScope", "putString", "a", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 169, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "putString", "iife", "getScope", "putString", "val", "getVal", "putNumber", 2, "call", "pop", "putNumber", 188, "jump", "putUndefined", "leaveScope"];
+    const codes = ["putNumber", 0, "initScope", "putNumber", 6, "jump", "putUndefined", "putString", "_uid", "newVar", "putUndefined", "putString", "_uid2", "newVar", "putUndefined", "putString", "test", "newVar", "putUndefined", "putString", "closureTest", "newVar", "putUndefined", "putString", "res", "newVar", "putNumber", 29, "jump", "putNumber", 3, "putString", "b", "newVar", "putNumber", 37, "jump", "getScope", "putString", "test", "createFunction", 153, "setVal", "pop", "putNumber", 47, "jump", "getScope", "putString", "closureTest", "createFunction", 235, "setVal", "pop", "putNumber", 57, "jump", "putNumber", 60, "jump", "createFunction", 257, "putNumber", 2, "putNumber", 1, "callIntr", "pop", "putNumber", 71, "jump", "getScope", "putString", "res", "getScope", "putString", "test", "putString", "a", "putNumber", 1, "call", "setVal", "pop", "putNumber", 87, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "res", "getVal", "putNumber", 1, "call", "pop", "putNumber", 104, "jump", "getScope", "putString", "_uid2", "getScope", "putString", "closureTest", "putString", "closure value", "putNumber", 1, "call", "setVal", "pop", "putNumber", 120, "jump", "getScope", "putString", "_uid", "getScope", "putString", "_uid2", "putNumber", 0, "call", "setVal", "pop", "putNumber", 134, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "_uid", "getVal", "putNumber", 1, "call", "pop", "putNumber", 151, "jump", "putUndefined", "leaveScope", "putString", "a", "putNumber", 1, "initScope", "putNumber", 161, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "b", "getVal", "getScope", "putString", "a", "getVal", "putString", "test", "putNumber", 1, "putNumber", 4, "call", "pop", "putNumber", 186, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "arguments", "getVal", "putNumber", 1, "call", "pop", "putNumber", 203, "jump", "putNumber", 211, "putNumber", 230, "putBoolean", true, "condition", "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "a", "getVal", "putString", "cond", "putNumber", 2, "call", "pop", "putNumber", 230, "jump", "getScope", "putString", "a", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 243, "jump", "createFunction", 246, "leaveScope", "putNumber", 0, "initScope", "putNumber", 252, "jump", "getScope", "putString", "val", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 265, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "putString", "iife", "getScope", "putString", "val", "getVal", "putNumber", 2, "call", "pop", "putNumber", 284, "jump", "putUndefined", "leaveScope"];
     const globalScope = this || (typeof global !== "undefined" ? global : null) || (typeof window !== "undefined" ? window : null) || (typeof self !== "undefined" ? self : null);
     const IS_SCOPE = Symbol("is scope");
     const PARENT_SCOPE = Symbol("parent_scope");
+    const PREV_SCOPE = Symbol("prev_scope");
     const THIS = Symbol("this");
     const RETURN_POINTER = Symbol("return_pointer");
     const IS_RECORD = Symbol("is_record");
@@ -417,7 +418,7 @@
             }) => {
                 var argument = stack.pop();
                 var returnPoint = scope[RETURN_POINTER];
-                scope[PARENT_SCOPE][STACK].push(argument);
+                scope[PREV_SCOPE][STACK].push(argument);
                 jump(returnPoint);
                 leave();
             };
@@ -455,6 +456,7 @@
                     stack.push(res);
                 } else {
                     var newScope = CreateChildScope(info.scope);
+                    newScope[PREV_SCOPE] = scope;
                     newScope[RETURN_POINTER] = currentIndex + 1;
                     newScope[STACK].push(self);
                     newScope[STACK].push(func);
@@ -496,6 +498,7 @@
                     stack.push(res);
                 } else {
                     var newScope = CreateChildScope(info.scope);
+                    newScope[PREV_SCOPE] = scope;
                     newScope[RETURN_POINTER] = currentIndex + 1;
                     newScope[STACK].push(globalScope);
                     newScope[STACK].push(func);
@@ -600,5 +603,7 @@
         return currentScope()[STACK][0];
     }
 
-    run(CreateChildScope(globalScope), globalScope, undefined, 0, []);
+    let shadowScope = CreateChildScope(globalScope);
+    shadowScope[PREV_SCOPE] = shadowScope;
+    run(shadowScope, globalScope, undefined, 0, []);
 })();
