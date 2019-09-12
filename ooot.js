@@ -1,5 +1,5 @@
 (function () {
-    const codes = ["putNumber", 0, "initScope", "putNumber", 6, "jump", "putUndefined", "putString", "_uid", "newVar", "putUndefined", "putString", "_uid2", "newVar", "putUndefined", "putString", "test", "newVar", "putUndefined", "putString", "closureTest", "newVar", "putUndefined", "putString", "res", "newVar", "putNumber", 29, "jump", "putNumber", 3, "putString", "b", "newVar", "putNumber", 37, "jump", "getScope", "putString", "test", "createFunction", 153, "setVal", "pop", "putNumber", 47, "jump", "getScope", "putString", "closureTest", "createFunction", 235, "setVal", "pop", "putNumber", 57, "jump", "putNumber", 60, "jump", "createFunction", 257, "putNumber", 2, "putNumber", 1, "callIntr", "pop", "putNumber", 71, "jump", "getScope", "putString", "res", "getScope", "putString", "test", "putString", "a", "putNumber", 1, "call", "setVal", "pop", "putNumber", 87, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "res", "getVal", "putNumber", 1, "call", "pop", "putNumber", 104, "jump", "getScope", "putString", "_uid2", "getScope", "putString", "closureTest", "putString", "closure value", "putNumber", 1, "call", "setVal", "pop", "putNumber", 120, "jump", "getScope", "putString", "_uid", "getScope", "putString", "_uid2", "putNumber", 0, "call", "setVal", "pop", "putNumber", 134, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "_uid", "getVal", "putNumber", 1, "call", "pop", "putNumber", 151, "jump", "putUndefined", "leaveScope", "putString", "a", "putNumber", 1, "initScope", "putNumber", 161, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "b", "getVal", "getScope", "putString", "a", "getVal", "putString", "test", "putNumber", 1, "putNumber", 4, "call", "pop", "putNumber", 186, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "arguments", "getVal", "putNumber", 1, "call", "pop", "putNumber", 203, "jump", "putNumber", 211, "putNumber", 230, "putBoolean", true, "condition", "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "a", "getVal", "putString", "cond", "putNumber", 2, "call", "pop", "putNumber", 230, "jump", "getScope", "putString", "a", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 243, "jump", "createFunction", 246, "leaveScope", "putNumber", 0, "initScope", "putNumber", 252, "jump", "getScope", "putString", "val", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 265, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "putString", "iife", "getScope", "putString", "val", "getVal", "putNumber", 2, "call", "pop", "putNumber", 284, "jump", "putUndefined", "leaveScope"];
+    const codes = ["putNumber", 0, "initScope", "putNumber", 6, "jump", "putUndefined", "putString", "_uid3", "newVar", "putUndefined", "putString", "_uid4", "newVar", "putUndefined", "putString", "_uid5", "newVar", "putUndefined", "putString", "test", "newVar", "putUndefined", "putString", "testRecursive", "newVar", "putUndefined", "putString", "closureTest", "newVar", "putUndefined", "putString", "res", "newVar", "putNumber", 37, "jump", "putNumber", 3, "putString", "b", "newVar", "putNumber", 45, "jump", "getScope", "putString", "test", "createFunction", 206, "setVal", "pop", "putNumber", 55, "jump", "getScope", "putString", "testRecursive", "createFunction", 334, "setVal", "pop", "putNumber", 65, "jump", "getScope", "putString", "closureTest", "createFunction", 434, "setVal", "pop", "putNumber", 75, "jump", "putNumber", 78, "jump", "createFunction", 456, "putNumber", 2, "putNumber", 1, "callIntr", "pop", "putNumber", 89, "jump", "getScope", "putString", "res", "getScope", "putString", "test", "putString", "a", "putNumber", 1, "call", "setVal", "pop", "putNumber", 105, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "res", "getVal", "putNumber", 1, "call", "pop", "putNumber", 122, "jump", "getScope", "putString", "_uid5", "getScope", "putString", "closureTest", "putString", "closure value", "putNumber", 1, "call", "setVal", "pop", "putNumber", 138, "jump", "getScope", "putString", "_uid3", "getScope", "putString", "_uid5", "putNumber", 0, "call", "setVal", "pop", "putNumber", 152, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "_uid3", "getVal", "putNumber", 1, "call", "pop", "putNumber", 169, "jump", "getScope", "putString", "_uid4", "getScope", "putString", "testRecursive", "putNumber", 100000, "putNumber", 0, "putNumber", 2, "call", "setVal", "pop", "putNumber", 187, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "_uid4", "getVal", "putNumber", 1, "call", "pop", "putNumber", 204, "jump", "putUndefined", "leaveScope", "putString", "a", "putNumber", 1, "initScope", "putNumber", 214, "jump", "putUndefined", "putString", "_uid", "newVar", "putUndefined", "putString", "_binary_uid", "newVar", "putNumber", 225, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "b", "getVal", "getScope", "putString", "a", "getVal", "putString", "test", "putNumber", 1, "putNumber", 4, "call", "pop", "putNumber", 250, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "arguments", "getVal", "putNumber", 1, "call", "pop", "putNumber", 267, "jump", "getScope", "putString", "_binary_uid", "putNumber", 2, "putNumber", 1101, "add", "setVal", "pop", "putNumber", 280, "jump", "getScope", "putString", "_uid", "getScope", "putString", "_binary_uid", "getVal", "putNumber", 155, "dupeVal", 1, "compare", "putNumber", 2, "sequence", "setVal", "pop", "putNumber", 300, "jump", "putNumber", 310, "putNumber", 329, "getScope", "putString", "_uid", "getVal", "condition", "jump", "getScope", "putString", "console", "getVal", "putString", "log", "getScope", "putString", "a", "getVal", "putString", "cond", "putNumber", 2, "call", "pop", "putNumber", 329, "jump", "getScope", "putString", "a", "getVal", "leaveScope", "putString", "from", "putString", "moveTo", "putNumber", 2, "initScope", "putNumber", 344, "jump", "putUndefined", "putString", "_uid2", "newVar", "putUndefined", "putString", "_binary_uid2", "newVar", "putUndefined", "putString", "_binary_uid3", "newVar", "putNumber", 359, "jump", "getScope", "putString", "_uid2", "getScope", "putString", "from", "getVal", "putNumber", 0, "compare", "setVal", "pop", "putNumber", 374, "jump", "putNumber", 384, "putNumber", 429, "getScope", "putString", "_uid2", "getVal", "condition", "jump", "getScope", "putString", "_binary_uid2", "getScope", "putString", "from", "getVal", "putNumber", 1, "subtract", "setVal", "pop", "putNumber", 399, "jump", "getScope", "putString", "_binary_uid3", "getScope", "putString", "moveTo", "getVal", "putNumber", 1, "add", "setVal", "pop", "putNumber", 414, "jump", "getScope", "putString", "testRecursive", "getScope", "putString", "_binary_uid2", "getVal", "getScope", "putString", "_binary_uid3", "getVal", "putNumber", 2, "call", "leaveScope", "getScope", "putString", "moveTo", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 442, "jump", "createFunction", 445, "leaveScope", "putNumber", 0, "initScope", "putNumber", 451, "jump", "getScope", "putString", "val", "getVal", "leaveScope", "putString", "val", "putNumber", 1, "initScope", "putNumber", 464, "jump", "getScope", "putString", "console", "getVal", "putString", "log", "putString", "iife", "getScope", "putString", "val", "getVal", "putNumber", 2, "call", "pop", "putNumber", 483, "jump", "putUndefined", "leaveScope"];
     const globalScope = this || (typeof global !== "undefined" ? global : null) || (typeof window !== "undefined" ? window : null) || (typeof self !== "undefined" ? self : null);
     const IS_SCOPE = Symbol("is scope");
     const PARENT_SCOPE = Symbol("parent_scope");
@@ -427,6 +427,7 @@
         call(opcodes, index, skip) {
             return ({
                 scope,
+                callStack,
                 stack,
                 leave,
                 enter,
@@ -456,8 +457,18 @@
                     stack.push(res);
                 } else {
                     var newScope = CreateChildScope(info.scope);
-                    newScope[PREV_SCOPE] = scope;
-                    newScope[RETURN_POINTER] = currentIndex + 1;
+
+                    if (opcodes[currentIndex + 1] === 'leaveScope') {
+                        var originalPreviousScope = callStack.pop();
+                        var newPrevScope = callStack[callStack.length - 1];
+                        var newReturnPointer = originalPreviousScope[RETURN_POINTER];
+                        newScope[PREV_SCOPE] = newPrevScope;
+                        newScope[RETURN_POINTER] = newReturnPointer;
+                    } else {
+                        newScope[PREV_SCOPE] = scope;
+                        newScope[RETURN_POINTER] = currentIndex + 1;
+                    }
+
                     newScope[STACK].push(self);
                     newScope[STACK].push(func);
                     var original_length = args.length;
@@ -529,6 +540,91 @@
                 var func = createFunction(scope, position);
                 stack.push(func);
             };
+        },
+
+        compare() {
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump,
+                createFunction
+            }) => {
+                const right = stack.pop();
+                const left = stack.pop();
+                stack.push(left > right);
+            };
+        },
+
+        compareEqual() {
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump,
+                createFunction
+            }) => {
+                const right = stack.pop();
+                const left = stack.pop();
+                stack.push(left >= right);
+            };
+        },
+
+        add() {
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump,
+                createFunction
+            }) => {
+                const right = stack.pop();
+                const left = stack.pop();
+                stack.push(left + right);
+            };
+        },
+
+        subtract() {
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump,
+                createFunction
+            }) => {
+                const right = stack.pop();
+                const left = stack.pop();
+                stack.push(left - right);
+            };
+        },
+
+        sequence(opcodes, index, skip) {
+            return ({
+                scope,
+                stack,
+                leave,
+                enter,
+                jump,
+                createFunction
+            }) => {
+                const length = stack.pop();
+
+                if (length < 2) {
+                    throw new Error(`invalid sequence length ${length}`);
+                }
+
+                const item = stack.pop();
+
+                for (let i = 0; i < length - 1; i++) {
+                    stack.pop();
+                }
+
+                stack.push(item);
+            };
         }
 
     };
@@ -542,6 +638,11 @@
 
     while (current < codes.length) {
         skip = 0;
+
+        if (!ops[codes[current]]) {
+            throw new Error(`unknown instruction ${codes[current]}`);
+        }
+
         baked[current] = ops[codes[current]](codes, current, skipFn);
         baked[current].nextIndex = current + 1 + skip;
         current = current + 1 + skip;
@@ -569,6 +670,7 @@
         }
 
         var ctx = {
+            callStack,
             scope: currentScope(),
             stack: currentScope()[STACK],
             leave,
