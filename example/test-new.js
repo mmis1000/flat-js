@@ -33,4 +33,4 @@ var res = test("a")
 console.log(res)
 
 console.log(closureTest('closure value')())
-console.log(testRecursive(100000, 0))
+console.log('this is proper tail recursion ' + testRecursive(100000, 0))

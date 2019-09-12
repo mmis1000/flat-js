@@ -1,2 +1,2 @@
-babel --plugins=../lib/flat.js -o ./ooot.js ./test/test-new.js
+babel --plugins=../lib/flat.js -o ./example/test-new.out.js ./example/test-new.js
 # node ./ooot.js
