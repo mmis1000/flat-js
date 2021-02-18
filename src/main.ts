@@ -1,4 +1,5 @@
 import * as ts from 'typescript'
+import { run } from './runtime';
 
 const source = `
 var string = 'string'
@@ -7,15 +8,27 @@ function test () {}
 const a = () => {}
 const c = (a) => 0
 console.log(1, 2)
+const log = 'log'
+console[log](1, 2, 'Hello World')
 const b = function (f, u ,g) {
-    let k = true ? 1 : 2
-    function m () {}
-    return k
+    console[log](1, 2, 'Hello World 3')
 }
 {
     let c = 0
-    c
+    console.log(c)
+    {
+        let c = false ? -1 : 1
+        console.log(c)
+        {
+            let c = true ? 2 : -1
+            console.log(c)
+            b()
+        }
+        console.log(c)
+    }
+    console.log(c)
 }
+console.log(c)
 `;
 
 let a = ts.createSourceFile('aaa.ts', source, ts.ScriptTarget.ESNext, undefined, ts.ScriptKind.TS)
@@ -54,7 +67,7 @@ function markParent(node: ts.Node) {
     findFunction(node)
 }
 
-enum VariableType {
+export enum VariableType {
     Var = 1,
     Let = 2,
     Const = 3,
@@ -303,9 +316,8 @@ const mapVariables = () => {
 
 console.log(mapVariables())
 
-enum OpCode {
+export  enum OpCode {
     Nop,
-    PopValue,
     Literal,
     // StringLiteral = 2,
     // NumberLiteral = 3,
@@ -325,7 +337,7 @@ enum OpCode {
      *   this
      *   parameter * O
      *   parameter count: O
-     *   parameter name * N
+     *   parameter name * N - reversed
      *   parameter name count: N
      *   [
      *     variable name
@@ -353,23 +365,64 @@ enum OpCode {
 
     // stack ops
     Pop,
-    Load,
 
     // variable related
     /** RTL, foo = bar, var foo = bar */
     GetRecord,
+    /**
+     * Stack:
+     *   value
+     *   env or object
+     *   name
+     */
     Set,
+    /**
+     * ```txt
+     * Stack:
+     *   env or object
+     *   name
+     * ```
+    */
     Get,
+    /**
+     * ```txt
+     * Stack:
+     *   env or object // no consume
+     *   name // no consume
+     * ```
+    */
     DeTDZ,
+    /**
+     * ```txt
+     * Stack:
+     *   env or object // no consume
+     *   name // no consume
+     * ```
+    */
     FreezeVariable,
 
-    // Function
-    // Length 2
-    // name
+    /**
+     * ```tst
+     * Stack:
+     *   name
+     *   nodeOffset
+     *   nodeFunctionType
+     * ```
+     */
     DefineFunction,
-    DefineMethod,
     Return,
     ReturnBare,
+
+    /**
+     * ```txt
+     * Stack:
+     *   env or object
+     *   name
+     *   argument * M
+     *   argument count - M
+     * ```
+     */
+    Call,
 }
 
 type Op<Code extends OpCode = OpCode> = {
@@ -455,6 +508,18 @@ function generateSegment (node: VariableRoot): Segment {
                 op(OpCode.Literal, 2, [node.text])
             ]
         }
+        if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) {
+            return [
+                ...generate(node.expression),
+                op(OpCode.Literal, 2, [node.name.text])
+            ]
+        }
+        if (ts.isElementAccessExpression(node)) {
+            return [
+                ...generate(node.expression),
+                ...generate(node.argumentExpression)
+            ]
+        }
 
         throw new Error('not support')
     }
@@ -474,12 +539,30 @@ function generateSegment (node: VariableRoot): Segment {
                 }
 
                 if (declaration.initializer) {
+                    ops.push(...generateLeft(declaration.name))
+
+                    if (node.declarationList.flags & ts.NodeFlags.BlockScoped) {
+                        ops.push(op(OpCode.DeTDZ))
+                    }
+
                     ops.push(...generate(declaration.initializer))
+
+                    ops.push(op(OpCode.Set))
+                    ops.push(op(OpCode.Pop))
+                    if (node.declarationList.flags & ts.NodeFlags.Const) {
+                        ops.push(
+                            ...generateLeft(declaration.name),
+                            op(OpCode.FreezeVariable),
+                            op(OpCode.Pop),
+                            op(OpCode.Pop)
+                        )
+                    }
                 } else if (node.declarationList.flags & ts.NodeFlags.Let) {
                     // unblock without doing anything
                     return [
                         ...generateLeft(declaration.name),
                         op(OpCode.DeTDZ),
+                        op(OpCode.Pop),
                         op(OpCode.Pop)
                     ]
                 } else {
@@ -487,26 +570,6 @@ function generateSegment (node: VariableRoot): Segment {
                     // the variable already handled by the scope step
                     return []
                 }
-
-                ops.push(...generateLeft(declaration.name))
-
-                if (node.declarationList.flags & ts.NodeFlags.BlockScoped) {
-                    ops.push(op(OpCode.DeTDZ))
-                }
-
-                ops.push(op(OpCode.Set))
-
-                ops.push(op(OpCode.Pop))
-
-                if (node.declarationList.flags & ts.NodeFlags.Const) {
-                    ops.push(
-                        ...generateLeft(declaration.name),
-                        op(OpCode.FreezeVariable),
-                        op(OpCode.Pop),
-                        op(OpCode.Pop)
-                    )
-                }
-
             }
 
             return ops
@@ -599,8 +662,8 @@ function generateSegment (node: VariableRoot): Segment {
         
         if (ts.isIdentifier(node)) {
             return [
-                op(OpCode.Literal, 2, [node.text]),
                 op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [node.text]),
                 op(OpCode.Get)
             ]
         }
@@ -617,9 +680,36 @@ function generateSegment (node: VariableRoot): Segment {
             }
         }
 
+
+        if (ts.isPrefixUnaryExpression(node)) {
+            if (ts.isNumericLiteral(node.operand)) {
+                if (node.operator === ts.SyntaxKind.MinusToken) {
+                    return [
+                        op(OpCode.Literal, 2, [-Number(node.operand.text)]),
+                    ]
+                }
+                if (node.operator === ts.SyntaxKind.PlusToken) {
+                    return [
+                        op(OpCode.Literal, 2, [+Number(node.operand.text)]),
+                    ]
+                }
+            }
+        }
+
         if (ts.isCallExpression(node)) {
             const self = node.expression
             const args = node.arguments.map(generate).flat()
+            
+            if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
+                const leftOps = generateLeft(self)
+
+                return [
+                    ...leftOps,
+                    ...args,
+                    op(OpCode.Literal, 2, [node.arguments.length]),
+                    op(OpCode.Call)
+                ]
+            }
         }
 
         throw new Error(`Unknown node ${getNameOfKind(node.kind)}`)
@@ -647,7 +737,8 @@ function generateSegment (node: VariableRoot): Segment {
         op(OpCode.NodeOffset, 2, [node]),
         op(OpCode.NodeFunctionType, 2, [node]),
         op(OpCode.DefineFunction),
-        op(OpCode.Set)
+        op(OpCode.Set),
+        op(OpCode.Pop)
     ]).flat()
 
     const entry: Op[] = []
@@ -701,8 +792,8 @@ console.log(flattened.map(it => {
     return `${it.offset} ${OpCode[it.op]} ${it.length} ${it.preData.map(it => it.kind ? getNameOfKind(it.kind) : JSON.stringify(it))}`
 }).join('\r\n'))
 
-const TEXT_DADA_MASK = 0x80000000
-const isSmallNumber = (a: any): a is number => {
+export const TEXT_DADA_MASK = 0x80000000
+export const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
 }
 
@@ -725,6 +816,10 @@ function generateData (seg: Segment) {
                 const opPtr: Op = ptr
                 programData.push(opPtr.offset)
             }
+        } else if (op.op === OpCode.NodeFunctionType) {
+            const func: VariableRoot = op.preData[0]
+            programData.push(OpCode.Literal)
+            programData.push(func.kind)
         } else {
             programData.push(op.op)
 
@@ -733,12 +828,13 @@ function generateData (seg: Segment) {
                     if (isSmallNumber(op.preData[0])) {
                         programData.push(op.preData[0])
                     } else {
-                        programData.push(TEXT_DADA_MASK | (textData.push(op.preData[0]) - 1))
+                        const oldIndex = textData.indexOf(op.preData[0])
+                        if (oldIndex >= 0) {
+                            programData.push(TEXT_DADA_MASK | oldIndex)
+                        } else {
+                            programData.push(TEXT_DADA_MASK | (textData.push(op.preData[0]) - 1))
+                        }
                     }
-                    break;
-                case OpCode.NodeFunctionType:
-                    var func: VariableRoot = op.preData[0]
-                    programData.push(func.kind)
                     break;
                 default:
                     throw new Error(`Unhandled ${OpCode[op.op]}`)
@@ -751,4 +847,8 @@ generateData(flattened)
 
 console.log(textData, programData)
 
-debugger
+// debugger
+
+console.time()
+run(programData, textData, 0, [globalThis])
+console.timeEnd()
