@@ -67,7 +67,7 @@ function markParent(node: ts.Node) {
     findFunction(node)
 }
 
-export enum VariableType {
+export const enum VariableType {
     Var = 1,
     Let = 2,
     Const = 3,
@@ -295,7 +295,7 @@ const mapVariables = () => {
 
     function map (node: ts.Node): Res {
         const scope = scopes.get(node)!
-        const names = [...scope.entries()].map(([k, v]) => k + ':' + VariableType[v.type])
+        const names = [...scope.entries()].map(([k, v]) => k + ':' +v.type)
 
         const children: Res[] = []
 
@@ -316,7 +316,7 @@ const mapVariables = () => {
 
 console.log(mapVariables())
 
-export  enum OpCode {
+export const enum OpCode {
     Nop,
     Literal,
     // StringLiteral = 2,
@@ -788,9 +788,9 @@ const genOffset = (nodes: Segment) => {
 
 genOffset(flattened)
 
-console.log(flattened.map(it => {
-    return `${it.offset} ${OpCode[it.op]} ${it.length} ${it.preData.map(it => it.kind ? getNameOfKind(it.kind) : JSON.stringify(it))}`
-}).join('\r\n'))
+// console.log(flattened.map(it => {
+//     return `${it.offset} ${OpCode[it.op]} ${it.length} ${it.preData.map(it => it.kind ? getNameOfKind(it.kind) : JSON.stringify(it))}`
+// }).join('\r\n'))
 
 export const TEXT_DADA_MASK = 0x80000000
 export const isSmallNumber = (a: any): a is number => {
@@ -837,7 +837,7 @@ function generateData (seg: Segment) {
                     }
                     break;
                 default:
-                    throw new Error(`Unhandled ${OpCode[op.op]}`)
+                    throw new Error(`Unhandled ${op.op}`)
             }
         }
     }
