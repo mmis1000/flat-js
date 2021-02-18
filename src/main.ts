@@ -13,6 +13,9 @@ console[log](1, 2, 'Hello World')
 const b = function (f, u ,g) {
     console[log](1, 2, 'Hello World 3')
 }
+const k = function (fn) {
+    fn()
+}
 {
     let c = 0
     console.log(c)
@@ -23,6 +26,7 @@ const b = function (f, u ,g) {
             let c = true ? 2 : -1
             console.log(c)
             b()
+            k(b)
         }
         console.log(c)
     }
