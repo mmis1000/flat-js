@@ -1,74 +1,9 @@
 import * as ts from 'typescript'
 import { run } from './runtime';
 
-const source = `
-var string = 'string'
-let string1:string  = 'string'
-function test () {}
-const a = () => {}
-const c = (a) => 0
-console.log(1, 2)
-const log = 'log'
-console[log](1, 2, 'Hello World')
-const b = function (f, u ,g) {
-    console[log](1, 2, 'Hello World 3')
-}
-const k = function (fn) {
-    fn()
-}
-{
-    let c = 0
-    console.log(c)
-    {
-        let c = false ? -1 : 1
-        console.log(c)
-        {
-            let c = true ? 2 : -1
-            console.log(c)
-            b()
-            k(b)
-        }
-        console.log(c)
-    }
-    console.log(c)
-}
-console.log(c)
-`;
-
-let a = ts.createSourceFile('aaa.ts', source, ts.ScriptTarget.ESNext, undefined, ts.ScriptKind.TS)
-
-const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
-const parentMap = new Map<ts.Node, { key: string, node: ts.Node }>()
-
-function findAncient(node: ts.Node, predicate: (node: ts.Node) => boolean): ts.Node | undefined
-function findAncient<T extends ts.Node = ts.Node>(node: ts.Node, predicate: (node: ts.Node) => node is T): T | undefined
-function findAncient(node: ts.Node, predicate: (node: ts.Node) => boolean): ts.Node | undefined {
-    let parent: ts.Node | undefined = parentMap.get(node)?.node
-    while (parent !== undefined) {
-        if (predicate(parent)) {
-            return parent
-        }
-
-        parent = parentMap.get(parent)?.node
-    }
-}
-
-function markParent(node: ts.Node) {
-    function findFunction(node: ts.Node) {
-        for (let [key, v] of Object.entries(node)) {
-            if (Array.isArray(v)) {
-                for (let item of v) {
-                    if (item !== null && typeof item === 'object' && typeof item.kind == 'number') {
-                        parentMap.set(item, { key, node })
-                    }
-                }
-            } else if (v !== null && typeof v === 'object' && typeof v.kind == 'number') {
-                parentMap.set(v, { key, node })
-            }
-        }
-        node.forEachChild(findFunction)
-    }
-    findFunction(node)
+export const TEXT_DADA_MASK = 0x80000000
+export const isSmallNumber = (a: any): a is number => {
+    return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
 }
 
 export const enum VariableType {
@@ -86,11 +21,7 @@ type VariableDeclaration = {
     node: ts.Node
 }
 
-const scopes = new Map<ts.Node, Map<string, VariableDeclaration>>()
-const functions = new Set<VariableRoot>()
-const scopeChild = new Map<ts.Node, Set<ts.Node>>()
-
-type VariableRoot = ts.SourceFile|
+type VariableRoot = ts.SourceFile |
     ts.FunctionDeclaration |
     ts.FunctionExpression |
     ts.MethodDeclaration |
@@ -98,227 +29,10 @@ type VariableRoot = ts.SourceFile|
     ts.AccessorDeclaration |
     ts.ArrowFunction
 
-function isScopeRoot(node: ts.Node): node is VariableRoot {
-    return ts.isSourceFile(node) ||
-    (
-        ts.isFunctionLike(node)
-        && !ts.isCallSignatureDeclaration(node)
-        && !ts.isConstructSignatureDeclaration(node)
-        && !ts.isMethodSignature(node)
-        && !ts.isIndexSignatureDeclaration(node)
-        && !ts.isTypeNode(node)
-    )
-}
-
-function extractVariable(node: ts.Identifier | ts.ObjectBindingPattern | ts.ArrayBindingPattern | ts.Node): ts.Identifier[] {
-    if (ts.isIdentifier(node)) {
-        return [node]
-    }
-
-    if (ts.isArrayBindingPattern(node)) {
-        const n = node
-        let list: ts.Identifier[] = []
-        for (const el of n.elements) {
-            if (ts.isIdentifier(el)) {
-                list.push(el)
-            }
-            if (ts.isObjectBindingPattern(el) || ts.isArrayBindingPattern(el)) {
-                list = [...list, ...extractVariable(el)]
-            }
-        }
-
-        return list
-    }
-
-    if (ts.isObjectBindingPattern(node)) {
-        const n = node
-        let list: ts.Identifier[] = []
-        for (const el of n.elements) {
-            // includes { ...a }
-            if (ts.isIdentifier(el.name)) {
-                if (el.propertyName === undefined) {
-                    list.push(el.name)
-                }
-            }
-
-            if (el.propertyName) {
-                if (ts.isIdentifier(el.name)) {
-                    list.push(el.name)
-                }
-
-                if (ts.isObjectBindingPattern(el.name) || ts.isArrayBindingPattern(el.name)) {
-                    list = [...list, ...extractVariable(el.name)]
-                }
-            }
-        }
-
-        return list
-    }
-
-    return []
-}
-
-function searchFunctionAndScope(node: ts.Node) {
-    function findFunction(node: ts.Node) {
-        if (isScopeRoot(node)) {
-            functions.add(node)
-            scopes.set(node, new Map())
-        }
-
-        switch (node.kind) {
-            case ts.SyntaxKind.Block:
-                let pair = parentMap.get(node)
-                if (
-                    pair
-                    && pair.key === 'body'
-                    && (
-                        ts.isConstructorDeclaration(pair.node) ||
-                        ts.isFunctionDeclaration(pair.node) ||
-                        ts.isFunctionExpression(pair.node) ||
-                        ts.isArrowFunction(pair.node) ||
-                        ts.isMethodDeclaration(pair.node) ||
-                        ts.isAccessor(pair.node)
-                    )
-                ) {
-                    break // this is the body of function, method, constructor
-                }
-            case ts.SyntaxKind.CaseBlock:
-                scopes.set(node, new Map())
-        }
-        node.forEachChild(findFunction)
-    }
-    findFunction(node)
-}
-
-function resolveScopes(node: ts.Node) {
-    function findFunction(node: ts.Node) {
-        if (ts.isVariableDeclarationList(node)) {
-            const variables = node.declarations.map(d => extractVariable(d.name)).flat()
-            const blockScoped = node.flags & ts.NodeFlags.BlockScoped
-
-            let block
-
-            if (blockScoped) {
-                block = findAncient(node, node => scopes.has(node))
-            } else {
-                block = findAncient(node, node => functions.has(node as any))
-            }
-
-            if (block === undefined) {
-                throw new Error('unresolvable variable')
-            }
-
-            for (const v of variables) {
-                scopes.get(block)!.set(
-                    v.text,
-                    {
-                        type: node.flags & ts.NodeFlags.Const ? VariableType.Const :
-                            node.flags & ts.NodeFlags.Let ? VariableType.Let :
-                                VariableType.Var
-                    }
-                )
-            }
-        }
-
-        if (ts.isFunctionDeclaration(node)) {
-            const parentFn = findAncient(node, node => (functions as Set<ts.Node>).has(node))
-
-            if (parentFn === undefined) {
-                throw new Error('unresolvable variable')
-            }
-
-            scopes.get(parentFn)!.set(node.name!.text, {
-                type: VariableType.Function,
-                node: node
-            })
-        }
-
-        if (ts.isFunctionLike(node)) {
-            for (const el of node.parameters) {
-                const variables = extractVariable(el.name)
-                const scope = scopes.get(node)
-
-                if (scope === undefined) {
-                    throw new Error('unresolvable variable')
-                }
-                for (const v of variables) {
-                    scope.set(
-                        v.text,
-                        {
-                            type: VariableType.Parameter
-                        }
-                    )
-                }
-            }
-        }
-
-        node.forEachChild(findFunction)
-    }
-    findFunction(node)
-}
-
-function linkScopes(node: ts.Node) {
-    function findFunction(node: ts.Node) {
-        const item = scopes.get(node)
-
-        if (item && item.size > 0) {
-            const parent = findAncient(node, node => (scopes.get(node)?.size ?? 0) > 0)
-            if (parent) {
-                scopeChild.set(parent, new Set([node, ...(scopeChild.get(parent) ?? new Set())]))
-            }
-        }
-
-        node.forEachChild(findFunction)
-    }
-    findFunction(node)
-}
-markParent(a)
-searchFunctionAndScope(a)
-resolveScopes(a)
-linkScopes(a)
-
-const mapVariables = () => {
-    const hasParent: Set<ts.Node> = new Set()
-    for (let v of scopeChild.values()) {
-        for (let v1 of v)
-        hasParent.add(v1)
-    }
-
-    const roots: Set<ts.Node> = new Set()
-
-    for (let k of scopeChild.keys()) {
-        if (!hasParent.has(k)) {
-            roots.add(k)
-        }
-    }
-
-    interface Res {
-        names: string[]
-        children: Res[]
-    }
-
-    function map (node: ts.Node): Res {
-        const scope = scopes.get(node)!
-        const names = [...scope.entries()].map(([k, v]) => k + ':' +v.type)
-
-        const children: Res[] = []
-
-        if (scopeChild.has(node)) {
-            for (const node1 of scopeChild.get(node)!) {
-                children.push(map(node1))
-            }
-        }
-
-        return {
-            names,
-            children
-        }
-    }
-
-    return [...roots].map(map)
-}
-
-console.log(mapVariables())
+type ParentMap = Map<ts.Node, { key: string, node: ts.Node }>
+type Scopes = Map<ts.Node, Map<string, VariableDeclaration>>
+type ScopeChild = Map<ts.Node, Set<ts.Node>>
+type Functions = Set<VariableRoot>
 
 export const enum OpCode {
     Nop,
@@ -438,6 +152,257 @@ type Op<Code extends OpCode = OpCode> = {
     offset: number
 }
 
+type Segment = Op[]
+
+function findAncient(node: ts.Node, parentMap: ParentMap, predicate: (node: ts.Node) => boolean): ts.Node | undefined
+function findAncient<T extends ts.Node = ts.Node>(node: ts.Node, parentMap: ParentMap, predicate: (node: ts.Node) => node is T): T | undefined
+function findAncient(node: ts.Node, parentMap: ParentMap, predicate: (node: ts.Node) => boolean): ts.Node | undefined {
+    let parent: ts.Node | undefined = parentMap.get(node)?.node
+    while (parent !== undefined) {
+        if (predicate(parent)) {
+            return parent
+        }
+
+        parent = parentMap.get(parent)?.node
+    }
+}
+
+function markParent(node: ts.Node, parentMap: ParentMap) {
+    function findFunction(node: ts.Node) {
+        for (let [key, v] of Object.entries(node)) {
+            if (Array.isArray(v)) {
+                for (let item of v) {
+                    if (item !== null && typeof item === 'object' && typeof item.kind == 'number') {
+                        parentMap.set(item, { key, node })
+                    }
+                }
+            } else if (v !== null && typeof v === 'object' && typeof v.kind == 'number') {
+                parentMap.set(v, { key, node })
+            }
+        }
+        node.forEachChild(findFunction)
+    }
+    findFunction(node)
+}
+
+
+function isScopeRoot(node: ts.Node): node is VariableRoot {
+    return ts.isSourceFile(node) ||
+        (
+            ts.isFunctionLike(node)
+            && !ts.isCallSignatureDeclaration(node)
+            && !ts.isConstructSignatureDeclaration(node)
+            && !ts.isMethodSignature(node)
+            && !ts.isIndexSignatureDeclaration(node)
+            && !ts.isTypeNode(node)
+        )
+}
+
+function extractVariable(node: ts.Identifier | ts.ObjectBindingPattern | ts.ArrayBindingPattern | ts.Node): ts.Identifier[] {
+    if (ts.isIdentifier(node)) {
+        return [node]
+    }
+
+    if (ts.isArrayBindingPattern(node)) {
+        const n = node
+        let list: ts.Identifier[] = []
+        for (const el of n.elements) {
+            if (ts.isIdentifier(el)) {
+                list.push(el)
+            }
+            if (ts.isObjectBindingPattern(el) || ts.isArrayBindingPattern(el)) {
+                list = [...list, ...extractVariable(el)]
+            }
+        }
+
+        return list
+    }
+
+    if (ts.isObjectBindingPattern(node)) {
+        const n = node
+        let list: ts.Identifier[] = []
+        for (const el of n.elements) {
+            // includes { ...a }
+            if (ts.isIdentifier(el.name)) {
+                if (el.propertyName === undefined) {
+                    list.push(el.name)
+                }
+            }
+
+            if (el.propertyName) {
+                if (ts.isIdentifier(el.name)) {
+                    list.push(el.name)
+                }
+
+                if (ts.isObjectBindingPattern(el.name) || ts.isArrayBindingPattern(el.name)) {
+                    list = [...list, ...extractVariable(el.name)]
+                }
+            }
+        }
+
+        return list
+    }
+
+    return []
+}
+
+function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, functions: Functions, scopes: Scopes) {
+    function findFunction(node: ts.Node) {
+        if (isScopeRoot(node)) {
+            functions.add(node)
+            scopes.set(node, new Map())
+        }
+
+        switch (node.kind) {
+            case ts.SyntaxKind.Block:
+                let pair = parentMap.get(node)
+                if (
+                    pair
+                    && pair.key === 'body'
+                    && (
+                        ts.isConstructorDeclaration(pair.node) ||
+                        ts.isFunctionDeclaration(pair.node) ||
+                        ts.isFunctionExpression(pair.node) ||
+                        ts.isArrowFunction(pair.node) ||
+                        ts.isMethodDeclaration(pair.node) ||
+                        ts.isAccessor(pair.node)
+                    )
+                ) {
+                    break // this is the body of function, method, constructor
+                }
+            case ts.SyntaxKind.CaseBlock:
+                scopes.set(node, new Map())
+        }
+        node.forEachChild(findFunction)
+    }
+    findFunction(node)
+}
+
+function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Functions, scopes: Scopes) {
+    function findFunction(node: ts.Node) {
+        if (ts.isVariableDeclarationList(node)) {
+            const variables = node.declarations.map(d => extractVariable(d.name)).flat()
+            const blockScoped = node.flags & ts.NodeFlags.BlockScoped
+
+            let block
+
+            if (blockScoped) {
+                block = findAncient(node, parentMap, node => scopes.has(node))
+            } else {
+                block = findAncient(node, parentMap, node => functions.has(node as any))
+            }
+
+            if (block === undefined) {
+                throw new Error('unresolvable variable')
+            }
+
+            for (const v of variables) {
+                scopes.get(block)!.set(
+                    v.text,
+                    {
+                        type: node.flags & ts.NodeFlags.Const ? VariableType.Const :
+                            node.flags & ts.NodeFlags.Let ? VariableType.Let :
+                                VariableType.Var
+                    }
+                )
+            }
+        }
+
+        if (ts.isFunctionDeclaration(node)) {
+            const parentFn = findAncient(node, parentMap, node => (functions as Set<ts.Node>).has(node))
+
+            if (parentFn === undefined) {
+                throw new Error('unresolvable variable')
+            }
+
+            scopes.get(parentFn)!.set(node.name!.text, {
+                type: VariableType.Function,
+                node: node
+            })
+        }
+
+        if (ts.isFunctionLike(node)) {
+            for (const el of node.parameters) {
+                const variables = extractVariable(el.name)
+                const scope = scopes.get(node)
+
+                if (scope === undefined) {
+                    throw new Error('unresolvable variable')
+                }
+                for (const v of variables) {
+                    scope.set(
+                        v.text,
+                        {
+                            type: VariableType.Parameter
+                        }
+                    )
+                }
+            }
+        }
+
+        node.forEachChild(findFunction)
+    }
+    findFunction(node)
+}
+
+function linkScopes(node: ts.Node, parentMap: ParentMap, scopes: Scopes, scopeChild: ScopeChild) {
+    function findFunction(node: ts.Node) {
+        const item = scopes.get(node)
+
+        if (item && item.size > 0) {
+            const parent = findAncient(node, parentMap, node => (scopes.get(node)?.size ?? 0) > 0)
+            if (parent) {
+                scopeChild.set(parent, new Set([node, ...(scopeChild.get(parent) ?? new Set())]))
+            }
+        }
+
+        node.forEachChild(findFunction)
+    }
+    findFunction(node)
+}
+
+const mapVariables = (scopes: Scopes, scopeChild: ScopeChild) => {
+    const hasParent: Set<ts.Node> = new Set()
+    for (let v of scopeChild.values()) {
+        for (let v1 of v)
+            hasParent.add(v1)
+    }
+
+    const roots: Set<ts.Node> = new Set()
+
+    for (let k of scopeChild.keys()) {
+        if (!hasParent.has(k)) {
+            roots.add(k)
+        }
+    }
+
+    interface Res {
+        names: string[]
+        children: Res[]
+    }
+
+    function map(node: ts.Node): Res {
+        const scope = scopes.get(node)!
+        const names = [...scope.entries()].map(([k, v]) => k + ':' + v.type)
+
+        const children: Res[] = []
+
+        if (scopeChild.has(node)) {
+            for (const node1 of scopeChild.get(node)!) {
+                children.push(map(node1))
+            }
+        }
+
+        return {
+            names,
+            children
+        }
+    }
+
+    return [...roots].map(map)
+}
+
+
 function headOf<T>(arr: T[]): T {
     if (arr.length === 0) {
         throw new Error('empty array')
@@ -451,9 +416,6 @@ function tailOf<T>(arr: T[]): T {
     }
     return arr[arr.length - 1]!
 }
-type Segment = Op[]
-
-const program: Segment[] = []
 
 function getNameOfKind(kind: ts.SyntaxKind): string {
     let name = ts.SyntaxKind[kind]
@@ -470,7 +432,7 @@ function getNameOfKind(kind: ts.SyntaxKind): string {
 }
 
 function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
-    return{
+    return {
         op,
         length,
         preData,
@@ -479,7 +441,7 @@ function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
     }
 }
 
-function generateVariableList(node: ts.Node): Op[] {
+function generateVariableList(node: ts.Node, scopes: Scopes): Op[] {
     const variables = scopes.get(node)!
 
     return [...variables].map(([name, type]) => [
@@ -490,19 +452,20 @@ function generateVariableList(node: ts.Node): Op[] {
     ])
 }
 
-function generateEnterScope(node: ts.Node): Op<OpCode>[] {
+function generateEnterScope(node: ts.Node, scopes: Scopes): Op<OpCode>[] {
     return [
-        ...generateVariableList(node),
+        ...generateVariableList(node, scopes),
         op(OpCode.EnterScope)
     ]
 }
+
 function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
     return [
         op(OpCode.LeaveScope)
     ]
 }
 
-function generateSegment (node: VariableRoot): Segment {
+function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
 
     function generateLeft(node: ts.Node): Segment {
@@ -658,12 +621,12 @@ function generateSegment (node: VariableRoot): Segment {
 
         if (ts.isBlock(node)) {
             return [
-                ...generateEnterScope(node),
+                ...generateEnterScope(node, scopes),
                 ...node.statements.map(generate).flat(),
                 ...generateLeaveScope(node)
             ]
         }
-        
+
         if (ts.isIdentifier(node)) {
             return [
                 op(OpCode.GetRecord),
@@ -703,7 +666,7 @@ function generateSegment (node: VariableRoot): Segment {
         if (ts.isCallExpression(node)) {
             const self = node.expression
             const args = node.arguments.map(generate).flat()
-            
+
             if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
                 const leftOps = generateLeft(self)
 
@@ -760,7 +723,7 @@ function generateSegment (node: VariableRoot): Segment {
         entry.push(op(OpCode.Literal, 2, [node.parameters.length]))
     }
 
-    entry.push(...generateVariableList(node))
+    entry.push(...generateVariableList(node, scopes))
     entry.push(op(OpCode.NodeFunctionType, 2, [node]))
     entry.push(op(OpCode.EnterFunction))
 
@@ -772,17 +735,7 @@ function generateSegment (node: VariableRoot): Segment {
     ]
 }
 
-const map = new Map<ts.Node, Segment>()
-
-for (let item of functions) {
-    const generated = generateSegment(item)
-    program.push(generated)
-    map.set(item, generated)
-}
-
-const flattened = program.flat()
-
-const genOffset = (nodes: Segment) => {
+function genOffset (nodes: Segment) {
     let offset = 0
     for (let seg of nodes) {
         seg.offset = offset
@@ -790,21 +743,7 @@ const genOffset = (nodes: Segment) => {
     }
 }
 
-genOffset(flattened)
-
-// console.log(flattened.map(it => {
-//     return `${it.offset} ${OpCode[it.op]} ${it.length} ${it.preData.map(it => it.kind ? getNameOfKind(it.kind) : JSON.stringify(it))}`
-// }).join('\r\n'))
-
-export const TEXT_DADA_MASK = 0x80000000
-export const isSmallNumber = (a: any): a is number => {
-    return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
-}
-
-const textData: any[] = []
-const programData: number[] = []
-
-function generateData (seg: Segment) {
+function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, programData: number[], textData: any[]) {
     for (const op of seg) {
         if (op.length === 0) {
             // not generate anything
@@ -815,7 +754,7 @@ function generateData (seg: Segment) {
             programData.push(OpCode.Literal)
             if (ptr.kind !== undefined) {
                 const nodePtr: ts.Node = ptr
-                programData.push(headOf(map.get(nodePtr)!).offset)
+                programData.push(headOf(fnRootToSegment.get(nodePtr)!).offset)
             } else {
                 const opPtr: Op = ptr
                 programData.push(opPtr.offset)
@@ -847,12 +786,80 @@ function generateData (seg: Segment) {
     }
 }
 
-generateData(flattened)
+const source = `
+var string = 'string'
+let string1:string  = 'string'
+function test () {}
+const a = () => {}
+const c = (a) => 0
+console.log(1, 2)
+const log = 'log'
+console[log](1, 2, 'Hello World')
+const b = function (f, u ,g) {
+    console[log](1, 2, 'Hello World 3')
+}
+const k = function (fn) {
+    fn()
+}
+{
+    let c = 0
+    console.log(c)
+    {
+        let c = false ? -1 : 1
+        console.log(c)
+        {
+            let c = true ? 2 : -1
+            console.log(c)
+            b()
+            k(b)
+        }
+        console.log(c)
+    }
+    console.log(c)
+}
+console.log(c)
+`;
 
-console.log(textData, programData)
+{
+    const parentMap: ParentMap = new Map()
+    const scopes: Scopes = new Map()
+    const functions: Functions = new Set()
+    const scopeChild: ScopeChild = new Map()
 
-// debugger
+    let sourceNode = ts.createSourceFile('aaa.ts', source, ts.ScriptTarget.ESNext, undefined, ts.ScriptKind.TS)
 
-console.time()
-run(programData, textData, 0, [globalThis])
-console.timeEnd()
+
+    markParent(sourceNode, parentMap)
+    searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
+    resolveScopes(sourceNode, parentMap, functions, scopes)
+    linkScopes(sourceNode, parentMap, scopes, scopeChild)
+
+    console.log(mapVariables(scopes, scopeChild))
+
+    const program: Segment[] = []
+
+    const functionToSegment = new Map<ts.Node, Segment>()
+
+    for (let item of functions) {
+        const generated = generateSegment(item, scopes)
+        program.push(generated)
+        functionToSegment.set(item, generated)
+    }
+
+    const flattened = program.flat()
+
+    genOffset(flattened)
+
+    const textData: any[] = []
+    const programData: number[] = []
+
+    generateData(flattened, functionToSegment, programData, textData)
+
+    console.log(textData, programData,)
+
+    // debugger
+
+    console.time()
+    run(programData, textData, 0, [globalThis])
+    console.timeEnd()
+}
