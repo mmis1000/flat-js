@@ -95,13 +95,13 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             configurable: true,
             get() {
                 if (descriptor[Fields.tdz]) {
-                    throw new ReferenceError(`${name} no defined`)
+                    throw new ReferenceError(`${name} is no defined`)
                 }
                 return descriptor[Fields.value]
             },
             set(v) {
                 if (descriptor[Fields.tdz]) {
-                    throw new ReferenceError(`${name} no defined`)
+                    throw new ReferenceError(`${name} is no defined`)
                 }
                 if (descriptor[Fields.immutable]) {
                     throw new ReferenceError(`${name} is a constant`)

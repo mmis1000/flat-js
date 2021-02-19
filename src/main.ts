@@ -818,6 +818,8 @@ const k = function (fn) {
     console.log(c)
 }
 console.log(c)
+console.log(e)
+let e= 0
 `;
 
 {
@@ -855,7 +857,7 @@ console.log(c)
 
     generateData(flattened, functionToSegment, programData, textData)
 
-    console.log(textData, programData,)
+    console.log(textData, programData)
 
     // debugger
 
