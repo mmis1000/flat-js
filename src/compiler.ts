@@ -1,5 +1,4 @@
 import * as ts from 'typescript'
-import { run } from './runtime';
 
 export const TEXT_DADA_MASK = 0x80000000
 export const isSmallNumber = (a: any): a is number => {
