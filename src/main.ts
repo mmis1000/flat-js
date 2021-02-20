@@ -73,26 +73,26 @@ let t;
 
 var a = function(){
     var c;
-    var crcTable = [];
+    var l = [];
     for(var n =0; n < 256; n++){
         c = n;
         for(var k =0; k < 8; k++){
             c = ((c&1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
         }
-        crcTable[n] = c;
+        l[n] = c;
     }
-    return crcTable;
+    return l;
 }
 
-var b = function(str) {
-    var crcTable = t || (t = a());
-    var crc = 0 ^ (-1);
+var b = function(s) {
+    var m = t || (t = a());
+    var n = 0 ^ (-1);
 
-    for (var i = 0; i < str.length; i++ ) {
-        crc = (crc >>> 8) ^ crcTable[(crc ^ str.charCodeAt(i)) & 0xFF];
+    for (var i = 0; i < s.length; i++ ) {
+        n = (n >>> 8) ^ m[(n ^ s.charCodeAt(i)) & 0xFF];
     }
 
-    return (crc ^ (-1)) >>> 0;
+    return (n ^ (-1)) >>> 0;
 };
 console.log(b(location.href))
 `)
