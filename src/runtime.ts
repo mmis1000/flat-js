@@ -3,6 +3,7 @@ import ts from "typescript"
 import { OpCode, SetFlag, VariableType } from "./compiler"
 
 
+// [START_HERE]
 // MUST SYNC WITH COMPILER
 const TEXT_DADA_MASK = 0x80000000
 // MUST SYNC WITH COMPILER

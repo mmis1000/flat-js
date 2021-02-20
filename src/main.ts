@@ -101,7 +101,15 @@ console.log(b(location.href))
 compileAndRun(`
 const fns = []
 for (let i = 0; i < 15; i++) {
-    fns.push(() => i)
+    let c = 0
+    fns.push({
+        a: () => c++,
+        b: () => {
+            debugger
+            return i + c
+        }
+    })
 }
-console.log(fns[7]() + fns[8]())
+fns[7].a()
+console.log(fns[7].b() + fns[8].b())
 `)

@@ -1178,8 +1178,6 @@ export function compile(src: string) {
     resolveScopes(sourceNode, parentMap, functions, scopes)
     linkScopes(sourceNode, parentMap, scopes, scopeChild)
 
-    console.log(mapVariables(scopes, scopeChild))
-
     const program: Segment[] = []
 
     const functionToSegment = new Map<ts.Node, Segment>()
