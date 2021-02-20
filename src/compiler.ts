@@ -874,7 +874,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             let condition = node.condition
             let incrementor = node.incrementor
 
-            let hasScope = scopes.has(node)
+            let hasScope = scopes.has(node) && scopes.get(node)!.size > 0
 
 
             /**
@@ -886,7 +886,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
              */
 
             var entry0 = hasScope
-                ? [...generateEnterScope(node, scopes), op(OpCode.EnterScope)]
+                ? generateEnterScope(node, scopes)
                 : [op(OpCode.Nop, 0)]
 
             var entry1 = initializer
@@ -920,7 +920,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                         op(OpCode.GetRecord),
                         op(OpCode.Literal, 2, [item.name.text]),
                         op(OpCode.Get),
-                        op(OpCode.Literal, 2, [SetFlag.DeTDZ & ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0)])
+                        op(OpCode.Literal, 2, [SetFlag.DeTDZ | ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0)])
                     )
                 }
 
@@ -928,7 +928,6 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     op(OpCode.Literal, 2, [initializer.declarations.length]),
                     op(OpCode.LeaveScope),
                     ...generateEnterScope(node, scopes),
-                    op(OpCode.EnterScope),
                     op(OpCode.GetRecord),
                     op(OpCode.SetMultiple)
                 )

@@ -27,7 +27,8 @@ const enum Fields {
     name,
     tdz,
     immutable,
-    value
+    value,
+    offset
 }
 
 type FunctionFrame = {
@@ -141,10 +142,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
     }
 
     type FunctionDescriptor = {
-        name: string,
-        type: ts.SyntaxKind,
-        offset: number,
-        scopes: Scope[]
+        [Fields.name]: string,
+        [Fields.type]: ts.SyntaxKind,
+        [Fields.offset]: number,
+        [Fields.scopes]: Scope[]
     }
 
     const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
@@ -154,10 +155,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         const scopeClone = [...scopes]
 
         const des: FunctionDescriptor = {
-            name,
-            type,
-            offset,
-            scopes: scopeClone
+            [Fields.name]: name,
+            [Fields.type]: type,
+            [Fields.offset]: offset,
+            [Fields.scopes]: scopeClone
         }
 
         const fn = function (this: any, ...args: any[]) {
@@ -279,9 +280,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         if (Reflect.has(ctx[Fields.scopes][i], name)) {
                             hit = true
                             const desc = getVariableDescriptor(ctx[Fields.scopes][i], name)
-                            if (desc && SetFlag.DeTDZ) desc[Fields.tdz] = false
+                            if (desc && (flag & SetFlag.DeTDZ)) desc[Fields.tdz] = false
                             currentFrame[Fields.scopes][i][name] = value
-                            if (desc && SetFlag.Freeze) desc[Fields.immutable] = true
+                            if (desc && (flag & SetFlag.Freeze)) desc[Fields.immutable] = true
                             break
                         }
                     }
@@ -408,7 +409,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     const des = functionDescriptors.get(fn)!
                     const newFrame: Frame = {
                         [Fields.type]: FrameType.Function,
-                        [Fields.scopes]: [...des.scopes],
+                        [Fields.scopes]: [...des[Fields.scopes]],
                         [Fields.return]: ptr,
                         [Fields.valueStack]: [
                             self,
@@ -419,7 +420,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     environments.add(newFrame)
 
                     stack.push(newFrame)
-                    ptr = des.offset
+                    ptr = des[Fields.offset]
                 }
             }
                 break

@@ -96,3 +96,12 @@ var b = function(s) {
 };
 console.log(b(location.href))
 `)
+
+
+compileAndRun(`
+const fns = []
+for (let i = 0; i < 15; i++) {
+    fns.push(() => i)
+}
+console.log(fns[7]() + fns[8]())
+`)
