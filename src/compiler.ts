@@ -963,6 +963,19 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 ...exit
             ]
         }
+        // Comma
+        if (ts.isBinaryExpression(node)) {
+            switch (node.operatorToken.kind) {
+                case ts.SyntaxKind.CommaToken:
+                    return [
+                        ...generate(node.left),
+                        op(OpCode.Pop),
+                        ...generate(node.right)
+                    ]
+                default:
+                    // let next block do it
+            }
+        }
 
         // Assignments
         if (ts.isBinaryExpression(node)) {

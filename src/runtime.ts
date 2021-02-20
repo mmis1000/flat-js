@@ -190,7 +190,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             if (scope) {
                 return scope[name]
             } else {
-                throw new ReferenceError(`Non exist variable ${name}`)
+                throw new ReferenceError(`${name} is no defined`)
             }
         }
     }
@@ -233,7 +233,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     if (scope) {
                         scope[name] = value
                     } else {
-                        throw new ReferenceError(`Non exist variable ${name}`)
+                        throw new ReferenceError(`${name} is no defined`)
                     }
                 }
 
@@ -289,7 +289,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     }
 
                     if (!hit) {
-                        throw new ReferenceError(`Non exist variable ${name}`)
+                        throw new ReferenceError(`${name} is no defined`)
                     }
                 }
             }
