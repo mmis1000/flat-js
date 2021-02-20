@@ -1,6 +1,6 @@
 "use strict"
 import ts from "typescript"
-import { isSmallNumber, OpCode, TEXT_DADA_MASK, VariableType } from "./main"
+import { isSmallNumber, OpCode, SetFlag, TEXT_DADA_MASK, VariableType } from "./compiler"
 
 const enum FrameType {
     Function,
@@ -161,18 +161,27 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         return fn
     }
 
+    const findScope = (ctx: Frame, name: string): Scope | null => {
+        for (let i = ctx[Fields.scopes].length - 1; i >= 0; i--) {
+            if (Reflect.has(ctx[Fields.scopes][i], name)) {
+                return ctx[Fields.scopes][i]
+            }
+        }
+
+        return null
+    }
     const getValue = (ctx: any, name: string) => {
         if (!environments.has(ctx)) {
             return ctx[name]
         } else {
             const env: Frame = ctx
-            for (let i = env[Fields.scopes].length - 1; i >= 0; i--) {
-                if (Reflect.has(env[Fields.scopes][i], name)) {
-                    return env[Fields.scopes][i][name]
-                }
-            }
+            const scope = findScope(env, name)
 
-            throw new ReferenceError(`Non exist variable ${name}`)
+            if (scope) {
+                return scope[name]
+            } else {
+                throw new ReferenceError(`Non exist variable ${name}`)
+            }
         }
     }
 
@@ -201,7 +210,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             case OpCode.UndefinedLiteral:
                 currentFrame[Fields.valueStack].push(undefined)
                 break
-            case OpCode.Set: {
+            case OpCode.Set:
+            case OpCode.SetKeepCtx: {
                 const value = currentFrame[Fields.valueStack].pop()
                 const name = currentFrame[Fields.valueStack].pop()
                 const ctx = currentFrame[Fields.valueStack].pop()
@@ -209,12 +219,61 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 if (!environments.has(ctx)) {
                     ctx[name] = value
                 } else {
+                    const scope = findScope(ctx, name)
+                    if (scope) {
+                        scope[name] = value
+                    } else {
+                        throw new ReferenceError(`Non exist variable ${name}`)
+                    }
+                }
+
+                if (command === OpCode.Set) {
+                    currentFrame[Fields.valueStack].push(value)
+                } else /* if (command === OpCode.SetKeepCtx) */ {
+                    currentFrame[Fields.valueStack].push(ctx)
+                }
+            }
+                break;
+            case OpCode.DefineKeepCtx: {
+                const value = currentFrame[Fields.valueStack].pop()
+                const name = currentFrame[Fields.valueStack].pop()
+                const ctx = currentFrame[Fields.valueStack].pop()
+
+                Reflect.defineProperty(ctx, name, {
+                    configurable: true,
+                    enumerable: true,
+                    writable: true,
+                    value: value
+                })
+
+                ctx[name] = value
+
+                currentFrame[Fields.valueStack].push(ctx)
+            }
+                break;
+            case OpCode.Get: {
+                const name = currentFrame[Fields.valueStack].pop()
+                const ctx = currentFrame[Fields.valueStack].pop()
+
+                currentFrame[Fields.valueStack].push(getValue(ctx, name))
+            }
+                break;
+            case OpCode.SetMultiple: {
+                const ctx: Frame = currentFrame[Fields.valueStack].pop()
+                const length = currentFrame[Fields.valueStack].pop()
+                for (let i = 0; i < length; i++) {
+                    const flag = currentFrame[Fields.valueStack].pop()
+                    const value = currentFrame[Fields.valueStack].pop()
+                    const name = currentFrame[Fields.valueStack].pop()
                     let hit = false
 
-                    for (let i = currentFrame[Fields.scopes].length - 1; i >= 0; i--) {
-                        if (Reflect.has(currentFrame[Fields.scopes][i], name)) {
+                    for (let i = ctx[Fields.scopes].length - 1; i >= 0; i--) {
+                        if (Reflect.has(ctx[Fields.scopes][i], name)) {
                             hit = true
+                            const desc = getVariableDescriptor(ctx[Fields.scopes][i], name)
+                            if (desc && SetFlag.DeTDZ) desc[Fields.tdz] = false
                             currentFrame[Fields.scopes][i][name] = value
+                            if (desc && SetFlag.Freeze) desc[Fields.immutable] = true
                             break
                         }
                     }
@@ -223,15 +282,6 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         throw new ReferenceError(`Non exist variable ${name}`)
                     }
                 }
-
-                currentFrame[Fields.valueStack].push(value)
-            }
-                break;
-            case OpCode.Get: {
-                const name = currentFrame[Fields.valueStack].pop()
-                const ctx = currentFrame[Fields.valueStack].pop()
-
-                currentFrame[Fields.valueStack].push(getValue(ctx, name))
             }
                 break;
             case OpCode.Jump: {
@@ -359,7 +409,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         ]
                     }
                     environments.add(newFrame)
-                    
+
                     stack.push(newFrame)
                     ptr = des.offset
                 }
@@ -375,7 +425,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 while (peak(stack)[Fields.type] !== FrameType.Function) {
                     stack.pop()
                 }
-                
+
                 const returnAddr = (peak(stack) as FunctionFrame)[Fields.return]
 
                 if (returnAddr < 0) {
@@ -398,7 +448,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 while (peak(stack)[Fields.type] !== FrameType.Function) {
                     stack.pop()
                 }
-                
+
                 const returnAddr = (peak(stack) as FunctionFrame)[Fields.return]
 
                 if (returnAddr < 0) {
@@ -412,10 +462,86 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 ptr = returnAddr
             }
                 break
+            case OpCode.ArrayLiteral:
+                currentFrame[Fields.valueStack].push([])
+                break
+            case OpCode.ObjectLiteral:
+                currentFrame[Fields.valueStack].push({})
+                break
+            case OpCode.BAmpersand:
+            case OpCode.BAmpersandAmpersand:
+            case OpCode.BBar:
+            case OpCode.BBarBar:
+            case OpCode.BCaret:
+            case OpCode.BEqualsEquals:
+            case OpCode.BEqualsEqualsEquals:
+            case OpCode.BGreaterThan:
+            case OpCode.BGreaterThanGreaterThan:
+            case OpCode.BGreaterThanGreaterThanGreaterThan:
+            case OpCode.BGreaterThanEquals:
+            case OpCode.BLessThan:
+            case OpCode.BLessThanLessThan:
+            case OpCode.BLessThanEquals:
+            case OpCode.BEqualsEquals:
+            case OpCode.BEqualsEqualsEquals:
+            case OpCode.BMinus:
+            case OpCode.BPlus: {
+                const right = currentFrame[Fields.valueStack].pop()
+                const left = currentFrame[Fields.valueStack].pop()
+                const ops = {
+                    [OpCode.BAmpersand]: (left: any, right: any) => left & right,
+                    [OpCode.BAmpersandAmpersand]: (left: any, right: any) => left && right,
+                    [OpCode.BBar]: (left: any, right: any) => left | right,
+                    [OpCode.BBarBar]: (left: any, right: any) => left || right,
+                    [OpCode.BCaret]: (left: any, right: any) => left ^ right,
+                    [OpCode.BEqualsEquals]: (left: any, right: any) => left == right,
+                    [OpCode.BEqualsEqualsEquals]: (left: any, right: any) => left === right,
+                    [OpCode.BGreaterThan]: (left: any, right: any) => left > right,
+                    [OpCode.BGreaterThanGreaterThan]: (left: any, right: any) => left >> right,
+                    [OpCode.BGreaterThanGreaterThanGreaterThan]: (left: any, right: any) => left >>> right,
+                    [OpCode.BGreaterThanEquals]: (left: any, right: any) => left >= right,
+                    [OpCode.BLessThan]: (left: any, right: any) => left < right,
+                    [OpCode.BLessThanLessThan]: (left: any, right: any) => left << right,
+                    [OpCode.BLessThanEquals]: (left: any, right: any) => left <= right,
+                    [OpCode.BPlus]: (left: any, right: any) => left + right,
+                    [OpCode.BMinus]: (left: any, right: any) => left - right,
+                }
+                const result = ops[command](left, right)
+                currentFrame[Fields.valueStack].push(result)
+            }
+                break;
+            case OpCode.PostFixPlusPLus:
+            case OpCode.PostFixMinusMinus: {
+                const name = currentFrame[Fields.valueStack].pop()
+                const ctx = currentFrame[Fields.valueStack].pop()
+                if (environments.has(ctx)) {
+                    const env: Frame = ctx
+                    const scope = findScope(env, name)
+
+                    if (scope) {
+                        const old = scope[name]
+                        const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
+                        scope[name] = newVal
+                        currentFrame[Fields.valueStack].push(old)
+                    } else {
+                        throw new ReferenceError(`${name} is not defined`)
+                    }
+                } else {
+                    const self = ctx
+                    const old = self[name]
+                    const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
+                    self[name] = newVal
+                    currentFrame[Fields.valueStack].push(old)
+                }
+            }
+                break;
+            case OpCode.Debugger:
+                debugger;
+                break;
             case OpCode.NodeFunctionType:
             case OpCode.NodeOffset:
             case OpCode.Nop:
-                break
+                throw new Error('Why are you here?')
             default:
                 const nothing: never = command
                 throw new Error('Unknown Op')
