@@ -14,6 +14,11 @@ export const enum VariableType {
     Function = 5,
 }
 
+export const enum SetFlag {
+    DeTDZ = 1,
+    Freeze = 2
+}
+
 type VariableDeclaration = {
     type: Exclude<VariableType, VariableType.Function>
 } | {
@@ -34,7 +39,7 @@ type Scopes = Map<ts.Node, Map<string, VariableDeclaration>>
 type ScopeChild = Map<ts.Node, Set<ts.Node>>
 type Functions = Set<VariableRoot>
 
-export const enum OpCode {
+export enum OpCode {
     Nop,
     Literal,
     // StringLiteral = 2,
@@ -45,6 +50,13 @@ export const enum OpCode {
 
     NodeOffset,
     NodeFunctionType,
+    /**
+     * ```txt
+     * Stack:
+     *   offset
+     *   condition
+     * ```
+     */
     JumpIfNot,
     Jump,
 
@@ -88,12 +100,53 @@ export const enum OpCode {
     /** RTL, foo = bar, var foo = bar */
     GetRecord,
     /**
+     * ```txt
      * Stack:
-     *   value
      *   env or object
      *   name
+     *   value
+     * Result:
+     *   value
+     * ```
      */
     Set,
+    /**
+     * ```txt
+     * Stack:
+     *   env or object
+     *   name
+     *   value
+     * Result:
+     *   env or object
+     * ```
+     */
+    SetKeepCtx,
+    /**
+     * ```txt
+     * Stack:
+     *   [
+     *     name
+     *     value
+     *     setFlag
+     *   ] * M
+     *   itemCount - M
+     *   env or object
+     * Result:
+     *   env or object
+     * ```
+     */
+    SetMultiple,
+    /**
+     * ```txt
+     * Stack:
+     *   object
+     *   name
+     *   value
+     * Result:
+     *   env or object
+     * ```
+     */
+    DefineKeepCtx,
     /**
      * ```txt
      * Stack:
@@ -141,6 +194,76 @@ export const enum OpCode {
      * ```
      */
     Call,
+
+    /**
+     * ```txt
+     * Stack:
+     * ```
+     */
+    ArrayLiteral,
+    /**
+     * ```txt
+     * Stack:
+     * ```
+     */
+    ObjectLiteral,
+
+    // Binary Operations
+    /** + */
+    BPlus,
+    /** - */
+    BMinus,
+    /** ^ */
+    BCaret,
+    /** & */
+    BAmpersand,
+    /** | */
+    BBar,
+    /** && */
+    BAmpersandAmpersand,
+    /** || */
+    BBarBar,
+    /** > */
+    BGreaterThan,
+    /** >> */
+    BGreaterThanGreaterThan,
+    /** >>> */
+    BGreaterThanGreaterThanGreaterThan,
+    /** >= */
+    BGreaterThanEquals,
+    /** < */
+    BLessThan,
+    /** << */
+    BLessThanLessThan,
+    /** <= */
+    BLessThanEquals,
+    /** == */
+    BEqualsEquals,
+    /** === */
+    BEqualsEqualsEquals,
+    /** 
+     * ```txt
+     * a--
+     * Stack:
+     *   env or object
+     *   name
+     * ```
+     * 
+    */
+    PostFixMinusMinus,
+    /**
+     * ```txt
+     * a++
+     * Stack:
+     *   env or object
+     *   name
+     * ```
+     */
+    PostFixPlusPLus,
+    /**
+     * debugger;
+     */
+    Debugger,
 }
 
 type Op<Code extends OpCode = OpCode> = {
@@ -270,6 +393,7 @@ function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, functions: 
                 ) {
                     break // this is the body of function, method, constructor
                 }
+            case ts.SyntaxKind.ForStatement:
             case ts.SyntaxKind.CaseBlock:
                 scopes.set(node, new Map())
         }
@@ -497,10 +621,11 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             case ts.SyntaxKind.FalseKeyword:
                 return [op(OpCode.Literal, 2, [false])]
         }
-        if (ts.isVariableStatement(node)) {
-            const ops: Op[] = []
 
-            for (let declaration of node.declarationList.declarations) {
+        if (ts.isVariableDeclarationList(node)) {
+            const ops: Segment = []
+
+            for (let declaration of node.declarations) {
                 if (!ts.isIdentifier(declaration.name)) {
                     throw new Error('not support pattern yet')
                 }
@@ -508,7 +633,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 if (declaration.initializer) {
                     ops.push(...generateLeft(declaration.name))
 
-                    if (node.declarationList.flags & ts.NodeFlags.BlockScoped) {
+                    if (node.flags & ts.NodeFlags.BlockScoped) {
                         ops.push(op(OpCode.DeTDZ))
                     }
 
@@ -516,7 +641,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
                     ops.push(op(OpCode.Set))
                     ops.push(op(OpCode.Pop))
-                    if (node.declarationList.flags & ts.NodeFlags.Const) {
+                    if (node.flags & ts.NodeFlags.Const) {
                         ops.push(
                             ...generateLeft(declaration.name),
                             op(OpCode.FreezeVariable),
@@ -524,7 +649,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                             op(OpCode.Pop)
                         )
                     }
-                } else if (node.declarationList.flags & ts.NodeFlags.Let) {
+                } else if (node.flags & ts.NodeFlags.Let) {
                     // unblock without doing anything
                     return [
                         ...generateLeft(declaration.name),
@@ -540,6 +665,10 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             }
 
             return ops
+        }
+
+        if (ts.isVariableStatement(node)) {
+            return generate(node.declarationList)
         }
 
         if (ts.isStringLiteral(node)) {
@@ -676,7 +805,257 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     op(OpCode.Literal, 2, [node.arguments.length]),
                     op(OpCode.Call)
                 ]
+            } else {
+                throw new Error('not support call value yet')
             }
+        }
+
+        if (ts.isArrayLiteralExpression(node)) {
+            const res = [
+                op(OpCode.ArrayLiteral)
+            ]
+            const list = node.elements
+            for (let [index, el] of list.entries()) {
+                if (ts.isSpreadElement(el)) {
+                    throw new Error('no spread support yet')
+                }
+
+                if (el.kind !== ts.SyntaxKind.OmittedExpression) {
+                    res.push(op(OpCode.Literal, 2, [index]))
+                    res.push(...generate(el))
+                    res.push(op(OpCode.SetKeepCtx))
+                }
+            }
+
+            return res
+        }
+
+        if (ts.isObjectLiteralExpression(node)) {
+            const res = [
+                op(OpCode.ObjectLiteral)
+            ]
+            const list = node.properties
+
+            for (let item of list) {
+                if (ts.isShorthandPropertyAssignment(item)) {
+                    break
+                }
+                if (!item.name) {
+                    throw new Error('property must have name')
+                } else if (ts.isComputedPropertyName(item.name)) {
+                    res.push(...generate(item.name.expression))
+                } else if (ts.isIdentifier(item.name)) {
+                    res.push(op(OpCode.Literal, 2, [item.name.text]))
+                } else if (
+                    ts.isStringLiteral(item.name)
+                    || ts.isNumericLiteral(item.name)
+                ) {
+                    res.push(...generate(item.name))
+                } else {
+                    throw new Error('not supported')
+                }
+
+                if (ts.isPropertyAssignment(item)) {
+                    res.push(...generate(item.initializer))
+                } else if (ts.isMethodDeclaration(item)) {
+                    res.push(...generate(item))
+                } else {
+                    throw new Error('not supported')
+                }
+
+                res.push(op(OpCode.DefineKeepCtx))
+            }
+
+            return res
+        }
+
+        if (ts.isForStatement(node)) {
+            let initializer = node.initializer
+            let condition = node.condition
+            let incrementor = node.incrementor
+
+            let hasScope = scopes.has(node)
+
+
+            /**
+             *    entry
+             * |- condition <-
+             * |  body       |
+             * |  update ----|
+             * -> exit
+             */
+
+            var entry0 = hasScope
+                ? [...generateEnterScope(node, scopes), op(OpCode.EnterScope)]
+                : [op(OpCode.Nop, 0)]
+
+            var entry1 = initializer
+                ? generate(initializer)
+                : [op(OpCode.Nop, 0)]
+
+            var exit = hasScope
+                ? [op(OpCode.LeaveScope)]
+                : [op(OpCode.Nop, 0)]
+
+            var conditionS = condition
+                ? [
+                    op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                    ...generate(condition),
+                    op(OpCode.JumpIfNot)
+                ]
+                : [
+                    op(OpCode.Nop, 0)
+                ]
+
+            var update0 = []
+
+            if (hasScope && ts.isVariableDeclarationList(initializer!)) {
+                for (let item of initializer.declarations) {
+                    if (!ts.isIdentifier(item.name)) {
+                        throw new Error('not support')
+                    }
+
+                    update0.push(
+                        op(OpCode.Literal, 2, [item.name.text]),
+                        op(OpCode.GetRecord),
+                        op(OpCode.Literal, 2, [item.name.text]),
+                        op(OpCode.Get),
+                        op(OpCode.Literal, 2, [SetFlag.DeTDZ & ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0)])
+                    )
+                }
+
+                update0.push(
+                    op(OpCode.Literal, 2, [initializer.declarations.length]),
+                    op(OpCode.LeaveScope),
+                    ...generateEnterScope(node, scopes),
+                    op(OpCode.EnterScope),
+                    op(OpCode.GetRecord),
+                    op(OpCode.SetMultiple)
+                )
+
+                for (let item of initializer.declarations) {
+                    if (!ts.isIdentifier(item.name)) {
+                        throw new Error('not support')
+                    }
+                }
+            }
+
+            var update1 = incrementor
+                ? [
+                    ...generate(incrementor),
+                    op(OpCode.Pop),
+                    op(OpCode.NodeOffset, 2, [headOf(conditionS)]),
+                    op(OpCode.Jump)
+                ]
+                : [
+                    op(OpCode.NodeOffset, 2, [headOf(conditionS)]),
+                    op(OpCode.Jump)
+                ]
+
+            var body = generate(node.statement)
+
+            return [
+                ...entry0,
+                ...entry1,
+                ...conditionS,
+                ...body,
+                ...update0,
+                ...update1,
+                ...exit
+            ]
+        }
+
+        // Assignments
+        if (ts.isBinaryExpression(node)) {
+            switch (node.operatorToken.kind) {
+                case ts.SyntaxKind.EqualsToken:
+                    return [
+                        ...generateLeft(node.left),
+                        ...generate(node.right),
+                        op(OpCode.Set)
+                    ]
+                default:
+                    // let next block do it
+            }
+        }
+
+        if (ts.isBinaryExpression(node)) {
+            const ops = [
+                ...generate(node.left),
+                ...generate(node.right),
+            ]
+
+            switch (node.operatorToken.kind) {
+                case ts.SyntaxKind.PlusToken:
+                    ops.push(op(OpCode.BPlus)); break;
+                case ts.SyntaxKind.MinusToken:
+                    ops.push(op(OpCode.BMinus)); break;
+                case ts.SyntaxKind.CaretToken:
+                    ops.push(op(OpCode.BCaret)); break;
+                case ts.SyntaxKind.AmpersandToken:
+                    ops.push(op(OpCode.BAmpersand)); break;
+                case ts.SyntaxKind.AmpersandAmpersandToken:
+                    ops.push(op(OpCode.BAmpersandAmpersand)); break;
+                case ts.SyntaxKind.BarToken:
+                    ops.push(op(OpCode.BBar)); break;
+                case ts.SyntaxKind.BarBarToken:
+                    ops.push(op(OpCode.BBarBar)); break;
+                case ts.SyntaxKind.GreaterThanToken:
+                    ops.push(op(OpCode.BGreaterThan)); break;
+                case ts.SyntaxKind.GreaterThanGreaterThanToken:
+                    ops.push(op(OpCode.BGreaterThanGreaterThan)); break;
+                case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken:
+                    ops.push(op(OpCode.BGreaterThanGreaterThanGreaterThan)); break;
+                case ts.SyntaxKind.GreaterThanEqualsToken:
+                    ops.push(op(OpCode.BGreaterThanEquals)); break;
+                case ts.SyntaxKind.LessThanToken:
+                    ops.push(op(OpCode.BLessThan)); break;
+                case ts.SyntaxKind.LessThanLessThanToken:
+                    ops.push(op(OpCode.BLessThanLessThan)); break;
+                case ts.SyntaxKind.LessThanEqualsToken:
+                    ops.push(op(OpCode.BLessThanEquals)); break;
+                case ts.SyntaxKind.EqualsEqualsToken:
+                    ops.push(op(OpCode.BEqualsEquals)); break;
+                case ts.SyntaxKind.EqualsEqualsEqualsToken:
+                    ops.push(op(OpCode.BEqualsEqualsEquals)); break;
+                default:
+                    const remain = node.operatorToken.kind
+                    throw new Error('unknown token')
+            }
+
+            return ops
+        }
+
+        if (ts.isPostfixUnaryExpression(node)) {
+            switch (node.operator) {
+                case ts.SyntaxKind.PlusPlusToken:
+                    return [
+                        ...generateLeft(node.operand),
+                        op(OpCode.PostFixPlusPLus)
+                    ]
+                case ts.SyntaxKind.MinusMinusToken:
+                    return [
+                        ...generateLeft(node.operand),
+                        op(OpCode.PostFixMinusMinus)
+                    ]
+                default:
+                    const nothing = node.operator
+            }
+        }
+
+        if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+            return [
+                ...generateLeft(node),
+                op(OpCode.Get)
+            ]
+        }
+
+        if (ts.isParenthesizedExpression(node)) {
+            return generate(node.expression)
+        }
+
+        if (ts.isDebuggerStatement(node)) {
+            return [op(OpCode.Debugger)]
         }
 
         throw new Error(`Unknown node ${getNameOfKind(node.kind)}`)
@@ -735,7 +1114,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
     ]
 }
 
-function genOffset (nodes: Segment) {
+function genOffset(nodes: Segment) {
     let offset = 0
     for (let seg of nodes) {
         seg.offset = offset
@@ -786,7 +1165,64 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
     }
 }
 
-const source = `
+function compile(src: string) {
+    const parentMap: ParentMap = new Map()
+    const scopes: Scopes = new Map()
+    const functions: Functions = new Set()
+    const scopeChild: ScopeChild = new Map()
+
+    let sourceNode = ts.createSourceFile('aaa.ts', src, ts.ScriptTarget.ESNext, undefined, ts.ScriptKind.TS)
+
+
+    markParent(sourceNode, parentMap)
+    searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
+    resolveScopes(sourceNode, parentMap, functions, scopes)
+    linkScopes(sourceNode, parentMap, scopes, scopeChild)
+
+    console.log(mapVariables(scopes, scopeChild))
+
+    const program: Segment[] = []
+
+    const functionToSegment = new Map<ts.Node, Segment>()
+
+    for (let item of functions) {
+        const generated = generateSegment(item, scopes)
+        program.push(generated)
+        functionToSegment.set(item, generated)
+    }
+
+    const flattened = program.flat()
+
+    genOffset(flattened)
+
+    console.log(flattened.map(it => {
+        let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
+        res += it.preData[0]
+            ? it.preData[0].kind
+                ? getNameOfKind(it.preData[0].kind)
+                : JSON.stringify(it.preData[0])
+            : ''
+        return res
+    }).join('\r\n'))
+
+    const textData: any[] = []
+    const programData: number[] = []
+
+    generateData(flattened, functionToSegment, programData, textData)
+
+    console.log(textData)
+    console.log(Buffer.from(new Uint32Array(programData)).toString('base64'))
+
+    return [programData, textData] as [number[], any[]]
+}
+
+function compileAndRun(src: string) {
+    console.time()
+    run(...compile(src), 0, [globalThis])
+    console.timeEnd()
+}
+
+compileAndRun(`
 var string = 'string'
 let string1:string  = 'string'
 function test () {}
@@ -819,49 +1255,52 @@ const k = function (fn) {
 }
 console.log(c)
 console.log(e)
-let e= 0
-`;
+var e= 0
+`)
 
-{
-    const parentMap: ParentMap = new Map()
-    const scopes: Scopes = new Map()
-    const functions: Functions = new Set()
-    const scopeChild: ScopeChild = new Map()
+compileAndRun(`
+var a = [1, 2]
+var b = [1, 2,]
+var c = [1,, 2]
+var d = {}
+var e = {
+    a: 1,
+    ['b']: 2,
+    'c': 3, 
+    d(e) { return e},
+    e: {
+        nested: true
+    }
+}
+console.log(a, b, c, d, e)
+`)
 
-    let sourceNode = ts.createSourceFile('aaa.ts', source, ts.ScriptTarget.ESNext, undefined, ts.ScriptKind.TS)
+compileAndRun(`
+let crcTable;
 
+var makeCRCTable = function(){
+    var c;
+    var crcTable = [];
+    for(var n =0; n < 256; n++){
+        c = n;
+        for(var k =0; k < 8; k++){
+            c = ((c&1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+        }
+        crcTable[n] = c;
+    }
+    return crcTable;
+}
 
-    markParent(sourceNode, parentMap)
-    searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
-    resolveScopes(sourceNode, parentMap, functions, scopes)
-    linkScopes(sourceNode, parentMap, scopes, scopeChild)
+var crc32 = function(str) {
+    var crcTable = crcTable || (crcTable = makeCRCTable());
+    var crc = 0 ^ (-1);
 
-    console.log(mapVariables(scopes, scopeChild))
-
-    const program: Segment[] = []
-
-    const functionToSegment = new Map<ts.Node, Segment>()
-
-    for (let item of functions) {
-        const generated = generateSegment(item, scopes)
-        program.push(generated)
-        functionToSegment.set(item, generated)
+    for (var i = 0; i < str.length; i++ ) {
+        crc = (crc >>> 8) ^ crcTable[(crc ^ str.charCodeAt(i)) & 0xFF];
     }
 
-    const flattened = program.flat()
-
-    genOffset(flattened)
-
-    const textData: any[] = []
-    const programData: number[] = []
-
-    generateData(flattened, functionToSegment, programData, textData)
-
-    console.log(textData, programData)
-
-    // debugger
-
-    console.time()
-    run(programData, textData, 0, [globalThis])
-    console.timeEnd()
-}
+    return (crc ^ (-1)) >>> 0;
+};
+console.log(crc32('aaa'))
+debugger
+`)
