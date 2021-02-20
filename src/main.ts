@@ -3,8 +3,15 @@ import { run } from "./runtime"
 
 
 function compileAndRun(src: string) {
+    const [programData, textData] = compile(src)
+    console.log(JSON.stringify(textData))
+    console.log(programData.length, Buffer.from(new Uint32Array(programData).buffer).toString('base64'))
     console.time()
-    run(...compile(src), 0, [globalThis])
+    run(programData, textData, 0, [globalThis, {
+        location: {
+            href: 'AAAA'
+        }
+    }])
     console.timeEnd()
 }
 
@@ -62,9 +69,9 @@ console.log(a, b, c, d, e)
 `)
 
 compileAndRun(`
-let crcTable;
+let t;
 
-var makeCRCTable = function(){
+var a = function(){
     var c;
     var crcTable = [];
     for(var n =0; n < 256; n++){
@@ -77,8 +84,8 @@ var makeCRCTable = function(){
     return crcTable;
 }
 
-var crc32 = function(str) {
-    var crcTable = crcTable || (crcTable = makeCRCTable());
+var b = function(str) {
+    var crcTable = t || (t = a());
     var crc = 0 ^ (-1);
 
     for (var i = 0; i < str.length; i++ ) {
@@ -87,5 +94,5 @@ var crc32 = function(str) {
 
     return (crc ^ (-1)) >>> 0;
 };
-console.log(crc32('aaa'))
+console.log(b(location.href))
 `)

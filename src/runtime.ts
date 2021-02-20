@@ -1,6 +1,14 @@
 "use strict"
 import ts from "typescript"
-import { isSmallNumber, OpCode, SetFlag, TEXT_DADA_MASK, VariableType } from "./compiler"
+import { OpCode, SetFlag, VariableType } from "./compiler"
+
+
+// MUST SYNC WITH COMPILER
+const TEXT_DADA_MASK = 0x80000000
+// MUST SYNC WITH COMPILER
+const isSmallNumber = (a: any): a is number => {
+    return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
+}
 
 const enum FrameType {
     Function,

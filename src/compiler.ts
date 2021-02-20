@@ -39,7 +39,7 @@ type Scopes = Map<ts.Node, Map<string, VariableDeclaration>>
 type ScopeChild = Map<ts.Node, Set<ts.Node>>
 type Functions = Set<VariableRoot>
 
-export enum OpCode {
+export const enum OpCode {
     Nop,
     Literal,
     // StringLiteral = 2,
@@ -1195,23 +1195,20 @@ export function compile(src: string) {
 
     genOffset(flattened)
 
-    console.log(flattened.map(it => {
-        let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
-        res += it.preData[0]
-            ? it.preData[0].kind
-                ? getNameOfKind(it.preData[0].kind)
-                : JSON.stringify(it.preData[0])
-            : ''
-        return res
-    }).join('\r\n'))
+    // console.log(flattened.map(it => {
+    //     let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
+    //     res += it.preData[0]
+    //         ? it.preData[0].kind
+    //             ? getNameOfKind(it.preData[0].kind)
+    //             : JSON.stringify(it.preData[0])
+    //         : ''
+    //     return res
+    // }).join('\r\n'))
 
     const textData: any[] = []
     const programData: number[] = []
 
     generateData(flattened, functionToSegment, programData, textData)
-
-    console.log(textData)
-    console.log(Buffer.from(new Uint32Array(programData)).toString('base64'))
 
     return [programData, textData] as [number[], any[]]
 }
