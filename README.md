@@ -6,7 +6,7 @@ flow flattening for javascript
 
 ## Motivation
 
-1. Learn how javascript internally works, and evaluate I did not learn it wrongly
+1. Learn how javascript internally works, and evaluate whether did I learn it correctly.
 2. Bypass the csp `eval` restriction with minimal size overhead.
 3. Obfuscate codes across all functions for obfuscation purpose
 
@@ -28,7 +28,7 @@ node ./lib/cli.js --json ./test/fixures/bad-code.js > ./example/bad-code.json
 
 ## Design
 
-Emulate a javascript interpreter that intermediate product of javascript parser.
+Emulate a javascript interpreter that interpret intermediate product of javascript parser.
 
 1. read code
 2. parsing into AST (typescript)
