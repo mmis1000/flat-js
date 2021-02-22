@@ -37,7 +37,7 @@ Emulate a javascript interpreter that interpret intermediate product of javascri
 5. generation instructions from AST
     1. offset is not known yet, only the length of instruction)
 6. resolving offset of instructions
-    2. concat the all together and get the offset of the instructions
+    1. concat the all together and get the offset of the instructions
 7. generate opcode and data session from instructions
 8. generate output and send to stdout
     1. combine with interpreter and interpreted by interpreter
