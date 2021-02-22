@@ -837,29 +837,31 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
             for (let item of list) {
                 if (ts.isShorthandPropertyAssignment(item)) {
-                    break
-                }
-                if (!item.name) {
-                    throw new Error('property must have name')
-                } else if (ts.isComputedPropertyName(item.name)) {
-                    res.push(...generate(item.name.expression))
-                } else if (ts.isIdentifier(item.name)) {
                     res.push(op(OpCode.Literal, 2, [item.name.text]))
-                } else if (
-                    ts.isStringLiteral(item.name)
-                    || ts.isNumericLiteral(item.name)
-                ) {
                     res.push(...generate(item.name))
                 } else {
-                    throw new Error('not supported')
-                }
+                    if (!item.name) {
+                        throw new Error('property must have name')
+                    } else if (ts.isComputedPropertyName(item.name)) {
+                        res.push(...generate(item.name.expression))
+                    } else if (ts.isIdentifier(item.name)) {
+                        res.push(op(OpCode.Literal, 2, [item.name.text]))
+                    } else if (
+                        ts.isStringLiteral(item.name)
+                        || ts.isNumericLiteral(item.name)
+                    ) {
+                        res.push(...generate(item.name))
+                    } else {
+                        throw new Error('not supported')
+                    }
 
-                if (ts.isPropertyAssignment(item)) {
-                    res.push(...generate(item.initializer))
-                } else if (ts.isMethodDeclaration(item)) {
-                    res.push(...generate(item))
-                } else {
-                    throw new Error('not supported')
+                    if (ts.isPropertyAssignment(item)) {
+                        res.push(...generate(item.initializer))
+                    } else if (ts.isMethodDeclaration(item)) {
+                        res.push(...generate(item))
+                    } else {
+                        throw new Error('not supported')
+                    }
                 }
 
                 res.push(op(OpCode.DefineKeepCtx))
