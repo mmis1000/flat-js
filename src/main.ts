@@ -104,7 +104,7 @@ for (let i = 0; i < 15; i++) {
     let c = 0
     fns.push({
         a: () => c++,
-        b: () => {
+        b () {
             debugger
             return i + c
         }
@@ -124,5 +124,16 @@ const a = { b () { return 1 } };
 console.log(a.b());
 `)
 compileAndRun(`
-console.log(a()); function a () { return 0 };
+console.log(a());
+function a () { return 0 };
 `)
+compileAndRun(`
+const a = {
+    a: 'content of a',
+    b () {
+        console.log(this.a)
+    }
+}
+a.b()
+`)
+

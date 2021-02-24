@@ -5,6 +5,10 @@ export const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
 }
 
+export const enum SpecialVariable {
+    This = '[this]'
+}
+
 export const enum VariableType {
     Var = 1,
     Let = 2,
@@ -293,6 +297,17 @@ export const enum OpCode {
     Debugger,
 }
 
+export const enum FunctionTypes {
+    SourceFile,
+    FunctionDeclaration,
+    FunctionExpression,
+    ArrowFunction,
+    MethodDeclaration,
+    GetAccessor,
+    SetAccessor,
+    Constructor
+}
+
 type Op<Code extends OpCode = OpCode> = {
     op: Code
     /** A length of 0 prevent emit of opcode itself */
@@ -562,13 +577,6 @@ function headOf<T>(arr: T[]): T {
     return arr[0]!
 }
 
-function tailOf<T>(arr: T[]): T {
-    if (arr.length === 0) {
-        throw new Error('empty array')
-    }
-    return arr[arr.length - 1]!
-}
-
 export function getNameOfKind(kind: ts.SyntaxKind): string {
     let name = ts.SyntaxKind[kind]
 
@@ -620,23 +628,41 @@ function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
 function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
 
+    function extractQuote(node: ts.Node) {
+        if (ts.isParenthesizedExpression(node)) {
+            return node.expression
+        } else {
+            return node
+        }
+    }
     function generateLeft(node: ts.Node): Segment {
-        if (ts.isIdentifier(node)) {
+        const rawNode = extractQuote(node)
+
+        if (rawNode.kind === ts.SyntaxKind.ThisKeyword) {
             return [
                 op(OpCode.GetRecord),
-                op(OpCode.Literal, 2, [node.text])
+                op(OpCode.Literal, 2, [SpecialVariable.This])
             ]
         }
-        if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) {
+
+        if (ts.isIdentifier(rawNode)) {
             return [
-                ...generate(node.expression),
-                op(OpCode.Literal, 2, [node.name.text])
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [rawNode.text])
             ]
         }
-        if (ts.isElementAccessExpression(node)) {
+
+        if (ts.isPropertyAccessExpression(rawNode) && ts.isIdentifier(rawNode.name)) {
             return [
-                ...generate(node.expression),
-                ...generate(node.argumentExpression)
+                ...generate(rawNode.expression),
+                op(OpCode.Literal, 2, [rawNode.name.text])
+            ]
+        }
+
+        if (ts.isElementAccessExpression(rawNode)) {
+            return [
+                ...generate(rawNode.expression),
+                ...generate(rawNode.argumentExpression)
             ]
         }
 
@@ -652,6 +678,12 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 return [op(OpCode.NullLiteral)]
             case ts.SyntaxKind.EmptyStatement:
                 return [op(OpCode.Nop, 0)]
+            case ts.SyntaxKind.ThisKeyword:
+                return [
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [SpecialVariable.This]),
+                    op(OpCode.Get)
+                ]
         }
 
         if (ts.isIdentifier(node) && node.text === 'undefined') {
@@ -819,7 +851,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         }
 
         if (ts.isCallExpression(node)) {
-            const self = node.expression
+            const self = extractQuote(node.expression)
             const args = node.arguments.map(generate).flat()
 
             if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
@@ -1281,7 +1313,17 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
         } else if (op.op === OpCode.NodeFunctionType) {
             const func: VariableRoot = op.preData[0]
             programData.push(OpCode.Literal)
-            programData.push(func.kind)
+            const type = {
+                [ts.SyntaxKind.SourceFile]: FunctionTypes.SourceFile,
+                [ts.SyntaxKind.FunctionDeclaration]: FunctionTypes.FunctionDeclaration,
+                [ts.SyntaxKind.FunctionExpression]: FunctionTypes.FunctionExpression,
+                [ts.SyntaxKind.ArrowFunction]: FunctionTypes.ArrowFunction,
+                [ts.SyntaxKind.GetAccessor]: FunctionTypes.GetAccessor,
+                [ts.SyntaxKind.SetAccessor]: FunctionTypes.SetAccessor,
+                [ts.SyntaxKind.Constructor]: FunctionTypes.Constructor,
+                [ts.SyntaxKind.MethodDeclaration]: FunctionTypes.MethodDeclaration,
+            }
+            programData.push(type[func.kind])
         } else {
             programData.push(op.op)
 

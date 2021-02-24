@@ -1,6 +1,6 @@
 "use strict"
 import ts from "typescript"
-import { OpCode, SetFlag, VariableType } from "./compiler"
+import { FunctionTypes, OpCode, SetFlag, SpecialVariable, VariableType } from "./compiler"
 
 
 // [START_HERE]
@@ -339,7 +339,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 break;
             case OpCode.EnterFunction: {
                 // TODO: arguments and this/self reference
-                const functionType = currentFrame[Fields.valueStack].pop()
+                const functionType: FunctionTypes = currentFrame[Fields.valueStack].pop()
                 const variableCount: number = currentFrame[Fields.valueStack].pop()
                 const variables: VariableRecord[] = []
                 for (let i = 0; i < variableCount; i++) {
@@ -364,6 +364,17 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                 const scope: Scope = {}
                 currentFrame[Fields.scopes].push(scope)
+
+
+                switch (functionType) {
+                    case FunctionTypes.FunctionDeclaration:
+                    case FunctionTypes.FunctionExpression:
+                    case FunctionTypes.MethodDeclaration:
+                    case FunctionTypes.GetAccessor:
+                    case FunctionTypes.SetAccessor:
+                        defineVariable(scope, SpecialVariable.This, VariableType.Var)
+                        scope[SpecialVariable.This] = self
+                }
 
                 for (let v of variables) {
                     defineVariable(scope, v[Fields.name], v[Fields.type])

@@ -275,9 +275,14 @@ testRuntimeThrows('variable const immutable', ' const a = 0; a = 0', TypeError)
 
 testRuntime('empty statement', ';', [], printProvider)
 testRuntime('function statement', 'print(a()); function a () { return 0 }', [0], printProvider)
+testRuntime('function statement covered by ParenthesizedExpression', 'print((a)()); function a () { return 0 }', [0], printProvider)
 testRuntime('function expression', 'const a = function a () { return 0 }; print(a());', [0], printProvider)
 testRuntime('arrow function', 'const a = () => 0; print(a());', [0], printProvider)
 testRuntime('object method', 'const a = { b () { return 0 } }; print(a.b());', [0], printProvider)
+testRuntime('object method covered by ParenthesizedExpression', 'const a = { b () { return 0 } }; print((a.b)());', [0], printProvider)
+testRuntime('this reference get', 'const a = { a: 0, b () { return this.a } }; print(a.b());', [0], printProvider)
+testRuntime('this reference set', 'const a = { a: 0, b () { this.a = 1 } }; a.b() print(a.a);', [1], printProvider)
+
 testRuntime(
     'scope shadowing',
     `
