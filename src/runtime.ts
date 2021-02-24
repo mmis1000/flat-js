@@ -64,6 +64,9 @@ type VariableDescriptor = {
     [Fields.value]: any
 }
 
+const is_not_defined = ' is not defined'
+const is_a_constant = ' is a constant'
+
 export function run(program: number[], textData: any[], entryPoint: number = 0, scopes: Scope[] = [], self: undefined = undefined, args: any[] = []) {
     const environments = new WeakSet()
     const initialFrame: Frame = {
@@ -105,16 +108,16 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             configurable: true,
             get() {
                 if (descriptor[Fields.tdz]) {
-                    throw new ReferenceError(`${name} is no defined`)
+                    throw new ReferenceError(name + is_not_defined)
                 }
                 return descriptor[Fields.value]
             },
             set(v) {
                 if (descriptor[Fields.tdz]) {
-                    throw new ReferenceError(`${name} is no defined`)
+                    throw new ReferenceError(name + is_not_defined)
                 }
                 if (descriptor[Fields.immutable]) {
-                    throw new TypeError(`${name} is a constant`)
+                    throw new TypeError(name + is_a_constant)
                 }
                 descriptor[Fields.value] = v
             }
@@ -190,7 +193,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             if (scope) {
                 return scope[name]
             } else {
-                throw new ReferenceError(`${name} is no defined`)
+                throw new ReferenceError(name + is_not_defined)
             }
         }
     }
@@ -233,7 +236,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     if (scope) {
                         scope[name] = value
                     } else {
-                        throw new ReferenceError(`${name} is no defined`)
+                        throw new ReferenceError(name + is_not_defined)
                     }
                 }
 
@@ -289,7 +292,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     }
 
                     if (!hit) {
-                        throw new ReferenceError(`${name} is no defined`)
+                        throw new ReferenceError(name + is_not_defined)
                     }
                 }
             }
@@ -554,7 +557,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         scope[name] = newVal
                         currentFrame[Fields.valueStack].push(old)
                     } else {
-                        throw new ReferenceError(`${name} is not defined`)
+                        throw new ReferenceError(name + is_not_defined)
                     }
                 } else {
                     const self = ctx

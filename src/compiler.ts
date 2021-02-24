@@ -1324,7 +1324,7 @@ export function compile(src: string, debug = false) {
     genOffset(flattened)
 
     // @ts-expect-error
-    if (debug && typeof OpCode !== undefined) {
+    if (debug && typeof OpCode !== 'undefined') {
         console.error(flattened.map(it => {
             // @ts-expect-error
             let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `

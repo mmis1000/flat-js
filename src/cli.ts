@@ -8,8 +8,15 @@ const END_FLAG = 'exports.run = run;'
 
 const args = process.argv.slice(2)
 
-const debugMode = args[0] === '--debug' ? (args.shift(), true) : false
-const JSONMode = args[0] === '--json' ? (args.shift(), true) : false
+const flags: Record<string, boolean> = {}
+
+while (args[0] && args[0].startsWith('--')) {
+    flags[args.shift()!] = true
+}
+
+const debugMode = flags['--debug'] || false
+const JSONMode = flags['--json'] || false
+const noMinimize = flags['--pretty'] || false
 const filename = args[0]
 
 async function main () {
@@ -19,7 +26,7 @@ async function main () {
     const runtime = runtimeFull.slice(startPos, endPos)
 
     const content = await fs.readFile(filename, { encoding: 'utf-8' })
-    const contentMinimized = uglify.minify(content).code
+    const contentMinimized = noMinimize ? content : uglify.minify(content).code
 
     if (debugMode) {
         console.error(contentMinimized)
@@ -35,7 +42,7 @@ const programData = new Int32Array(Uint8Array.from(atob('${programData}'), c => 
 run(programData, textData, 0, [globalThis, { _$_: run }])
     `
         const joined = '{\r\n' + runtime + postFix + '}\r\n'
-        console.log(uglify.minify(joined).code)
+        console.log(noMinimize ? joined : uglify.minify(joined).code)
     } else {
         const result = {
             p: programData,

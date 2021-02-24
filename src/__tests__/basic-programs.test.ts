@@ -225,6 +225,13 @@ print(fn())
     printProvider
 )
 
-testRuntime('variable', 'let a = 0; print(a);', [0], printProvider)
 testRuntimeThrows('variable not exist', 'a', ReferenceError)
-testRuntimeThrows('variable TDZ', ' print(a); let a = 0;', ReferenceError)
+
+testRuntime('variable let', 'let a = 0; print(a);', [0], printProvider)
+testRuntimeThrows('variable let TDZ get', ' print(a); let a = 0;', ReferenceError)
+testRuntimeThrows('variable let TDZ set', ' a = 1; let a = 0;', ReferenceError)
+
+testRuntime('variable const', 'const a = 0; print(a);', [0], printProvider)
+testRuntimeThrows('variable const TDZ get', 'print(a); const a = 0;', ReferenceError)
+testRuntimeThrows('variable const TDZ set', 'a = 1; const a = 0;', ReferenceError)
+testRuntimeThrows('variable const immutable', ' const a = 0; a = 0', TypeError)
