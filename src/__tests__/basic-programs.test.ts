@@ -131,10 +131,10 @@ testRuntime('compare 0 <= 1', 'if (0 <= 1) { print(1) } else { print(0) }', [1],
 testRuntime('shortcut &&', 'false && print(1)', [], printProvider)
 testRuntime('shortcut ||', 'true || print(1)', [], printProvider)
 testRuntime('shortcut &&', 'false && print(1)', [], printProvider)
-testRuntime('? : ', 'true ?  print(1) : 0', [1], printProvider)
-testRuntime('? : ', 'false ? 0 : print(1) ', [1], printProvider)
-testRuntime('shortcut ? : ', 'true ? 0 : print(1)', [], printProvider)
-testRuntime('shortcut ? : ', 'false ? print(1) : 0', [], printProvider)
+testRuntime('true ? : ', 'true ?  print(1) : 0', [1], printProvider)
+testRuntime('false ? : ', 'false ? 0 : print(1) ', [1], printProvider)
+testRuntime('shortcut true ? : ', 'true ? 0 : print(1)', [], printProvider)
+testRuntime('shortcut false ? : ', 'false ? print(1) : 0', [], printProvider)
 
 testRuntime('for let', `
 const fns = []
