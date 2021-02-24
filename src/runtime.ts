@@ -114,7 +114,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     throw new ReferenceError(`${name} is no defined`)
                 }
                 if (descriptor[Fields.immutable]) {
-                    throw new ReferenceError(`${name} is a constant`)
+                    throw new TypeError(`${name} is a constant`)
                 }
                 descriptor[Fields.value] = v
             }

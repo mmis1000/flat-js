@@ -484,6 +484,7 @@ function linkScopes(node: ts.Node, parentMap: ParentMap, scopes: Scopes, scopeCh
     findFunction(node)
 }
 
+/* istanbul ignore next */
 const mapVariables = (scopes: Scopes, scopeChild: ScopeChild) => {
     const hasParent: Set<ts.Node> = new Set()
     for (let v of scopeChild.values()) {
@@ -619,6 +620,12 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 return [op(OpCode.Literal, 2, [true])]
             case ts.SyntaxKind.FalseKeyword:
                 return [op(OpCode.Literal, 2, [false])]
+            case ts.SyntaxKind.NullKeyword:
+                return [op(OpCode.NullLiteral)]
+        }
+
+        if (ts.isIdentifier(node) && node.text === 'undefined') {
+            return [op(OpCode.UndefinedLiteral)]
         }
 
         if (ts.isVariableDeclarationList(node)) {
@@ -699,14 +706,14 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         if (
             ts.isConditionalExpression(node)
         ) {
-            const cond = generate(node.condition)
+            const condition = generate(node.condition)
             const positive = [op(OpCode.Nop, 0), ...generate(node.whenTrue)]
             const negative = [op(OpCode.Nop, 0), ...generate(node.whenFalse)]
             const end = [op(OpCode.Nop, 0)]
 
             return [
                 op(OpCode.NodeOffset, 2, [headOf(negative)]),
-                ...cond,
+                ...condition,
                 op(OpCode.JumpIfNot),
 
                 ...positive,
