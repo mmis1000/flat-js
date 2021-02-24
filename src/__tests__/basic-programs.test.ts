@@ -23,7 +23,7 @@ for (let file of files) {
 test('Example: crc location', () => {
     const code = fs.readFileSync(path.resolve(__dirname, './fixures/crc-location-href.js'), { encoding: 'utf-8' })
 
-    let href =  'AAAAA'
+    let href = 'AAAAA'
     let result: any
 
     const context = {
@@ -31,7 +31,7 @@ test('Example: crc location', () => {
             href
         },
         console: {
-            log (res: any) {
+            log(res: any) {
                 result = res
                 expect(result).toBeDefined()
             }
@@ -48,7 +48,7 @@ test('Example: crc location', () => {
             href
         },
         console: {
-            log (res: any) {
+            log(res: any) {
                 expect(res).toEqual(result)
             }
         }
@@ -57,7 +57,7 @@ test('Example: crc location', () => {
     runtime.run(program, text, 0, [globalThis, context2])
 })
 
-function testRuntime (
+function testRuntime(
     testName: string,
     code: string,
     expectResults: any[],
@@ -77,7 +77,7 @@ function testRuntime (
     })
 }
 
-function testRuntimeThrows (
+function testRuntimeThrows(
     testName: string,
     code: string,
     error: any = undefined,
@@ -96,7 +96,7 @@ function testRuntimeThrows (
 }
 
 const printProvider = (result: any[]) => ({
-    print (...args: any[]) { result.push(...args) }
+    print(...args: any[]) { result.push(...args) }
 })
 
 testRuntime('primitive 0', 'print(0)', [0], printProvider)
@@ -117,7 +117,7 @@ testRuntime('object method { a () {} }', 'print(({ a () {} }).a)', ['function'],
 
 testRuntime('array []', 'print([])', [[]], printProvider)
 testRuntime('array [1]', 'print([1])', [[1]], printProvider)
-testRuntime('array [,1]', 'print([,1])', [[,1]], printProvider)
+testRuntime('array [,1]', 'print([,1])', [[, 1]], printProvider)
 
 testRuntime('condition expression true', 'print(true ? 1 : 0)', [1], printProvider)
 testRuntime('condition expression falsy', 'print(false ? 1 : 0)', [0], printProvider)
@@ -191,74 +191,74 @@ print(fns[0](), fns[1]())
 `, [0, 1], printProvider)
 
 testRuntime(
-    'function return value', 
-`
+    'function return value',
+    `
 const fn = () => 0
 run(fn)
 `,
-    [0], 
+    [0],
     (results) => ({
-        run (fn: (...args: any[]) => any) {
+        run(fn: (...args: any[]) => any) {
             results.push(fn())
         }
     })
 )
 
 testRuntime(
-    'local function return value', 
-`
+    'local function return value',
+    `
 const fn = () => 0
 print(fn())
 `,
-    [0], 
+    [0],
     printProvider
 )
 
 testRuntime(
-    'function return bare', 
-`
+    'function return bare',
+    `
 const fn = () => { return }
 run(fn)
 `,
-    [undefined], 
+    [undefined],
     (results) => ({
-        run (fn: (...args: any[]) => any) {
+        run(fn: (...args: any[]) => any) {
             results.push(fn())
         }
     })
 )
 
 testRuntime(
-    'local function return bare', 
-`
+    'local function return bare',
+    `
 const fn = () => { return }
 print(fn())
 `,
-    [undefined], 
+    [undefined],
     printProvider
 )
 
 testRuntime(
-    'function without return', 
-`
+    'function without return',
+    `
 const fn = () => {}
 run(fn)
 `,
-    [undefined], 
+    [undefined],
     (results) => ({
-        run (fn: (...args: any[]) => any) {
+        run(fn: (...args: any[]) => any) {
             results.push(fn())
         }
     })
 )
 
 testRuntime(
-    'local function without return', 
-`
+    'local function without return',
+    `
 const fn = () => {}
 print(fn())
 `,
-    [undefined], 
+    [undefined],
     printProvider
 )
 
@@ -278,3 +278,16 @@ testRuntime('function statement', 'print(a()); function a () { return 0 }', [0],
 testRuntime('function expression', 'const a = function a () { return 0 }; print(a());', [0], printProvider)
 testRuntime('arrow function', 'const a = () => 0; print(a());', [0], printProvider)
 testRuntime('object method', 'const a = { b () { return 0 } }; print(a.b());', [0], printProvider)
+testRuntime(
+    'scope shadowing',
+    `
+    let a = 0
+    {
+        let a = 1
+        print(a)
+    }
+    print(a)
+    `,
+    [1, 0],
+    printProvider
+)
