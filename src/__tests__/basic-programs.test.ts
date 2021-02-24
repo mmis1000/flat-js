@@ -235,3 +235,9 @@ testRuntime('variable const', 'const a = 0; print(a);', [0], printProvider)
 testRuntimeThrows('variable const TDZ get', 'print(a); const a = 0;', ReferenceError)
 testRuntimeThrows('variable const TDZ set', 'a = 1; const a = 0;', ReferenceError)
 testRuntimeThrows('variable const immutable', ' const a = 0; a = 0', TypeError)
+
+
+testRuntime('function statement', 'print(a()); function a () { return 0 };', [0], printProvider)
+testRuntime('function expression', 'const a = function a () { return 0 }; print(a());', [0], printProvider)
+testRuntime('arrow function', 'const a = () => 0; print(a());', [0], printProvider)
+testRuntime('object method', 'const a = { b () { return 0 } }; print(a.b());', [0], printProvider)

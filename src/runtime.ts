@@ -214,6 +214,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             case OpCode.Pop:
                 currentFrame[Fields.valueStack].pop()
                 break
+            case OpCode.Duplicate:
+                currentFrame[Fields.valueStack].push(peak(currentFrame[Fields.valueStack]))
+                break
             case OpCode.GetRecord:
                 currentFrame[Fields.valueStack].push(currentFrame)
                 break

@@ -116,6 +116,17 @@ export const enum OpCode {
     // stack ops
     Pop,
 
+
+    /**
+     * ```txt
+     * Stack:
+     *   item
+     * Result:
+     *   item
+     *   item
+     */
+    Duplicate,
+
     // variable related
     /** RTL, foo = bar, var foo = bar */
     GetRecord,
@@ -639,6 +650,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 return [op(OpCode.Literal, 2, [false])]
             case ts.SyntaxKind.NullKeyword:
                 return [op(OpCode.NullLiteral)]
+            case ts.SyntaxKind.EmptyStatement:
+                return [op(OpCode.Nop, 0)]
         }
 
         if (ts.isIdentifier(node) && node.text === 'undefined') {
@@ -862,10 +875,13 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 if (ts.isShorthandPropertyAssignment(item)) {
                     res.push(op(OpCode.Literal, 2, [item.name.text]))
                     res.push(...generate(item.name))
+                    res.push(op(OpCode.DefineKeepCtx))
                 } else {
                     if (!item.name) {
                         throw new Error('property must have name')
-                    } else if (ts.isComputedPropertyName(item.name)) {
+                    }
+
+                    if (ts.isComputedPropertyName(item.name)) {
                         res.push(...generate(item.name.expression))
                     } else if (ts.isIdentifier(item.name)) {
                         res.push(op(OpCode.Literal, 2, [item.name.text]))
@@ -878,16 +894,19 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                         throw new Error('not supported')
                     }
 
-                    if (ts.isPropertyAssignment(item)) {
+                    if (ts.isMethodDeclaration(item)) {
+                        res.push(op(OpCode.Duplicate))
+                        res.push(op(OpCode.NodeOffset, 2, [item]))
+                        res.push(op(OpCode.NodeFunctionType, 2, [item]))
+                        res.push(op(OpCode.DefineFunction))
+                        res.push(op(OpCode.DefineKeepCtx))
+                    } else if (ts.isPropertyAssignment(item)) {
                         res.push(...generate(item.initializer))
-                    } else if (ts.isMethodDeclaration(item)) {
-                        res.push(...generate(item))
+                        res.push(op(OpCode.DefineKeepCtx))
                     } else {
                         throw new Error('not supported')
                     }
                 }
-
-                res.push(op(OpCode.DefineKeepCtx))
             }
 
             return res
@@ -1210,8 +1229,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         op(OpCode.GetRecord),
         op(OpCode.Literal, 2, [n.name?.text]),
         op(OpCode.Literal, 2, [n.name?.text]),
-        op(OpCode.NodeOffset, 2, [node]),
-        op(OpCode.NodeFunctionType, 2, [node]),
+        op(OpCode.NodeOffset, 2, [n]),
+        op(OpCode.NodeFunctionType, 2, [n]),
         op(OpCode.DefineFunction),
         op(OpCode.Set),
         op(OpCode.Pop)
@@ -1332,7 +1351,7 @@ export function compile(src: string, debug = false) {
                 ? it.preData[0].kind
                     ? getNameOfKind(it.preData[0].kind)
                     : JSON.stringify(it.preData[0])
-                : ''
+                : JSON.stringify(it.preData[0])
             return res
         }).join('\r\n'))
     }

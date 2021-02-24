@@ -118,3 +118,11 @@ compileAndRun(`
 let a = 0, b;
 a = 1
 `)
+
+compileAndRun(`
+const a = { b () { return 1 } };
+console.log(a.b());
+`)
+compileAndRun(`
+console.log(a()); function a () { return 0 };
+`)
