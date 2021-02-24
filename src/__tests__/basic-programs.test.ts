@@ -61,7 +61,8 @@ function testRuntime (
     testName: string,
     code: string,
     expectResults: any[],
-    ctxProvider: (results: any[]) => Record<string, any>
+    ctxProvider: (results: any[]) => Record<string, any>,
+    resultTransform: (results: any[]) => any[] = (a: any[]) => a,
 ) {
 
     test('Runtime: ' + testName, () => {
@@ -72,7 +73,7 @@ function testRuntime (
 
         runtime.run(program, text, 0, [globalThis, context])
 
-        expect(expectResults).toEqual(results)
+        expect(expectResults).toEqual(resultTransform(results))
     })
 }
 
@@ -107,34 +108,70 @@ testRuntime('primitive true', 'print(true)', [true], printProvider)
 testRuntime('primitive false', 'print(false)', [false], printProvider)
 testRuntime('primitive null', 'print(null)', [null], printProvider)
 testRuntime('primitive undefined', 'print(undefined)', [undefined], printProvider)
+
 testRuntime('object {}', 'print({})', [{}], printProvider)
 testRuntime('object { a: 1 }', 'print({ a: 1 })', [{ a: 1 }], printProvider)
+testRuntime('object shorthand { a }', 'const a = 1 ;print({ a })', [{ a: 1 }], printProvider)
+testRuntime('object computed name { [a]: 1 }', 'const a = "a"; print({ [a]: 1 })', [{ a: 1 }], printProvider)
+testRuntime('object method { a () {} }', 'print(({ a () {} }).a)', ['function'], printProvider, (l) => l.map(i => typeof i))
+
 testRuntime('array []', 'print([])', [[]], printProvider)
 testRuntime('array [1]', 'print([1])', [[1]], printProvider)
 testRuntime('array [,1]', 'print([,1])', [[,1]], printProvider)
+
 testRuntime('condition expression true', 'print(true ? 1 : 0)', [1], printProvider)
 testRuntime('condition expression falsy', 'print(false ? 1 : 0)', [0], printProvider)
+
 testRuntime('if statement true', 'if (true) { print(1) } else { print(0) }', [1], printProvider)
 testRuntime('if statement falsy', 'if (false) { print(1) } else { print(0) }', [0], printProvider)
+
 testRuntime('compare 1 > 0', 'if (1 > 0) { print(1) } else { print(0) }', [1], printProvider)
 testRuntime('compare 1 > 1', 'if (1 > 1) { print(1) } else { print(0) }', [0], printProvider)
 testRuntime('compare 0 > 1', 'if (0 > 0) { print(1) } else { print(0) }', [0], printProvider)
+
 testRuntime('compare 1 >= 0', 'if (1 >= 0) { print(1) } else { print(0) }', [1], printProvider)
 testRuntime('compare 1 >= 1', 'if (1 >= 1) { print(1) } else { print(0) }', [1], printProvider)
 testRuntime('compare 0 >= 1', 'if (0 >= 1) { print(1) } else { print(0) }', [0], printProvider)
+
 testRuntime('compare 1 < 0', 'if (1 < 0) { print(1) } else { print(0) }', [0], printProvider)
 testRuntime('compare 1 < 1', 'if (1 < 1) { print(1) } else { print(0) }', [0], printProvider)
 testRuntime('compare 0 < 1', 'if (0 < 1) { print(1) } else { print(0) }', [1], printProvider)
+
 testRuntime('compare 1 <= 0', 'if (1 <= 0) { print(1) } else { print(0) }', [0], printProvider)
 testRuntime('compare 1 <= 1', 'if (1 <= 1) { print(1) } else { print(0) }', [1], printProvider)
 testRuntime('compare 0 <= 1', 'if (0 <= 1) { print(1) } else { print(0) }', [1], printProvider)
-testRuntime('shortcut &&', 'false && print(1)', [], printProvider)
+
+testRuntime('1 + 2', 'print(1 + 2)', [3], printProvider)
+testRuntime('1 - 2', 'print(1 - 2)', [-1], printProvider)
+testRuntime('1 & 2', 'print(1 & 2)', [0], printProvider)
+testRuntime('1 | 2', 'print(1 | 2)', [3], printProvider)
+testRuntime('1 ^ 2', 'print(1 ^ 2)', [3], printProvider)
+testRuntime('2 >> 1', 'print(2 >> 1)', [1], printProvider)
+testRuntime('2 >>> 1', 'print(2 >>> 1)', [1], printProvider)
+testRuntime('2 << 1', 'print(2 << 1)', [4], printProvider)
+testRuntime('1 == 1', 'print(1 == 1)', [true], printProvider)
+testRuntime('1 == "1"', 'print(1 == "1")', [true], printProvider)
+testRuntime('1 == "2"', 'print(1 == "2")', [false], printProvider)
+testRuntime('1 === 1', 'print(1 === 1)', [true], printProvider)
+testRuntime('1 === "1"', 'print(1 === "1")', [false], printProvider)
+testRuntime('1 === "2"', 'print(1 === "2")', [false], printProvider)
+
+testRuntime('||', 'false || print(1)', [1], printProvider)
 testRuntime('shortcut ||', 'true || print(1)', [], printProvider)
+
+testRuntime('&&', 'true && print(1)', [1], printProvider)
 testRuntime('shortcut &&', 'false && print(1)', [], printProvider)
+
 testRuntime('true ? : ', 'true ?  print(1) : 0', [1], printProvider)
 testRuntime('false ? : ', 'false ? 0 : print(1) ', [1], printProvider)
 testRuntime('shortcut true ? : ', 'true ? 0 : print(1)', [], printProvider)
 testRuntime('shortcut false ? : ', 'false ? print(1) : 0', [], printProvider)
+testRuntime('i++', 'let i = 0; i++; print(i)', [1], printProvider)
+testRuntime('i++ before', 'let i = 0; print(i++); print(i)', [0, 1], printProvider)
+testRuntime('i--', 'let i = 1; i--; print(i)', [0], printProvider)
+testRuntime('i-- before', 'let i = 1; print(i--); print(i)', [1, 0], printProvider)
+testRuntimeThrows('undefined i++', 'i++;', ReferenceError, printProvider)
+testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
 
 testRuntime('for let', `
 const fns = []

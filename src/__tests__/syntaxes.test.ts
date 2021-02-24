@@ -25,6 +25,7 @@ const syntaxes = [
     ['FunctionExpression', '(function a () {})'],
     ['ObjectLiteral', '({})'],
     ['ObjectLiteral Property', '({ a: 0 })'],
+    ['ObjectLiteral Property Shorthand', '({ a })'],
     ['ObjectLiteral Method', '({ a () {} })'],
     ['ObjectLiteral ComputedKey', '({ [a]: {} })'],
     ['ObjectLiteral String Key', '({ "a": {} })'],
@@ -33,6 +34,7 @@ const syntaxes = [
     ['BinaryExpression - + ^ | || & && > 1 >> 1 >>> < << >= <= == ===', '1 - 1 + 1 ^ 1 | 1 || 1 & 1 && 1 > 1 >> 1 >>> 1 < 1 << 1 >= 1 <= 1 == 1 === 1'],
     ['PostfixUnaryExpression a++', 'a++'],
     ['PostfixUnaryExpression a--', 'a--'],
+    ['DebuggerStatement', 'debugger'],
     ['Nested Scope', `
     let a = 0;
     {

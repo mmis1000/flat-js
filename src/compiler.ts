@@ -774,15 +774,6 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             return []
         }
 
-        if (ts.isMethodDeclaration(node)) {
-            return [
-                ...generate(node.name),
-                op(OpCode.NodeOffset, 2, [node]),
-                op(OpCode.NodeFunctionType, 2, [node]),
-                op(OpCode.DefineFunction)
-            ]
-        }
-
         if (ts.isBlock(node)) {
             return [
                 ...generateEnterScope(node, scopes),
