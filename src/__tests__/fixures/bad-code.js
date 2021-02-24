@@ -27,7 +27,17 @@
     el.style.height = '100px'
     el.style.transform = 'translate(-50%, -50%)'
 
-    el.addEventListener('click', () => alert('hacked'))
+    let i = 0
+    let cb
+
+    el.addEventListener('click', cb = () => {
+        alert('hacked ' + i);
+        i++;
+        if (i > 5) {
+            el.removeEventListener('click', cb)
+            alert('bye!');
+        }
+    })
 
     document.body.appendChild(el)
 }

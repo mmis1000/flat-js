@@ -302,11 +302,35 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             case OpCode.JumpIfNot: {
                 const value = currentFrame[Fields.valueStack].pop()
                 const pos = currentFrame[Fields.valueStack].pop()
-                if (!value) {
+                if (value) {
+                    // intentional blank
+                } else {
                     ptr = pos
                 }
             }
                 break
+            case OpCode.JumpIfAndKeep: {
+                const value = currentFrame[Fields.valueStack].pop()
+                const pos = currentFrame[Fields.valueStack].pop()
+                currentFrame[Fields.valueStack].push(value)
+                if (value) {
+                    ptr = pos
+                } else {
+                    // intentional blank
+                }
+            }
+                break;
+            case OpCode.JumpIfNotAndKeep: {
+                const value = currentFrame[Fields.valueStack].pop()
+                const pos = currentFrame[Fields.valueStack].pop()
+                currentFrame[Fields.valueStack].push(value)
+                if (value) {
+                    // intentional blank
+                } else {
+                    ptr = pos
+                }
+            }
+                break;
             case OpCode.EnterFunction: {
                 // TODO: arguments and this/self reference
                 const functionType = currentFrame[Fields.valueStack].pop()
@@ -479,9 +503,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 currentFrame[Fields.valueStack].push({})
                 break
             case OpCode.BAmpersand:
-            case OpCode.BAmpersandAmpersand:
             case OpCode.BBar:
-            case OpCode.BBarBar:
             case OpCode.BCaret:
             case OpCode.BEqualsEquals:
             case OpCode.BEqualsEqualsEquals:
@@ -500,9 +522,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 const left = currentFrame[Fields.valueStack].pop()
                 const ops = {
                     [OpCode.BAmpersand]: (left: any, right: any) => left & right,
-                    [OpCode.BAmpersandAmpersand]: (left: any, right: any) => left && right,
                     [OpCode.BBar]: (left: any, right: any) => left | right,
-                    [OpCode.BBarBar]: (left: any, right: any) => left || right,
                     [OpCode.BCaret]: (left: any, right: any) => left ^ right,
                     [OpCode.BEqualsEquals]: (left: any, right: any) => left == right,
                     [OpCode.BEqualsEqualsEquals]: (left: any, right: any) => left === right,

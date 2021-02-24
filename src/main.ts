@@ -3,7 +3,7 @@ import { run } from "./runtime"
 
 
 function compileAndRun(src: string) {
-    const [programData, textData] = compile(src)
+    const [programData, textData] = compile(src, true)
     console.log(JSON.stringify(textData))
     console.log(programData.length, Buffer.from(new Uint32Array(programData).buffer).toString('base64'))
     console.time()
@@ -112,4 +112,9 @@ for (let i = 0; i < 15; i++) {
 }
 fns[7].a()
 console.log(fns[7].b() + fns[8].b())
+`)
+
+compileAndRun(`
+let a = 0, b;
+a = 1
 `)

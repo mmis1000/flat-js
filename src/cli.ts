@@ -6,8 +6,11 @@ import * as uglify from 'uglify-js'
 const START_FLAG = '// [START_HERE]'
 const END_FLAG = 'exports.run = run;'
 
-const JSONMode = process.argv[2] === '--json'
-const filename = process.argv[2] === '--json' ? process.argv[3]! : process.argv[2]!
+const args = process.argv.slice(2)
+
+const debugMode = args[0] === '--debug' ? (args.shift(), true) : false
+const JSONMode = args[0] === '--json' ? (args.shift(), true) : false
+const filename = args[0]
 
 async function main () {
     const runtimeFull = await fs.readFile(path.resolve(__dirname, './runtime.js'),{ encoding: 'utf-8' })
@@ -18,7 +21,11 @@ async function main () {
     const content = await fs.readFile(filename, { encoding: 'utf-8' })
     const contentMinimized = uglify.minify(content).code
 
-    const [programDataRaw, textDataRaw] = compile(contentMinimized)
+    if (debugMode) {
+        console.error(contentMinimized)
+    }
+
+    const [programDataRaw, textDataRaw] = compile(contentMinimized, debugMode)
     const textData = JSON.stringify(textDataRaw)
     const programData = Buffer.from(new Uint32Array(programDataRaw).buffer).toString('base64')
 

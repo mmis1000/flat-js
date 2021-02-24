@@ -59,6 +59,27 @@ export const enum OpCode {
     JumpIfNot,
     Jump,
 
+    /**
+     * ```txt
+     * Stack:
+     *   offset
+     *   condition
+     * Result
+     *   condition
+     * ```
+     */
+    JumpIfAndKeep,
+    /**
+     * ```txt
+     * Stack:
+     *   offset
+     *   condition
+     * Result
+     *   condition
+     * ```
+     */
+    JumpIfNotAndKeep,
+
     // setup arguments, this, and so on
     /** 
      * ```txt
@@ -218,10 +239,6 @@ export const enum OpCode {
     BAmpersand,
     /** | */
     BBar,
-    /** && */
-    BAmpersandAmpersand,
-    /** || */
-    BBarBar,
     /** > */
     BGreaterThan,
     /** >> */
@@ -657,16 +674,15 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     }
                 } else if (node.flags & ts.NodeFlags.Let) {
                     // unblock without doing anything
-                    return [
+                    ops.push(
                         ...generateLeft(declaration.name),
                         op(OpCode.DeTDZ),
                         op(OpCode.Pop),
                         op(OpCode.Pop)
-                    ]
+                    )
                 } else {
                     // a var without value effectively does nothing
                     // the variable already handled by the scope step
-                    return []
                 }
             }
 
@@ -971,6 +987,104 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 ...exit
             ]
         }
+
+        if (ts.isIfStatement(node)) {
+            /**
+             * |--condition
+             * |  whenTrue --|
+             * -->whenFalsy  |
+             *    exit     <-|
+             */
+
+            const exit = [
+                op(OpCode.Nop, 0)
+            ]
+
+            const whenTrue = [
+                op(OpCode.Nop, 0),
+                ...generate(node.thenStatement),
+                op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                op(OpCode.Jump),
+            ]
+
+            const whenFalsy = [
+                op(OpCode.Nop, 0),
+                ...(node.elseStatement !== undefined ? generate(node.elseStatement) : [])
+            ]
+
+            const condition = [
+                op(OpCode.NodeOffset, 2, [headOf(whenFalsy)]),
+                ...generate(node.expression),
+                op(OpCode.JumpIfNot)
+            ]
+
+            return [...condition, ...whenTrue, ...whenFalsy, ...exit]
+        }
+
+        // &&
+        if (ts.isBinaryExpression(node)) {
+            switch (node.operatorToken.kind) {
+                case ts.SyntaxKind.AmpersandAmpersandToken:
+                    const left = generate(node.left)
+                    const right = generate(node.right)
+                    const exit = [op(OpCode.Nop, 0)]
+                    /**
+                     *   push evaluate left
+                     *   if not peak() goto Exit
+                     *     pop
+                     *     push evaluate right
+                     *     goto Exit
+                     *   Else:
+                     *     push res
+                     *   Exit:
+                     */
+                    return [
+                        op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                        ...left,
+                        op(OpCode.JumpIfNotAndKeep),
+
+                        op(OpCode.Pop),
+                        ...right,
+
+                        ...exit
+                    ]
+                default:
+                    // let next block do it
+            }
+        }
+
+        // ||
+        if (ts.isBinaryExpression(node)) {
+            switch (node.operatorToken.kind) {
+                case ts.SyntaxKind.BarBarToken:
+                    const left = generate(node.left)
+                    const right = generate(node.right)
+                    const exit = [op(OpCode.Nop, 0)]
+                    /**
+                     *   push evaluate left
+                     *   if peak() goto Exit
+                     *     pop
+                     *     push evaluate right
+                     *     goto Exit
+                     *   Else:
+                     *     push res
+                     *   Exit:
+                     */
+                    return [
+                        op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                        ...left,
+                        op(OpCode.JumpIfAndKeep),
+
+                        op(OpCode.Pop),
+                        ...right,
+
+                        ...exit
+                    ]
+                default:
+                    // let next block do it
+            }
+        }
+
         // Comma
         if (ts.isBinaryExpression(node)) {
             switch (node.operatorToken.kind) {
@@ -1014,12 +1128,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     ops.push(op(OpCode.BCaret)); break;
                 case ts.SyntaxKind.AmpersandToken:
                     ops.push(op(OpCode.BAmpersand)); break;
-                case ts.SyntaxKind.AmpersandAmpersandToken:
-                    ops.push(op(OpCode.BAmpersandAmpersand)); break;
                 case ts.SyntaxKind.BarToken:
                     ops.push(op(OpCode.BBar)); break;
-                case ts.SyntaxKind.BarBarToken:
-                    ops.push(op(OpCode.BBarBar)); break;
                 case ts.SyntaxKind.GreaterThanToken:
                     ops.push(op(OpCode.BGreaterThan)); break;
                 case ts.SyntaxKind.GreaterThanGreaterThanToken:
@@ -1185,7 +1295,7 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
     }
 }
 
-export function compile(src: string) {
+export function compile(src: string, debug = false) {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
@@ -1213,15 +1323,19 @@ export function compile(src: string) {
 
     genOffset(flattened)
 
-    // console.log(flattened.map(it => {
-    //     let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
-    //     res += it.preData[0]
-    //         ? it.preData[0].kind
-    //             ? getNameOfKind(it.preData[0].kind)
-    //             : JSON.stringify(it.preData[0])
-    //         : ''
-    //     return res
-    // }).join('\r\n'))
+    // @ts-expect-error
+    if (debug && typeof OpCode !== undefined) {
+        console.error(flattened.map(it => {
+            // @ts-expect-error
+            let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
+            res += it.preData[0]
+                ? it.preData[0].kind
+                    ? getNameOfKind(it.preData[0].kind)
+                    : JSON.stringify(it.preData[0])
+                : ''
+            return res
+        }).join('\r\n'))
+    }
 
     const textData: any[] = []
     const programData: number[] = []
