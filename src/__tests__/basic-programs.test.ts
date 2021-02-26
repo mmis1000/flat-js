@@ -73,7 +73,7 @@ function testRuntime(
 
         runtime.run(program, text, 0, [globalThis, context])
 
-        expect(expectResults).toEqual(resultTransform(results))
+        expect(resultTransform(results)).toEqual(expectResults)
     })
 }
 
@@ -294,10 +294,11 @@ testRuntime(
     print(a)
     `,
     [1, 0],
+
     printProvider
 )
 testRuntime(
-    'try catch',
+    'try catch - return bare',
     `
     try {
         throw 1
@@ -309,7 +310,35 @@ testRuntime(
     printProvider
 )
 testRuntime(
-    'try catch',
+    'try catch - return try',
+    `
+    const a = () => {
+        try {
+            return 1
+        } catch (err) {}
+    }
+    print(a())
+    `,
+    [1],
+    printProvider
+)
+testRuntime(
+    'try catch - return catch',
+    `
+    const a = () => {
+        try {
+            throw 0
+        } catch (err) {
+            return 1
+        }
+    }
+    print(a())
+    `,
+    [1],
+    printProvider
+)
+testRuntime(
+    'try catch - return in finally',
     `
     const a = () => {
         try {
