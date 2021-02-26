@@ -355,3 +355,61 @@ testRuntime(
     [1, 2, 3],
     printProvider
 )
+testRuntime(
+    'try catch - exit finally',
+    `
+    try {
+        throw 1
+    } catch (err) {
+        print(err)
+    } finally {
+        print(0)
+    }
+    `,
+    [1, 0],
+    printProvider
+)
+testRuntime(
+    'try catch - exit from finally from throw in catch',
+    `
+    try {
+        try {
+            print(0)
+            throw 1
+        } catch (err) {
+            throw 2
+        } finally {
+            print(1)
+        }
+    } catch (err) {
+        print(err)
+    }
+    `,
+    [0, 1, 2],
+    printProvider
+)
+testRuntime(
+    'try catch - exit from finally from return in catch',
+    `
+    const a = () => {
+        try {
+            print(0)
+            throw 1
+        } catch (err) {
+            return 2
+        } finally {
+            print(1)
+        }
+    }
+
+    print(a())
+    `,
+    [0, 1, 2],
+    printProvider
+)
+testRuntimeThrows(
+    'try catch - throw bare',
+    'throw "FQ"',
+    "FQ",
+    printProvider
+)
