@@ -1,6 +1,6 @@
 "use strict"
 import ts from "typescript"
-import { FunctionTypes, OpCode, SetFlag, SpecialVariable, VariableType } from "./compiler"
+import { FunctionTypes, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "./compiler"
 
 
 // [START_HERE]
@@ -24,17 +24,21 @@ const enum Fields {
     valueStack,
     return,
     catch,
+    finally,
     variable,
     name,
     tdz,
     immutable,
     value,
-    offset
+    offset,
+    state,
+    resolveType,
+    exit
 }
 
 type FunctionFrame = {
-    [Fields.type]: FrameType.Function,
-    [Fields.scopes]: Scope[],
+    [Fields.type]: FrameType.Function
+    [Fields.scopes]: Scope[]
     [Fields.valueStack]: any[]
     [Fields.return]: number
 }
@@ -45,7 +49,18 @@ type TryFrame = {
     [Fields.scopes]: Scope[],
     // ref to frame's valueStack
     [Fields.valueStack]: any[]
+
+    [Fields.state]: TryCatchFinallyState
+    [Fields.resolveType]: ResolveType
+    [Fields.value]: any
+
+    /** address */
     [Fields.catch]: number,
+    /** address */
+    [Fields.finally]: number,
+    /** address */
+    [Fields.exit]: number,
+
     [Fields.variable]: string
 }
 
@@ -201,7 +216,126 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
     while (ptr >= 0 && ptr < program.length) {
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
-        switch (command) {
+
+        const throwsConditional = (value: any) => {
+            loop: while (true) {
+                const currentFrame = peak(stack)
+                switch (currentFrame[Fields.type]) {
+                    case FrameType.Function: {
+                        stack.pop()
+                    }
+                        break
+                    case FrameType.Try: {
+                        const frame = currentFrame as TryFrame
+
+                        if (frame[Fields.state] === TryCatchFinallyState.Finally) {
+                            stack.pop()
+                        } else {
+                            handleTryFrame();
+                            break loop;
+                        }
+                    }
+                    
+                }
+            }
+
+            throw value
+        }
+
+        const returnsValueConditional = (value: any) => {
+            const currentFrame = peak(stack)
+            // try to find upper try frame or return (if any and hand control to it)
+            switch (currentFrame[Fields.type]) {
+                case FrameType.Function: {
+                    const frame = currentFrame as FunctionFrame
+
+                    // exit
+                    const returnAddr = frame[Fields.return]
+
+                    if (returnAddr < 0) {
+                        // leave the whole function
+                        return value
+                    } else {
+                        stack.pop()
+                        ptr = returnAddr
+                        peak(stack)[Fields.valueStack].push(value)
+                    }
+                }
+                    break
+                case FrameType.Try: {
+                    const frame = currentFrame as TryFrame
+                    frame[Fields.valueStack].push(value)
+
+                    // as if we return on upper try catch
+                    returnsTryFrame()
+                }
+                    break
+            }
+        }
+
+        const returnsTryFrame = () => {
+            const frame = stack.pop() as TryFrame
+            const value = frame[Fields.valueStack].pop()
+            const finallyAddr = frame[Fields.finally]
+
+            switch (frame[Fields.state]) {
+                case TryCatchFinallyState.Try:
+                case TryCatchFinallyState.Catch: {
+                    if (finallyAddr >= 0) {
+                        frame[Fields.state] = TryCatchFinallyState.Finally
+                        frame[Fields.resolveType] = ResolveType.return
+                        frame[Fields.value] = value
+                        ptr = finallyAddr
+                    } else {
+                        returnsValueConditional(value)
+                    }
+                }
+                    break;
+                case TryCatchFinallyState.Finally: {
+                    returnsValueConditional(value)
+                }
+            }
+        }
+
+        const handleTryFrame = () => {
+            const frame = stack.pop() as TryFrame
+            const value = frame[Fields.valueStack].pop()
+            const exitAddr = frame[Fields.exit]
+            const finallyAddr = frame[Fields.finally]
+            const catchAddr = frame[Fields.catch]
+
+            switch (frame[Fields.state]) {
+                case TryCatchFinallyState.Try: {
+                    if (catchAddr >= 0) {
+                        frame[Fields.state] = TryCatchFinallyState.Catch
+                        frame[Fields.resolveType] = ResolveType.throw
+                        frame[Fields.value] = value
+                        // put thrown value
+                        frame[Fields.valueStack].push(value)
+                        ptr = catchAddr
+                    } else {
+                        ptr = exitAddr
+                    }
+                }
+                    break;
+                case TryCatchFinallyState.Catch: {
+                    if (finallyAddr >= 0) {
+                        frame[Fields.state] = TryCatchFinallyState.Finally
+                        frame[Fields.resolveType] = ResolveType.throw
+                        frame[Fields.value] = value
+                        ptr = finallyAddr
+                    } else {
+                        throwsConditional(value)
+                    }
+                }
+
+                case TryCatchFinallyState.Finally: {
+                    throwsConditional(value)
+                }
+            }
+        }
+
+        command: switch (command) {
             case OpCode.Literal: {
                 const value = read()
                 if (isSmallNumber(value)) {
@@ -490,35 +624,66 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 ptr = returnAddr
             }
                 break
-            case OpCode.ReturnBare: {
-                if (currentFrame[Fields.valueStack].length > 0) {
-                    throw new Error('bad return')
-                }
-
-                // remove all try frames
-                while (peak(stack)[Fields.type] !== FrameType.Function) {
-                    stack.pop()
-                }
-
-                const returnAddr = (peak(stack) as FunctionFrame)[Fields.return]
-
-                if (returnAddr < 0) {
-                    // leave the whole function
-                    return undefined
-                }
-
-                stack.pop()
-
-                peak(stack)[Fields.valueStack].push(undefined)
-                ptr = returnAddr
+            case OpCode.Throw: {
+                const err = currentFrame[Fields.valueStack].pop()
+                throw err
             }
-                break
             case OpCode.ArrayLiteral:
                 currentFrame[Fields.valueStack].push([])
                 break
             case OpCode.ObjectLiteral:
                 currentFrame[Fields.valueStack].push({})
                 break
+            case OpCode.InitTryCatch: {
+                const catchName = currentFrame[Fields.valueStack].pop()
+                const finallyAddr = currentFrame[Fields.valueStack].pop()
+                const catchAddr = currentFrame[Fields.valueStack].pop()
+                const exitAddr = currentFrame[Fields.valueStack].pop()
+
+                const frame: TryFrame = {
+                    [Fields.type]: FrameType.Try,
+                    [Fields.scopes]: currentFrame[Fields.scopes],
+                    [Fields.valueStack]: [],
+                    [Fields.state]: TryCatchFinallyState.Try,
+                    [Fields.resolveType]: ResolveType.normal,
+                    [Fields.value]: undefined,
+                    [Fields.catch]: catchAddr,
+                    [Fields.finally]: finallyAddr,
+                    [Fields.variable]: catchName,
+                    [Fields.exit]: exitAddr
+                }
+
+                environments.add(frame)
+
+                stack.push(frame)
+            }
+                break
+            case OpCode.ReturnInTryCatchFinally: 
+                returnsTryFrame()
+            
+                break;
+            case OpCode.ThrowInTryCatchFinally: 
+                handleTryFrame()
+            
+                break
+            case OpCode.ExitTryCatchFinally: {
+                const prevResolveType = (currentFrame as TryFrame)[Fields.resolveType]
+                const value = (currentFrame as TryFrame)[Fields.value]
+                const exit = (currentFrame as TryFrame)[Fields.exit]
+
+                switch (prevResolveType) {
+                    case ResolveType.normal:
+                        ptr = exit
+                        break command
+                    case ResolveType.throw:
+                        throwsConditional(value)
+                        break command
+                    case ResolveType.return:
+                        returnsValueConditional(value)
+                        break command
+                }
+            } 
+                break;
             case OpCode.BAmpersand:
             case OpCode.BBar:
             case OpCode.BCaret:

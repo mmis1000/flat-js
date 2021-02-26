@@ -9,6 +9,24 @@ export const enum SpecialVariable {
     This = '[this]'
 }
 
+export const enum StatementFlag {
+    Try              = 1 << 0,
+    Catch            = 1 << 1,
+    Finally          = 1 << 2,
+    TryCatchFlags = Try | Catch | Finally
+}
+
+export const enum TryCatchFinallyState {
+    Try,
+    Catch,
+    Finally
+}
+export const enum ResultType {
+    Normal,
+    Return,
+    Throw
+}
+
 export const enum VariableType {
     Var = 1,
     Let = 2,
@@ -120,7 +138,6 @@ export const enum OpCode {
     // stack ops
     Pop,
 
-
     /**
      * ```txt
      * Stack:
@@ -217,7 +234,56 @@ export const enum OpCode {
      */
     DefineFunction,
     Return,
-    ReturnBare,
+
+    /**
+     * ```tst
+     * Stack:
+     *   TryCatchFinallyState
+     *   ReturnType
+     *   Value
+     * ```
+     */
+    ReturnInTryCatchFinally,
+
+    /**
+     * ```tst
+     * Stack:
+     *   Value
+     * ```
+     */
+    Throw,
+
+    /**
+     * ```tst
+     * Stack:
+     *   TryCatchFinallyState
+     *   ReturnType
+     *   Value
+     * ```
+     */
+    ThrowInTryCatchFinally,
+
+    /**
+     * ```tst
+     * Stack:
+     *   TryCatchFinallyState
+     *   ReturnType
+     *   Value
+     * ```
+     */
+    ExitTryCatchFinally,
+
+
+    /**
+     * ```tst
+     * Stack:
+     *   Exit
+     *   CatchAddress
+     *   FinallyAddress
+     *   CatchClauseName
+     * ```
+     */
+    InitTryCatch,
 
     /**
      * ```txt
@@ -295,6 +361,13 @@ export const enum OpCode {
      * debugger;
      */
     Debugger,
+}
+
+
+export const enum ResolveType {
+    normal,
+    throw,
+    return
 }
 
 export const enum FunctionTypes {
@@ -635,7 +708,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             return node
         }
     }
-    function generateLeft(node: ts.Node): Segment {
+    function generateLeft(node: ts.Node, flag: number): Segment {
         const rawNode = extractQuote(node)
 
         if (rawNode.kind === ts.SyntaxKind.ThisKeyword) {
@@ -654,21 +727,21 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
         if (ts.isPropertyAccessExpression(rawNode) && ts.isIdentifier(rawNode.name)) {
             return [
-                ...generate(rawNode.expression),
+                ...generate(rawNode.expression, flag),
                 op(OpCode.Literal, 2, [rawNode.name.text])
             ]
         }
 
         if (ts.isElementAccessExpression(rawNode)) {
             return [
-                ...generate(rawNode.expression),
-                ...generate(rawNode.argumentExpression)
+                ...generate(rawNode.expression, flag),
+                ...generate(rawNode.argumentExpression, flag)
             ]
         }
 
         throw new Error('not support')
     }
-    function generate(node: ts.Node): Segment {
+    function generate(node: ts.Node, flag: number): Segment {
         switch (node.kind) {
             case ts.SyntaxKind.TrueKeyword:
                 return [op(OpCode.Literal, 2, [true])]
@@ -699,19 +772,19 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 }
 
                 if (declaration.initializer) {
-                    ops.push(...generateLeft(declaration.name))
+                    ops.push(...generateLeft(declaration.name, flag))
 
                     if (node.flags & ts.NodeFlags.BlockScoped) {
                         ops.push(op(OpCode.DeTDZ))
                     }
 
-                    ops.push(...generate(declaration.initializer))
+                    ops.push(...generate(declaration.initializer, flag))
 
                     ops.push(op(OpCode.Set))
                     ops.push(op(OpCode.Pop))
                     if (node.flags & ts.NodeFlags.Const) {
                         ops.push(
-                            ...generateLeft(declaration.name),
+                            ...generateLeft(declaration.name, flag),
                             op(OpCode.FreezeVariable),
                             op(OpCode.Pop),
                             op(OpCode.Pop)
@@ -720,7 +793,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 } else if (node.flags & ts.NodeFlags.Let) {
                     // unblock without doing anything
                     ops.push(
-                        ...generateLeft(declaration.name),
+                        ...generateLeft(declaration.name, flag),
                         op(OpCode.DeTDZ),
                         op(OpCode.Pop),
                         op(OpCode.Pop)
@@ -735,7 +808,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         }
 
         if (ts.isVariableStatement(node)) {
-            return generate(node.declarationList)
+            return generate(node.declarationList, flag)
         }
 
         if (ts.isStringLiteral(node)) {
@@ -744,7 +817,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
         if (ts.isExpressionStatement(node)) {
             return [
-                ...generate(node.expression),
+                ...generate(node.expression, flag),
                 op(OpCode.Pop)
             ]
         }
@@ -767,9 +840,9 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         if (
             ts.isConditionalExpression(node)
         ) {
-            const condition = generate(node.condition)
-            const positive = [op(OpCode.Nop, 0), ...generate(node.whenTrue)]
-            const negative = [op(OpCode.Nop, 0), ...generate(node.whenFalse)]
+            const condition = generate(node.condition, flag)
+            const positive = [op(OpCode.Nop, 0), ...generate(node.whenTrue, flag)]
+            const negative = [op(OpCode.Nop, 0), ...generate(node.whenFalse, flag)]
             const end = [op(OpCode.Nop, 0)]
 
             return [
@@ -824,12 +897,13 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         if (ts.isReturnStatement(node)) {
             if (node.expression !== undefined) {
                 return [
-                    ...generate(node.expression),
-                    op(OpCode.Return)
+                    ...generate(node.expression, flag),
+                    (flag & StatementFlag.TryCatchFlags) ? op(OpCode.ReturnInTryCatchFinally) : op(OpCode.Return)
                 ]
             } else {
                 return [
-                    op(OpCode.ReturnBare)
+                    op(OpCode.UndefinedLiteral),
+                    (flag & StatementFlag.TryCatchFlags) ? op(OpCode.ReturnInTryCatchFinally) : op(OpCode.Return)
                 ]
             }
         }
@@ -852,10 +926,10 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
         if (ts.isCallExpression(node)) {
             const self = extractQuote(node.expression)
-            const args = node.arguments.map(generate).flat()
+            const args = node.arguments.map(a => generate(a, flag)).flat()
 
             if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
-                const leftOps = generateLeft(self)
+                const leftOps = generateLeft(self, flag)
 
                 return [
                     ...leftOps,
@@ -880,7 +954,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
                 if (el.kind !== ts.SyntaxKind.OmittedExpression) {
                     res.push(op(OpCode.Literal, 2, [index]))
-                    res.push(...generate(el))
+                    res.push(...generate(el, flag))
                     res.push(op(OpCode.SetKeepCtx))
                 }
             }
@@ -897,7 +971,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             for (let item of list) {
                 if (ts.isShorthandPropertyAssignment(item)) {
                     res.push(op(OpCode.Literal, 2, [item.name.text]))
-                    res.push(...generate(item.name))
+                    res.push(...generate(item.name, flag))
                     res.push(op(OpCode.DefineKeepCtx))
                 } else {
                     if (!item.name) {
@@ -905,14 +979,14 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     }
 
                     if (ts.isComputedPropertyName(item.name)) {
-                        res.push(...generate(item.name.expression))
+                        res.push(...generate(item.name.expression, flag))
                     } else if (ts.isIdentifier(item.name)) {
                         res.push(op(OpCode.Literal, 2, [item.name.text]))
                     } else if (
                         ts.isStringLiteral(item.name)
                         || ts.isNumericLiteral(item.name)
                     ) {
-                        res.push(...generate(item.name))
+                        res.push(...generate(item.name, flag))
                     } else {
                         throw new Error('not supported')
                     }
@@ -924,7 +998,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                         res.push(op(OpCode.DefineFunction))
                         res.push(op(OpCode.DefineKeepCtx))
                     } else if (ts.isPropertyAssignment(item)) {
-                        res.push(...generate(item.initializer))
+                        res.push(...generate(item.initializer, flag))
                         res.push(op(OpCode.DefineKeepCtx))
                     } else {
                         throw new Error('not supported')
@@ -956,7 +1030,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 : [op(OpCode.Nop, 0)]
 
             var entry1 = initializer
-                ? generate(initializer)
+                ? generate(initializer, flag)
                 : [op(OpCode.Nop, 0)]
 
             var exit = hasScope
@@ -966,7 +1040,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             var conditionS = condition
                 ? [
                     op(OpCode.NodeOffset, 2, [headOf(exit)]),
-                    ...generate(condition),
+                    ...generate(condition, flag),
                     op(OpCode.JumpIfNot)
                 ]
                 : [
@@ -1007,7 +1081,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
             var update1 = incrementor
                 ? [
-                    ...generate(incrementor),
+                    ...generate(incrementor, flag),
                     op(OpCode.Pop),
                     op(OpCode.NodeOffset, 2, [headOf(conditionS)]),
                     op(OpCode.Jump)
@@ -1017,7 +1091,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     op(OpCode.Jump)
                 ]
 
-            var body = generate(node.statement)
+            var body = generate(node.statement, flag)
 
             return [
                 ...entry0,
@@ -1044,19 +1118,19 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
             const whenTrue = [
                 op(OpCode.Nop, 0),
-                ...generate(node.thenStatement),
+                ...generate(node.thenStatement, flag),
                 op(OpCode.NodeOffset, 2, [headOf(exit)]),
                 op(OpCode.Jump),
             ]
 
             const whenFalsy = [
                 op(OpCode.Nop, 0),
-                ...(node.elseStatement !== undefined ? generate(node.elseStatement) : [])
+                ...(node.elseStatement !== undefined ? generate(node.elseStatement, flag) : [])
             ]
 
             const condition = [
                 op(OpCode.NodeOffset, 2, [headOf(whenFalsy)]),
-                ...generate(node.expression),
+                ...generate(node.expression, flag),
                 op(OpCode.JumpIfNot)
             ]
 
@@ -1067,8 +1141,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         if (ts.isBinaryExpression(node)) {
             switch (node.operatorToken.kind) {
                 case ts.SyntaxKind.AmpersandAmpersandToken:
-                    const left = generate(node.left)
-                    const right = generate(node.right)
+                    const left = generate(node.left, flag)
+                    const right = generate(node.right, flag)
                     const exit = [op(OpCode.Nop, 0)]
                     /**
                      *   push evaluate left
@@ -1099,8 +1173,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         if (ts.isBinaryExpression(node)) {
             switch (node.operatorToken.kind) {
                 case ts.SyntaxKind.BarBarToken:
-                    const left = generate(node.left)
-                    const right = generate(node.right)
+                    const left = generate(node.left, flag)
+                    const right = generate(node.right, flag)
                     const exit = [op(OpCode.Nop, 0)]
                     /**
                      *   push evaluate left
@@ -1132,9 +1206,9 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             switch (node.operatorToken.kind) {
                 case ts.SyntaxKind.CommaToken:
                     return [
-                        ...generate(node.left),
+                        ...generate(node.left, flag),
                         op(OpCode.Pop),
-                        ...generate(node.right)
+                        ...generate(node.right, flag)
                     ]
                 default:
                     // let next block do it
@@ -1146,8 +1220,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             switch (node.operatorToken.kind) {
                 case ts.SyntaxKind.EqualsToken:
                     return [
-                        ...generateLeft(node.left),
-                        ...generate(node.right),
+                        ...generateLeft(node.left, flag),
+                        ...generate(node.right, flag),
                         op(OpCode.Set)
                     ]
                 default:
@@ -1157,8 +1231,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
         if (ts.isBinaryExpression(node)) {
             const ops = [
-                ...generate(node.left),
-                ...generate(node.right),
+                ...generate(node.left, flag),
+                ...generate(node.right, flag),
             ]
 
             switch (node.operatorToken.kind) {
@@ -1202,12 +1276,12 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
             switch (node.operator) {
                 case ts.SyntaxKind.PlusPlusToken:
                     return [
-                        ...generateLeft(node.operand),
+                        ...generateLeft(node.operand, flag),
                         op(OpCode.PostFixPlusPLus)
                     ]
                 case ts.SyntaxKind.MinusMinusToken:
                     return [
-                        ...generateLeft(node.operand),
+                        ...generateLeft(node.operand, flag),
                         op(OpCode.PostFixMinusMinus)
                     ]
                 default:
@@ -1217,17 +1291,89 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
         if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
             return [
-                ...generateLeft(node),
+                ...generateLeft(node, flag),
                 op(OpCode.Get)
             ]
         }
 
         if (ts.isParenthesizedExpression(node)) {
-            return generate(node.expression)
+            return generate(node.expression, flag)
         }
 
         if (ts.isDebuggerStatement(node)) {
             return [op(OpCode.Debugger)]
+        }
+
+        if (ts.isThrowStatement(node)) {
+            const ops: Segment = []
+            ops.push(...generate(node.expression, flag))
+            if (flag & StatementFlag.TryCatchFlags) {
+                ops.push(op(OpCode.ThrowInTryCatchFinally))
+            } else {
+                ops.push(op(OpCode.Throw))
+            }
+        }
+
+        if (ts.isTryStatement(node)) {
+            /** TRY START */
+            const tryStatements = generate(node.tryBlock, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Try)
+            const exitTry = [
+                op(OpCode.ExitTryCatchFinally)
+            ]
+            /** CATCH START */
+
+            /** CATCH START */
+            const catchStatement = node.catchClause
+                ? generate(node.catchClause.block, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch)
+                : [op(OpCode.Nop, 0)]
+            const exitCatch = [
+                op(OpCode.ExitTryCatchFinally)
+            ]
+            /** CATCH END */
+
+            /** Finally START */
+            const finallyStatement = node.finallyBlock
+                ? generate(node.finallyBlock, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Finally)
+                : [op(OpCode.Nop, 0)]
+            const exitFinally = [
+                op(OpCode.ExitTryCatchFinally)
+            ]
+            /** Finally END */
+
+            const exitAll = [op(OpCode.Nop, 0)]
+
+            const init = [
+                op(OpCode.NodeOffset, 2, [headOf(exitAll)]),
+                node.catchClause
+                    ? op(OpCode.NodeOffset, 2, [headOf(catchStatement)])
+                    : op(OpCode.Literal, 2, [-1]),
+                node.finallyBlock
+                    ? op(OpCode.NodeOffset, 2, [headOf(finallyStatement)])
+                    : op(OpCode.Literal, 2, [-1]),
+                node.catchClause?.variableDeclaration 
+                    ? op(OpCode.Literal, 2, [node.catchClause?.variableDeclaration.name]) 
+                    : op(OpCode.UndefinedLiteral),
+                op(OpCode.InitTryCatch)
+            ]
+
+            return [
+                ...init,
+                ...tryStatements,
+                ...exitTry,
+                ...node.catchClause
+                    ? [
+                        ...catchStatement,
+                        ...exitCatch
+                    ]
+                    : [],
+                ...node.finallyBlock
+                    ? [
+                        ...finallyStatement,
+                        ...exitFinally
+                    ]
+                    : [],
+                ...exitAll
+            ]
         }
 
         throw new Error(`Unknown node ${getNameOfKind(node.kind)}`)
@@ -1237,13 +1383,13 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
     if (ts.isSourceFile(node)) {
         const statements = [...node.statements]
-        bodyNodes = statements.map(generate).flat().concat(op(OpCode.ReturnBare))
+        bodyNodes = statements.map(s => generate(s, 0)).flat().concat(op(OpCode.UndefinedLiteral), op(OpCode.Return))
     } else if (node.body != undefined && ts.isBlock(node.body)) {
         const statements = [...node.body.statements]
-        bodyNodes = statements.map(generate).flat().concat(op(OpCode.ReturnBare))
+        bodyNodes = statements.map(s => generate(s, 0)).flat().concat(op(OpCode.UndefinedLiteral), op(OpCode.Return))
     } else {
         bodyNodes = [
-            ...generate(node.body!),
+            ...generate(node.body!, 0),
             op(OpCode.Return)
         ]
     }
