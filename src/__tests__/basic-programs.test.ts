@@ -296,3 +296,33 @@ testRuntime(
     [1, 0],
     printProvider
 )
+testRuntime(
+    'try catch',
+    `
+    try {
+        throw 1
+    } catch (err) {
+        print(err)
+    }
+    `,
+    [1],
+    printProvider
+)
+testRuntime(
+    'try catch',
+    `
+    const a = () => {
+        try {
+            throw (print(1), 1)
+        } catch (err) {
+            print(err + 1)
+        } finally {
+            return 3
+        }
+    }
+
+    print(a())
+    `,
+    [1, 2, 3],
+    printProvider
+)
