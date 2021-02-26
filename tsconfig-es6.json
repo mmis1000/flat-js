@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/compiler.ts",
+    "src/runtime.ts",
+    "src/index.ts",
+  ],
+  "exclude": [],
+  "compilerOptions": {
+    "outDir": "dist" /* Concatenate and emit output to single file. */,
+    "moduleResolution": "node" /* Specify module resolution strategy: 'node' (Node.js) or 'classic' (TypeScript pre-1.6). */,
+    "module": "ESNext",
+    "preserveConstEnums": false
+  }
+}
