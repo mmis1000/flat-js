@@ -337,6 +337,21 @@ testRuntime(
     [1],
     printProvider
 )
+testRuntimeThrows(
+    'try catch - throw catch',
+    `
+    const a = () => {
+        try {
+            throw 0
+        } catch (err) {
+            throw Reflect.construct(Error, ['a'])
+        }
+    }
+    print(a())
+    `,
+    'a',
+    printProvider
+)
 testRuntime(
     'try catch - return in finally',
     `
@@ -367,6 +382,20 @@ testRuntime(
     }
     `,
     [1, 0],
+    printProvider
+)
+testRuntimeThrows(
+    'try catch - throw in finally',
+    `
+    try {
+        throw 1
+    } catch (err) {
+        print(err)
+    } finally {
+        throw Reflect.construct(Error, ['a'])
+    }
+    `,
+    'a',
     printProvider
 )
 testRuntime(
