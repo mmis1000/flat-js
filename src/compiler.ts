@@ -882,7 +882,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         if (ts.isBlock(node)) {
             return [
                 ...generateEnterScope(node, scopes),
-                ...node.statements.map(generate).flat(),
+                ...node.statements.map(s => generate(s, flag)).flat(),
                 ...generateLeaveScope(node)
             ]
         }
@@ -1306,12 +1306,16 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
         if (ts.isThrowStatement(node)) {
             const ops: Segment = []
+
             ops.push(...generate(node.expression, flag))
+
             if (flag & StatementFlag.TryCatchFlags) {
                 ops.push(op(OpCode.ThrowInTryCatchFinally))
             } else {
                 ops.push(op(OpCode.Throw))
             }
+
+            return ops
         }
 
         if (ts.isTryStatement(node)) {
@@ -1342,6 +1346,12 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
             const exitAll = [op(OpCode.Nop, 0)]
 
+            const catchIdentifier =node.catchClause?.variableDeclaration?.name
+
+            if (catchIdentifier === undefined || catchIdentifier.kind !== ts.SyntaxKind.Identifier) {
+                throw new Error('not support non identifier binding')
+            }
+
             const init = [
                 op(OpCode.NodeOffset, 2, [headOf(exitAll)]),
                 node.catchClause
@@ -1351,7 +1361,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     ? op(OpCode.NodeOffset, 2, [headOf(finallyStatement)])
                     : op(OpCode.Literal, 2, [-1]),
                 node.catchClause?.variableDeclaration 
-                    ? op(OpCode.Literal, 2, [node.catchClause?.variableDeclaration.name]) 
+                    ? op(OpCode.Literal, 2, [catchIdentifier.text]) 
                     : op(OpCode.UndefinedLiteral),
                 op(OpCode.InitTryCatch)
             ]

@@ -20,6 +20,7 @@ type Scope = Record<string, any>
 
 const enum Fields {
     type,
+    savedScopes,
     scopes,
     valueStack,
     return,
@@ -46,6 +47,7 @@ type FunctionFrame = {
 type TryFrame = {
     [Fields.type]: FrameType.Try,
     // scope snapshot
+    [Fields.savedScopes]: Scope[],
     [Fields.scopes]: Scope[],
     // ref to frame's valueStack
     [Fields.valueStack]: any[]
@@ -217,29 +219,11 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
 
-        const throwsConditional = (value: any) => {
-            loop: while (true) {
-                const currentFrame = peak(stack)
-                switch (currentFrame[Fields.type]) {
-                    case FrameType.Function: {
-                        stack.pop()
-                    }
-                        break
-                    case FrameType.Try: {
-                        const frame = currentFrame as TryFrame
-
-                        if (frame[Fields.state] === TryCatchFinallyState.Finally) {
-                            stack.pop()
-                        } else {
-                            handleTryFrame();
-                            break loop;
-                        }
-                    }
-                    
-                }
-            }
-
-            throw value
+        const addCatchScope = (frame: TryFrame, name: string, value: any) => {
+            const newScope: Scope = {}
+            defineVariable(newScope, name, VariableType.Var)
+            newScope[name] = value
+            frame[Fields.scopes].push(newScope)
         }
 
         const returnsValueConditional = (value: any) => {
@@ -264,9 +248,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     break
                 case FrameType.Try: {
                     const frame = currentFrame as TryFrame
-                    frame[Fields.valueStack].push(value)
 
                     // as if we return on upper try catch
+                    frame[Fields.valueStack].push(value)
                     returnsTryFrame()
                 }
                     break
@@ -274,11 +258,15 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         }
 
         const returnsTryFrame = () => {
-            const frame = stack.pop() as TryFrame
+            const frame = peak(stack) as TryFrame
             const value = frame[Fields.valueStack].pop()
             const finallyAddr = frame[Fields.finally]
 
-            switch (frame[Fields.state]) {
+            // restore scopes
+            frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
+
+            const state = frame[Fields.state]
+            switch (state) {
                 case TryCatchFinallyState.Try:
                 case TryCatchFinallyState.Catch: {
                     if (finallyAddr >= 0) {
@@ -287,31 +275,74 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         frame[Fields.value] = value
                         ptr = finallyAddr
                     } else {
+                        stack.pop()
                         returnsValueConditional(value)
+                        return
                     }
                 }
                     break;
                 case TryCatchFinallyState.Finally: {
+                    stack.pop()
                     returnsValueConditional(value)
+                    return
                 }
+                    break;
+                default:
+                    const nothing: never = state
+
             }
         }
 
-        const handleTryFrame = () => {
-            const frame = stack.pop() as TryFrame
+        const throwsConditional = (value: any) => {
+            loop: while (true) {
+                const currentFrame = peak(stack)
+                switch (currentFrame[Fields.type]) {
+                    case FrameType.Function: {
+                        stack.pop()
+                    }
+                        break
+                    case FrameType.Try: {
+                        const frame = currentFrame as TryFrame
+
+                        if (frame[Fields.state] === TryCatchFinallyState.Finally) {
+                            stack.pop()
+                        } else {
+
+                            // as if we return on upper try catch
+                            currentFrame[Fields.valueStack].push(value)
+                            throwsTryFrame();
+                            return
+                        }
+                    }
+
+                }
+            }
+
+            throw value
+        }
+
+        const throwsTryFrame = () => {
+            const frame = peak(stack) as TryFrame
             const value = frame[Fields.valueStack].pop()
             const exitAddr = frame[Fields.exit]
             const finallyAddr = frame[Fields.finally]
             const catchAddr = frame[Fields.catch]
 
-            switch (frame[Fields.state]) {
+            // restore scopes
+            frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
+
+            const state = frame[Fields.state]
+            switch (state) {
                 case TryCatchFinallyState.Try: {
                     if (catchAddr >= 0) {
                         frame[Fields.state] = TryCatchFinallyState.Catch
                         frame[Fields.resolveType] = ResolveType.throw
                         frame[Fields.value] = value
-                        // put thrown value
-                        frame[Fields.valueStack].push(value)
+
+                        if (frame[Fields.variable] !== undefined) {
+                            addCatchScope(frame, frame[Fields.variable], value)
+                        }
+
                         ptr = catchAddr
                     } else {
                         ptr = exitAddr
@@ -325,13 +356,19 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         frame[Fields.value] = value
                         ptr = finallyAddr
                     } else {
+                        stack.pop()
                         throwsConditional(value)
                     }
+                    break
                 }
 
                 case TryCatchFinallyState.Finally: {
+                    stack.pop()
                     throwsConditional(value)
                 }
+                    break
+                default:
+                    const nothing: never = state
             }
         }
 
@@ -642,7 +679,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                 const frame: TryFrame = {
                     [Fields.type]: FrameType.Try,
-                    [Fields.scopes]: currentFrame[Fields.scopes],
+                    [Fields.savedScopes]: currentFrame[Fields.scopes],
+                    [Fields.scopes]: currentFrame[Fields.scopes].slice(0),
                     [Fields.valueStack]: [],
                     [Fields.state]: TryCatchFinallyState.Try,
                     [Fields.resolveType]: ResolveType.normal,
@@ -658,31 +696,55 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 stack.push(frame)
             }
                 break
-            case OpCode.ReturnInTryCatchFinally: 
+            case OpCode.ReturnInTryCatchFinally:
                 returnsTryFrame()
-            
+
                 break;
-            case OpCode.ThrowInTryCatchFinally: 
-                handleTryFrame()
-            
+            case OpCode.ThrowInTryCatchFinally:
+                throwsTryFrame()
+
                 break
             case OpCode.ExitTryCatchFinally: {
-                const prevResolveType = (currentFrame as TryFrame)[Fields.resolveType]
-                const value = (currentFrame as TryFrame)[Fields.value]
-                const exit = (currentFrame as TryFrame)[Fields.exit]
+                const frame = currentFrame as TryFrame
+                const prevState = frame[Fields.state]
+                const prevResolveType = frame[Fields.resolveType]
+                const prevValue = frame[Fields.value]
+                const exit = frame[Fields.exit]
+                const finallyPtr = frame[Fields.finally]
 
-                switch (prevResolveType) {
-                    case ResolveType.normal:
-                        ptr = exit
-                        break command
-                    case ResolveType.throw:
-                        throwsConditional(value)
-                        break command
-                    case ResolveType.return:
-                        returnsValueConditional(value)
-                        break command
+                // restore scopes
+                frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
+
+                switch (prevState) {
+                    case TryCatchFinallyState.Finally:
+                        switch (prevResolveType) {
+                            case ResolveType.normal:
+                                ptr = exit
+                                break command
+                            case ResolveType.throw:
+                                throwsConditional(prevValue)
+                                break command
+                            case ResolveType.return:
+                                returnsValueConditional(prevValue)
+                                break command
+                        }
+                    case TryCatchFinallyState.Try:
+                    case TryCatchFinallyState.Catch:
+                        if (frame[Fields.finally] >= 0) {
+                            frame[Fields.state] = TryCatchFinallyState.Finally
+                            frame[Fields.resolveType] = ResolveType.normal
+                            frame[Fields.value] = undefined
+
+                            ptr = finallyPtr
+                            break command
+                        } else {
+                            ptr = exit
+                            break command
+                        }
+                    default:
+                        const nothing: never = prevState;
                 }
-            } 
+            }
                 break;
             case OpCode.BAmpersand:
             case OpCode.BBar:
