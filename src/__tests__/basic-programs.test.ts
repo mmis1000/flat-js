@@ -172,6 +172,7 @@ testRuntime('i--', 'let i = 1; i--; print(i)', [0], printProvider)
 testRuntime('i-- before', 'let i = 1; print(i--); print(i)', [1, 0], printProvider)
 testRuntimeThrows('undefined i++', 'i++;', ReferenceError, printProvider)
 testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
+testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', ReferenceError, printProvider)
 
 testRuntime('for let', `
 const fns = []
@@ -259,6 +260,13 @@ const fn = () => {}
 print(fn())
 `,
     [undefined],
+    printProvider
+)
+
+testRuntime(
+    'call value directly',
+    `((a) => { print(a)})(0)`,
+    [0], 
     printProvider
 )
 
@@ -442,3 +450,33 @@ testRuntimeThrows(
     "FQ",
     printProvider
 )
+
+testRuntime('call', `
+const fn = function (b) {
+    return this.a + b
+}
+const obj = {
+    a: 1
+}
+print(fn.call(obj, 1))
+`, [2], printProvider)
+
+testRuntime('apply', `
+const fn = function (b) {
+    return this.a + b
+}
+const obj = {
+    a: 1
+}
+print(fn.apply(obj, [1]))
+`, [2], printProvider)
+
+testRuntimeThrows('call throws', `
+const call = Function.prototype.call
+call(null)
+`, TypeError)
+
+testRuntimeThrows('apply throws', `
+const apply = Function.prototype.apply
+apply(null, [])
+`, TypeError)

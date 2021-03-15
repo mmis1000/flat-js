@@ -299,6 +299,16 @@ export const enum OpCode {
     /**
      * ```txt
      * Stack:
+     *   fn
+     *   argument * M
+     *   argument count - M
+     * ```
+     */
+    CallValue,
+
+    /**
+     * ```txt
+     * Stack:
      * ```
      */
     ArrayLiteral,
@@ -347,6 +357,17 @@ export const enum OpCode {
      * ```
      * 
     */
+
+    // Errors
+    /** 
+     * ```txt
+     * Stack:
+     *   message
+     * ```
+     * 
+    */
+    ThrowReferenceError,
+
     PostFixMinusMinus,
     /**
      * ```txt
@@ -938,7 +959,14 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     op(OpCode.Call)
                 ]
             } else {
-                throw new Error('not support call value yet')
+                const leftValue = generate(self, flag)
+
+                return [
+                    ...leftValue,
+                    ...args,
+                    op(OpCode.Literal, 2, [node.arguments.length]),
+                    op(OpCode.CallValue)
+                ]
             }
         }
 
@@ -1219,11 +1247,24 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         if (ts.isBinaryExpression(node)) {
             switch (node.operatorToken.kind) {
                 case ts.SyntaxKind.EqualsToken:
-                    return [
-                        ...generateLeft(node.left, flag),
-                        ...generate(node.right, flag),
-                        op(OpCode.Set)
-                    ]
+                    const left = extractQuote(node.left)
+                    if (
+                        ts.isPropertyAccessExpression(left) ||
+                        ts.isElementAccessExpression(left) ||
+                        ts.isIdentifier(left) ||
+                        left.kind === ts.SyntaxKind.ThisKeyword) {
+                        return [
+                            ...generateLeft(node.left, flag),
+                            ...generate(node.right, flag),
+                            op(OpCode.Set)
+                        ]
+                    } else {        
+                        return [
+                            ...generate(left, flag),
+                            op(OpCode.Literal, 2, ['Invalid left-hand side in assignment']),
+                            op(OpCode.ThrowReferenceError)
+                        ]
+                    }
                 default:
                     // let next block do it
             }

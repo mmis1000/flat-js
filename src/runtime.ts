@@ -11,6 +11,9 @@ const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
 }
 
+const CALL = Function.prototype.call
+const APPLY = Function.prototype.apply
+
 const enum FrameType {
     Function,
     Try
@@ -601,17 +604,46 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     currentFrame[Fields.valueStack].push(defineFunction(currentFrame[Fields.scopes], name, type, offset))
                 }
                     break
+                case OpCode.CallValue:
                 case OpCode.Call: {
                     const parameterCount: number = currentFrame[Fields.valueStack].pop()
-                    const parameters: any[] = []
+                    let parameters: any[] = []
                     for (let i = 0; i < parameterCount; i++) {
                         parameters.unshift(currentFrame[Fields.valueStack].pop())
                     }
 
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const envOrRecord = currentFrame[Fields.valueStack].pop()
+                    let fn, envOrRecord
 
-                    let fn = getValue(envOrRecord, name)
+                    if (command === OpCode.Call) {
+                        const name = currentFrame[Fields.valueStack].pop()
+                        envOrRecord = currentFrame[Fields.valueStack].pop()
+                        fn = getValue(envOrRecord, name)
+                    } else /** if (command === OpCode.CallValue) */ {
+                        envOrRecord = undefined
+                        fn = currentFrame[Fields.valueStack].pop()
+                    }
+
+                    while (fn === CALL || fn === APPLY) {
+                        let newFn, newSelf, newParameters
+                        if (fn === CALL) {
+                            newFn = envOrRecord
+                            newSelf = parameters[0]
+                            newParameters = parameters.slice(1)
+                        } else /**if (fn === APPLY)*/ {
+                            newFn = envOrRecord
+                            newSelf = parameters[0]
+                            const parameterArrayLike = parameters[1]
+                            const parameterLength = parameterArrayLike.length
+                            newParameters = []
+                            for (let i = 0; i < parameterLength; i++) {
+                                newParameters.push(parameterArrayLike[i])
+                            }
+                        }
+
+                        fn = environments.has(newFn) ? undefined : newFn
+                        envOrRecord = newSelf
+                        parameters = newParameters
+                    }
 
                     let self = undefined
 
@@ -668,6 +700,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 case OpCode.Throw: {
                     const err = currentFrame[Fields.valueStack].pop()
                     throw err
+                }
+                case OpCode.ThrowReferenceError: {
+                    const msg = currentFrame[Fields.valueStack].pop()
+                    throw new ReferenceError(msg)
                 }
                 case OpCode.ArrayLiteral:
                     currentFrame[Fields.valueStack].push([])
@@ -816,13 +852,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 case OpCode.Debugger:
                     debugger;
                     break;
-                case OpCode.NodeFunctionType:
-                case OpCode.NodeOffset:
-                case OpCode.Nop:
-                    throw new Error('Why are you here?')
                 default:
-                    const nothing: never = command
-                    throw new Error('Unknown Op')
+                    type NonRuntimeCommands = OpCode.NodeFunctionType | OpCode.NodeOffset | OpCode.Nop
+                    const nothing: NonRuntimeCommands = command
+                    throw new Error('Um?')
             }
 
         } catch (err) {
