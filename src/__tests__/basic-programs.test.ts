@@ -461,6 +461,11 @@ const obj = {
 print(fn.call(obj, 1))
 `, [2], printProvider)
 
+testRuntime('call recursive', `
+const call = Function.prototype.call
+call.call(call, call, call, function () { print(this.a) }, { a: 1 })
+`, [1], printProvider)
+
 testRuntime('apply', `
 const fn = function (b) {
     return this.a + b
