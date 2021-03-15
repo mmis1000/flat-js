@@ -37,7 +37,11 @@ const enum Fields {
     offset,
     state,
     resolveType,
-    exit
+    exit,
+
+    function,
+    self,
+    arguments
 }
 
 type FunctionFrame = {
@@ -192,6 +196,24 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         functionDescriptors.set(fn, des)
 
         return fn
+    }
+    const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
+    const bindInternal = (fn: any, self: any, args: any[]) => {
+        if (typeof fn !== 'function') {
+            return undefined
+        }
+
+        const bindFn = function (...additionalArgs: any[]) {
+            return Reflect.apply(fn, self, [...args, ...additionalArgs])
+        }
+
+        bindInfo.set(bindFn, {
+            [Fields.function]: fn,
+            [Fields.self]: self,
+            [Fields.arguments]: args
+        })
+
+        return bindFn
     }
 
     const findScope = (ctx: Frame, name: string): Scope | null => {
@@ -623,13 +645,13 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         fn = currentFrame[Fields.valueStack].pop()
                     }
 
-                    while (fn === CALL || fn === APPLY) {
+                    while (fn === CALL || fn === APPLY || bindInfo.has(fn)) {
                         let newFn, newSelf, newParameters
                         if (fn === CALL) {
                             newFn = envOrRecord
                             newSelf = parameters[0]
                             newParameters = parameters.slice(1)
-                        } else /**if (fn === APPLY)*/ {
+                        } else if (fn === APPLY) {
                             newFn = envOrRecord
                             newSelf = parameters[0]
                             const parameterArrayLike = parameters[1]
@@ -638,6 +660,12 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             for (let i = 0; i < parameterLength; i++) {
                                 newParameters.push(parameterArrayLike[i])
                             }
+                        } else /* if (bindInfo.has(fn))*/ {
+                            const info0 = bindInfo.get(fn)
+                            const info = info0!
+                            newSelf = info[Fields.self]
+                            newParameters = [...info[Fields.arguments], ...parameters]
+                            newFn = info[Fields.arguments]
                         }
 
                         fn = environments.has(newFn) ? undefined : newFn

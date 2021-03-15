@@ -485,3 +485,27 @@ testRuntimeThrows('apply throws', `
 const apply = Function.prototype.apply
 apply(null, [])
 `, TypeError)
+
+testRuntime('bind', `
+const a = function (b, c) {
+    print(this.a, b, c)
+}
+const b = a.bind({ a: 0 }, 1)
+b(2)
+`, [0, 1, 2], printProvider)
+
+testRuntime('bind external', `
+const a = function (b, c) {
+    return [this.a, b, c]
+}
+const b = a.bind({ a: 0 }, 1)
+run(b)
+`, [0, 1, 2],
+(results) => ({
+    run(fn: (...args: any[]) => any) {
+        results.push(...fn(2))
+    }
+}))
+
+
+    
