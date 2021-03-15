@@ -13,6 +13,7 @@ const isSmallNumber = (a: any): a is number => {
 
 const CALL = Function.prototype.call
 const APPLY = Function.prototype.apply
+const BIND = Function.prototype.bind
 
 const enum FrameType {
     Function,
@@ -665,7 +666,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             const info = info0!
                             newSelf = info[Fields.self]
                             newParameters = [...info[Fields.arguments], ...parameters]
-                            newFn = info[Fields.arguments]
+                            newFn = info[Fields.function]
                         }
 
                         fn = environments.has(newFn) ? undefined : newFn
@@ -679,7 +680,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         self = envOrRecord
                     }
 
-                    if (!functionDescriptors.has(fn)) {
+                    if (fn === BIND) {
+                        const bound = bindInternal(self, parameters[0], parameters.slice(1))
+                        currentFrame[Fields.valueStack].push(bound)
+                    } else if (!functionDescriptors.has(fn)) {
                         // extern
                         currentFrame[Fields.valueStack].push(Reflect.apply(fn, self, parameters))
                     } else {
