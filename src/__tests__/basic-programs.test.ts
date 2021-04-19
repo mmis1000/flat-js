@@ -587,6 +587,20 @@ switch (1) {
 print(a)
 `, [1], printProvider)
 
+testRuntime('switch nested break 2', `
+var a = 0
+switch (1) {
+    case 1: 
+        let b = a
+        a = b + 1
+        if (true) {
+            break
+        }
+    default:
+        a = 2
+}
+print(a)
+`, [1], printProvider)
 
 
 testRuntime('for break', `
@@ -602,7 +616,15 @@ for (;;) {
 print(a)
 `, [3], printProvider)
 
-
+testRuntime('for break nested', `
+for (let i = 0; i < 5; i++) {
+    let a = i
+    if (a > 3) {
+        break
+    }
+    print(a)
+}
+`, [0, 1, 2, 3], printProvider)
 
 testRuntime('for continue', `
 
