@@ -718,10 +718,16 @@ function generateVariableList(node: ts.Node, scopes: Scopes): Op[] {
 }
 
 function generateEnterScope(node: ts.Node, scopes: Scopes): Op<OpCode>[] {
-    return [
+    const result = [
         ...generateVariableList(node, scopes),
         op(OpCode.EnterScope)
     ]
+
+    if (result.length <= 2) {
+        throw new Error('tries to generate empty block')
+    }
+
+    return result
 }
 
 function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
@@ -914,11 +920,19 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         }
 
         if (ts.isBlock(node)) {
-            return [
-                ...generateEnterScope(node, scopes),
-                ...node.statements.map(s => generate(s, flag)).flat(),
-                ...generateLeaveScope(node)
-            ]
+            const variableCount = scopes.get(node)?.size ?? 0
+            if (variableCount > 0) {
+                return [
+                    ...generateEnterScope(node, scopes),
+                    ...node.statements.map(s => generate(s, flag)).flat(),
+                    ...generateLeaveScope(node)
+                ]
+            } else {
+                return [
+                    op(OpCode.Nop, 0),
+                    ...node.statements.map(s => generate(s, flag)).flat()
+                ]
+            }
         }
 
         if (ts.isIdentifier(node)) {
