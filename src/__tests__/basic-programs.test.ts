@@ -612,5 +612,25 @@ for (let i = 0; i < 5; i++) {
     }
     print(i)
 }
+`, [3, 4], printProvider)
 
+testRuntime('for continue nested', `
+for (let i = 0; i < 5; i++) {
+    let a = i
+    if (a < 3) {
+        continue
+    }
+    print(a)
+}
+`, [3, 4], printProvider)
+
+testRuntime('for continue nested', `
+let i;
+for (i = 0; i < 5; i++) {
+    let a = i
+    if (a < 3) {
+        continue
+    }
+    print(a)
+}
 `, [3, 4], printProvider)

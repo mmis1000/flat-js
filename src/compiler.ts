@@ -1068,6 +1068,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
         if (ts.isForStatement(node)) {
             const nextOp = op(OpCode.Nop, 0)
             nextOps.set(node, nextOp)
+
             const continueOp = op(OpCode.Nop, 0)
             continueOps.set(node, continueOp)
 
@@ -1091,7 +1092,12 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 : [op(OpCode.Nop, 0)]
 
             var entry1 = initializer
-                ? generate(initializer, flag)
+                ?  ts.isVariableDeclarationList(initializer)
+                    ? generate(initializer, flag)
+                    : [
+                        ...generate(initializer, flag),
+                        op(OpCode.Pop)
+                    ]
                 : [op(OpCode.Nop, 0)]
 
             var exit = hasScope
