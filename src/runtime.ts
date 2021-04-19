@@ -516,6 +516,16 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     }
                 }
                     break
+                case OpCode.JumpIf: {
+                    const value = currentFrame[Fields.valueStack].pop()
+                    const pos = currentFrame[Fields.valueStack].pop()
+                    if (value) {
+                        ptr = pos
+                    } else {
+                        // intentional blank
+                    }
+                }
+                    break
                 case OpCode.JumpIfAndKeep: {
                     const value = currentFrame[Fields.valueStack].pop()
                     const pos = currentFrame[Fields.valueStack].pop()

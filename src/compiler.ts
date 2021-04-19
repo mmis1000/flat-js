@@ -6,7 +6,8 @@ export const isSmallNumber = (a: any): a is number => {
 }
 
 export const enum SpecialVariable {
-    This = '[this]'
+    This = '[this]',
+    SwitchValue = '[switch]'
 }
 
 export const enum StatementFlag {
@@ -79,6 +80,14 @@ export const enum OpCode {
      * ```
      */
     JumpIfNot,
+    /**
+     * ```txt
+     * Stack:
+     *   offset
+     *   condition
+     * ```
+     */
+    JumpIf,
     Jump,
 
     /**
@@ -530,6 +539,8 @@ function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, functions: 
                     break // this is the body of function, method, constructor
                 }
             case ts.SyntaxKind.ForStatement:
+
+            case ts.SyntaxKind.SwitchStatement:
             case ts.SyntaxKind.CaseBlock:
                 scopes.set(node, new Map())
         }
@@ -718,6 +729,8 @@ function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
         op(OpCode.LeaveScope)
     ]
 }
+
+const nextOps = new Map<ts.Node, Op>()
 
 function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
@@ -1121,6 +1134,10 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
 
             var body = generate(node.statement, flag)
 
+            var nextOp = op(OpCode.Nop, 0)
+
+            nextOps.set(node, nextOp)
+
             return [
                 ...entry0,
                 ...entry1,
@@ -1128,7 +1145,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 ...body,
                 ...update0,
                 ...update1,
-                ...exit
+                ...exit,
+                nextOp
             ]
         }
 
@@ -1424,6 +1442,100 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                     ]
                     : [],
                 ...exitAll
+            ]
+        }
+
+        if (ts.isSwitchStatement(node)) {
+            const switchHead = [
+                op(OpCode.Literal, 2, [SpecialVariable.SwitchValue]),
+                op(OpCode.Literal, 2, [VariableType.Var]),
+                op(OpCode.Literal, 2, [1]),
+                op(OpCode.EnterScope),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.SwitchValue]),
+                ...generate(node.expression, flag),
+                op(OpCode.Set),
+                op(OpCode.Pop)
+            ]
+
+            const bodies: {
+                entry: Op,
+                rule?: Op[],
+                body: Op[]
+            }[] = []
+
+            for (let c of node.caseBlock.clauses) {
+                if (ts.isCaseClause(c)) {
+                    const rule = [
+                        op(OpCode.GetRecord),
+                        op(OpCode.Literal, 2, [SpecialVariable.SwitchValue]),
+                        op(OpCode.Get),
+                        ...generate(c.expression, flag),
+                        op(OpCode.BEqualsEqualsEquals)
+                    ]
+                    const body = [
+                        op(OpCode.Nop, 0),
+                        ...c.statements.map(it => generate(it, flag)).flat()
+                    ]
+                    bodies.push({
+                        entry: op(OpCode.Nop, 0),
+                        rule,
+                        body
+                    })
+                } else {
+                    const body = c.statements.map(it => generate(it, flag)).flat()
+                    bodies.push({
+                        entry: op(OpCode.Nop, 0),
+                        body
+                    })
+                }
+            }
+
+            const hasVariables = scopes.get(node.caseBlock)!.size > 0
+
+            const connectedBodyHead = hasVariables ? generateEnterScope(node.caseBlock, scopes) : []
+            const connectedBodyRules: Op[] = []
+            const connectedBody: Op[] = []
+            const connectedBodyExit = op(OpCode.Nop, 0)
+            const connectedBodyEnd = hasVariables ? op(OpCode.LeaveScope) : op(OpCode.Nop, 0)
+
+            for (const [index, item] of bodies.entries()) {
+                connectedBody.push(...item.body)
+            }
+
+            for (const [index, item] of bodies.entries()) {
+                const nextSegment = bodies[index].body[0]
+                connectedBodyRules.push(op(OpCode.NodeOffset, 2, [nextSegment]))
+
+                if (item.rule != null) {
+                    connectedBodyRules.push(...item.rule)
+                    connectedBodyRules.push(op(OpCode.JumpIf))
+                } else {
+                    connectedBodyRules.push(op(OpCode.Jump))
+                }
+
+                connectedBody.push(...item.body)
+            }
+            connectedBodyRules.push(op(OpCode.NodeOffset, 2, [connectedBodyExit]))
+            connectedBodyRules.push(op(OpCode.Jump))
+
+            const switchTail = [
+                op(OpCode.LeaveScope)
+            ]
+
+            var nextOp = op(OpCode.Nop, 0)
+
+            nextOps.set(node, nextOp)
+
+            return [
+                ...switchHead,
+                ...connectedBodyHead,
+                ...connectedBodyRules,
+                ...connectedBody,
+                connectedBodyExit,
+                connectedBodyEnd,
+                ...switchTail,
+                nextOp
             ]
         }
 

@@ -508,4 +508,52 @@ run(b)
 }))
 
 
-    
+testRuntime('switch miss', `
+var a = 1
+switch (a) {
+    case 2: 
+        a = 2
+}
+print(a)
+`, [1], printProvider)
+
+testRuntime('switch hit', `
+var a = 1
+switch (a) {
+    case 1: 
+        a = 2
+}
+print(a)
+`, [2], printProvider)
+
+testRuntime('switch default', `
+var a = 1
+switch (a) {
+    default:
+        a = 2
+}
+print(a)
+`, [2], printProvider)
+
+
+testRuntime('switch full', `
+var flag = 2
+var a = 0
+var b = 0
+var c = 0
+var d = 0
+switch (flag) {
+    case 1: 
+        a = 1
+    case 2: 
+        b = 1
+    case 3: 
+        c = 1
+    default:
+        d = 1
+}
+print(a)
+print(b)
+print(c)
+print(d)
+`, [0, 1, 1, 1], printProvider)
