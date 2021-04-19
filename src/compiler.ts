@@ -738,7 +738,7 @@ function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
 
 const nextOps = new Map<ts.Node, Op>()
 
-function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
+function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMap): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
 
     function extractQuote(node: ts.Node) {
@@ -1065,6 +1065,9 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         }
 
         if (ts.isForStatement(node)) {
+            var nextOp = op(OpCode.Nop, 0)
+            nextOps.set(node, nextOp)
+
             let initializer = node.initializer
             let condition = node.condition
             let incrementor = node.incrementor
@@ -1147,10 +1150,6 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 ]
 
             var body = generate(node.statement, flag)
-
-            var nextOp = op(OpCode.Nop, 0)
-
-            nextOps.set(node, nextOp)
 
             return [
                 ...entry0,
@@ -1460,6 +1459,9 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
         }
 
         if (ts.isSwitchStatement(node)) {
+            var nextOp = op(OpCode.Nop, 0)
+            nextOps.set(node, nextOp)
+
             const switchHead = [
                 op(OpCode.Literal, 2, [SpecialVariable.SwitchValue]),
                 op(OpCode.Literal, 2, [VariableType.Var]),
@@ -1537,10 +1539,6 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 op(OpCode.LeaveScope)
             ]
 
-            var nextOp = op(OpCode.Nop, 0)
-
-            nextOps.set(node, nextOp)
-
             return [
                 ...switchHead,
                 ...connectedBodyHead,
@@ -1550,6 +1548,37 @@ function generateSegment(node: VariableRoot, scopes: Scopes): Segment {
                 connectedBodyEnd,
                 ...switchTail,
                 nextOp
+            ]
+        }
+
+        if (ts.isBreakStatement(node) && node.label == null) {
+            let scopeCount = 0
+            const target = findAncient(node, parentMap, (node) => {
+                if ((scopes.get(node)?.size ?? 0) > 0) {
+                    scopeCount++
+                }
+
+                if (ts.isForStatement(node)) {
+                    return true
+                }
+
+                if (ts.isSwitchStatement(node)) {
+                    return true
+                }
+
+                return false
+            })
+            if (target == null) {
+                throw new Error('cannot find break target')
+            }
+            const nextNode = nextOps.get(target)
+            if (nextNode == null) {
+                throw new Error('did not get nextNode')
+            }
+            return [
+                ...new Array(scopeCount).fill(0).map(it => op(OpCode.LeaveScope)),
+                op(OpCode.NodeOffset, 2, [nextNode]),
+                op(OpCode.Jump)
             ]
         }
 
@@ -1689,7 +1718,7 @@ export function compile(src: string, debug = false) {
     const functionToSegment = new Map<ts.Node, Segment>()
 
     for (let item of functions) {
-        const generated = generateSegment(item, scopes)
+        const generated = generateSegment(item, scopes, parentMap)
         program.push(generated)
         functionToSegment.set(item, generated)
     }

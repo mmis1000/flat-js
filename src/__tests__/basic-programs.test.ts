@@ -557,3 +557,47 @@ print(b)
 print(c)
 print(d)
 `, [0, 1, 1, 1], printProvider)
+
+
+testRuntime('switch break', `
+var a = 0
+switch (1) {
+    case 1: 
+        a = 1
+        break
+    default:
+        a = 2
+}
+print(a)
+`, [1], printProvider)
+
+
+
+testRuntime('switch nested break', `
+var a = 0
+switch (1) {
+    case 1: 
+        a = 1
+        if (true) {
+            break
+        }
+    default:
+        a = 2
+}
+print(a)
+`, [1], printProvider)
+
+
+
+testRuntime('for break', `
+var a = 0
+
+for (;;) {
+    a++
+    if (a === 3) {
+        break
+    }
+}
+
+print(a)
+`, [3], printProvider)
