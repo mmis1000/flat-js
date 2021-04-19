@@ -737,6 +737,7 @@ function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
 }
 
 const nextOps = new Map<ts.Node, Op>()
+const continueOps = new Map<ts.Node, Op>()
 
 function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMap): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
@@ -1065,8 +1066,10 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
         }
 
         if (ts.isForStatement(node)) {
-            var nextOp = op(OpCode.Nop, 0)
+            const nextOp = op(OpCode.Nop, 0)
             nextOps.set(node, nextOp)
+            const continueOp = op(OpCode.Nop, 0)
+            continueOps.set(node, continueOp)
 
             let initializer = node.initializer
             let condition = node.condition
@@ -1156,6 +1159,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 ...entry1,
                 ...conditionS,
                 ...body,
+                continueOp,
                 ...update0,
                 ...update1,
                 ...exit,
@@ -1577,6 +1581,39 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             }
             return [
                 ...new Array(scopeCount).fill(0).map(it => op(OpCode.LeaveScope)),
+                op(OpCode.NodeOffset, 2, [nextNode]),
+                op(OpCode.Jump)
+            ]
+        }
+
+        if (ts.isContinueStatement(node) && node.label == null) {
+            let scopeCount = 0
+            const target = findAncient(node, parentMap, (node) => {
+                if ((scopes.get(node)?.size ?? 0) > 0) {
+                    scopeCount++
+                }
+
+                if (ts.isForStatement(node)) {
+                    return true
+                }
+
+                return false
+            })
+
+            if (target == null) {
+                throw new Error('cannot find continue target')
+            }
+
+            const nextNode = continueOps.get(target)
+
+            if (nextNode == null) {
+                throw new Error('did not get nextNode')
+            }
+
+            const forHasScope = (scopes.get(target)?.size ?? 0) !== 0
+
+            return [
+                ...new Array(forHasScope ? scopeCount - 1 : scopeCount).fill(0).map(it => op(OpCode.LeaveScope)),
                 op(OpCode.NodeOffset, 2, [nextNode]),
                 op(OpCode.Jump)
             ]

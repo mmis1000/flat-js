@@ -601,3 +601,16 @@ for (;;) {
 
 print(a)
 `, [3], printProvider)
+
+
+
+testRuntime('for continue', `
+
+for (let i = 0; i < 5; i++) {
+    if (i < 3) {
+        continue
+    }
+    print(i)
+}
+
+`, [3, 4], printProvider)
