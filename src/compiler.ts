@@ -41,6 +41,11 @@ export const enum SetFlag {
     Freeze = 2
 }
 
+export const enum InvokeType {
+    Apply,
+    Construct
+}
+
 type VariableDeclaration = {
     type: Exclude<VariableType, VariableType.Function>
 } | {
@@ -116,6 +121,8 @@ export const enum OpCode {
      * ```txt
      * Stack:
      *   this
+     *   function
+     *   InvokeType.Apply
      *   parameter * O
      *   parameter count: O
      *   parameter name * N - reversed
@@ -126,6 +133,24 @@ export const enum OpCode {
      *   ] * M
      *   variable count: M
      *   function type
+     * 
+     * or
+     *
+     * Stack:
+     *   newTarget
+     *   constructor
+     *   InvokeType.Construct
+     *   parameter * O
+     *   parameter count: O
+     *   parameter name * N - reversed
+     *   parameter name count: N
+     *   [
+     *     variable name
+     *     variable type
+     *   ] * M
+     *   variable count: M
+     *   function type
+     * 
      * ```
     */
     EnterFunction,
@@ -304,6 +329,16 @@ export const enum OpCode {
      * ```
      */
     Call,
+
+    /**
+     * ```txt
+     * Stack:
+     *   fn
+     *   argument * M
+     *   argument count - M
+     * ```
+     */
+    New,
 
     /**
      * ```txt
@@ -996,6 +1031,20 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     op(OpCode.CallValue)
                 ]
             }
+        }
+
+        if (ts.isNewExpression(node)) {
+            const self = extractQuote(node.expression)
+            const args = node.arguments?.map(a => generate(a, flag)).flat() ?? []
+
+            const leftValue = generate(self, flag)
+
+            return [
+                ...leftValue,
+                ...args,
+                op(OpCode.Literal, 2, [node.arguments?.length ?? 0]),
+                op(OpCode.New)
+            ]
         }
 
         if (ts.isArrayLiteralExpression(node)) {

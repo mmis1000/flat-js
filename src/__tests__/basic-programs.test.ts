@@ -660,3 +660,18 @@ for (i = 0; i < 5; i++) {
     print(a)
 }
 `, [3, 4], printProvider)
+
+
+
+testRuntime('new', `
+function a () {
+    this.b = 10
+}
+
+print((new a()).b)
+`, [10], printProvider)
+
+
+testRuntimeThrows('new method cause error', `
+new ({ a () {} }).a
+`, TypeError)

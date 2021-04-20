@@ -1,6 +1,6 @@
 "use strict"
 import ts from "typescript"
-import { FunctionTypes, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "./compiler"
+import { FunctionTypes, InvokeType, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "./compiler"
 
 
 // [START_HERE]
@@ -42,14 +42,16 @@ const enum Fields {
 
     function,
     self,
-    arguments
+    arguments,
+    invokeType
 }
 
 type FunctionFrame = {
     [Fields.type]: FrameType.Function
     [Fields.scopes]: Scope[]
     [Fields.valueStack]: any[]
-    [Fields.return]: number
+    [Fields.return]: number,
+    [Fields.invokeType]: InvokeType
 }
 
 type TryFrame = {
@@ -99,9 +101,12 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         [Fields.scopes]: scopes,
         [Fields.valueStack]: [
             self,
+            undefined,
+            InvokeType.Apply,
             ...args,
             args.length
         ],
+        [Fields.invokeType]: InvokeType.Apply,
         [Fields.return]: -1
     }
 
@@ -570,29 +575,59 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         parameters.unshift(currentFrame[Fields.valueStack].pop())
                     }
 
-                    // TODO: arguments and this/self reference
-                    const self = currentFrame[Fields.valueStack].pop()
+                    const invokeType = currentFrame[Fields.valueStack].pop()
 
-                    const scope: Scope = {}
-                    currentFrame[Fields.scopes].push(scope)
+                    if (invokeType === InvokeType.Apply) {
+                        // TODO: arguments and this/self reference
+                        const fn = currentFrame[Fields.valueStack].pop()
+                        const self = currentFrame[Fields.valueStack].pop()
 
+                        const scope: Scope = {}
+                        currentFrame[Fields.scopes].push(scope)
 
-                    switch (functionType) {
-                        case FunctionTypes.FunctionDeclaration:
-                        case FunctionTypes.FunctionExpression:
-                        case FunctionTypes.MethodDeclaration:
-                        case FunctionTypes.GetAccessor:
-                        case FunctionTypes.SetAccessor:
-                            defineVariable(scope, SpecialVariable.This, VariableType.Var)
-                            scope[SpecialVariable.This] = self
-                    }
+                        switch (functionType) {
+                            case FunctionTypes.FunctionDeclaration:
+                            case FunctionTypes.FunctionExpression:
+                            case FunctionTypes.MethodDeclaration:
+                            case FunctionTypes.GetAccessor:
+                            case FunctionTypes.SetAccessor:
+                                defineVariable(scope, SpecialVariable.This, VariableType.Var)
+                                scope[SpecialVariable.This] = self
+                        }
 
-                    for (let v of variables) {
-                        defineVariable(scope, v[Fields.name], v[Fields.type])
-                    }
+                        for (let v of variables) {
+                            defineVariable(scope, v[Fields.name], v[Fields.type])
+                        }
 
-                    for (let [index, name] of argumentNames.entries()) {
-                        scope[name] = parameters[index]
+                        for (let [index, name] of argumentNames.entries()) {
+                            scope[name] = parameters[index]
+                        }
+                    } else if (invokeType === InvokeType.Construct) {
+                        // FIXME:
+                        const fn = currentFrame[Fields.valueStack].pop()
+                        const newTarget = currentFrame[Fields.valueStack].pop()
+
+                        const scope: Scope = {}
+                        currentFrame[Fields.scopes].push(scope)
+
+                        switch (functionType) {
+                            case FunctionTypes.MethodDeclaration:
+                            case FunctionTypes.GetAccessor:
+                            case FunctionTypes.SetAccessor:
+                                throw new TypeError('- not a constructor')
+                            case FunctionTypes.FunctionDeclaration:
+                            case FunctionTypes.FunctionExpression:
+                                defineVariable(scope, SpecialVariable.This, VariableType.Var)
+                                scope[SpecialVariable.This] = Object.create(fn.prototype)
+                        }
+
+                        for (let v of variables) {
+                            defineVariable(scope, v[Fields.name], v[Fields.type])
+                        }
+
+                        for (let [index, name] of argumentNames.entries()) {
+                            scope[name] = parameters[index]
+                        }
                     }
                 }
                     break
@@ -704,9 +739,59 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             [Fields.return]: ptr,
                             [Fields.valueStack]: [
                                 self,
+                                fn,
+                                InvokeType.Apply,
                                 ...parameters,
                                 parameters.length
-                            ]
+                            ],
+                            [Fields.invokeType]: InvokeType.Apply
+                        }
+                        environments.add(newFrame)
+
+                        stack.push(newFrame)
+                        ptr = des[Fields.offset]
+                    }
+                }
+                    break
+                case OpCode.New: {
+                    const parameterCount: number = currentFrame[Fields.valueStack].pop()
+                    let parameters: any[] = []
+
+                    for (let i = 0; i < parameterCount; i++) {
+                        parameters.unshift(currentFrame[Fields.valueStack].pop())
+                    }
+
+                    let fn = currentFrame[Fields.valueStack].pop()
+
+                    while (bindInfo.has(fn)) {
+                        let newFn, newParameters
+
+                        const info0 = bindInfo.get(fn)
+                        const info = info0!
+                        newParameters = [...info[Fields.arguments], ...parameters]
+                        newFn = info[Fields.function]
+
+                        fn = environments.has(newFn) ? undefined : newFn
+                        parameters = newParameters
+                    }
+
+                    if (!functionDescriptors.has(fn)) {
+                        // extern
+                        currentFrame[Fields.valueStack].push(Reflect.construct(fn, parameters, fn))
+                    } else {
+                        const des = functionDescriptors.get(fn)!
+                        const newFrame: Frame = {
+                            [Fields.type]: FrameType.Function,
+                            [Fields.scopes]: [...des[Fields.scopes]],
+                            [Fields.return]: ptr,
+                            [Fields.valueStack]: [
+                                fn,
+                                fn,
+                                InvokeType.Construct,
+                                ...parameters,
+                                parameters.length
+                            ],
+                            [Fields.invokeType]: InvokeType.Construct
                         }
                         environments.add(newFrame)
 
@@ -728,14 +813,33 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     const returnAddr = (peak(stack) as FunctionFrame)[Fields.return]
 
+                    const functionFrame = peak(stack) as FunctionFrame
+
                     if (returnAddr < 0) {
                         // leave the whole function
-                        return result
+                        if (functionFrame[Fields.invokeType] === InvokeType.Apply) {
+                            return result
+                        } else {
+                            if (typeof result === 'function' || typeof result === 'object') {
+                                return result
+                            } else {
+                                return getValue(functionFrame, SpecialVariable.This)
+                            }
+                        }
                     }
 
                     stack.pop()
 
-                    peak(stack)[Fields.valueStack].push(result)
+                    if (functionFrame[Fields.invokeType] === InvokeType.Apply) {
+                        peak(stack)[Fields.valueStack].push(result)
+                    } else {
+                        if (typeof result === 'function' || typeof result === 'object') {
+                            peak(stack)[Fields.valueStack].push(result)
+                        } else {
+                            peak(stack)[Fields.valueStack].push(getValue(functionFrame, SpecialVariable.This))
+                        }
+                    }
+
                     ptr = returnAddr
                 }
                     break
