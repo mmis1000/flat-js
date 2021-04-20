@@ -4,10 +4,24 @@
     // 如需詳細資訊，請瀏覽: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+    {
+        "type": "node",
+        "request": "launch",
+        "name": "Test via NPM",
+        "runtimeExecutable": "npm",
+        "runtimeArgs": [
+            "run-script",
+            "test"
+        ],
+        "port": 9229,
+        "skipFiles": [
+            "<node_internals>/**"
+        ]
+    },
         {
             "type": "node",
             "request": "launch",
-            "name": "啟動程式",
+            "name": "啟動Main",
             "skipFiles": [
                 "<node_internals>/**"
             ],
