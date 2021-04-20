@@ -672,6 +672,18 @@ print((new a()).b)
 `, [10], printProvider)
 
 
+testRuntime('new with try catch', `
+function a () {
+    this.b = 10
+    try {
+        return
+    } catch (err) {}
+}
+
+print((new a()).b)
+`, [10], printProvider)
+
+
 testRuntimeThrows('new method cause error', `
 new ({ a () {} }).a
 `, TypeError)

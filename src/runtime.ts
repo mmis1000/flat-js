@@ -273,7 +273,15 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     } else {
                         stack.pop()
                         ptr = returnAddr
-                        peak(stack)[Fields.valueStack].push(value)
+                        if (
+                            frame[Fields.invokeType] === InvokeType.Apply
+                            || ( value !== null && typeof value === 'object')
+                            || typeof value === 'function'
+                        ) {
+                            peak(stack)[Fields.valueStack].push(value)
+                        } else {
+                            peak(stack)[Fields.valueStack].push(getValue(frame, SpecialVariable.This))
+                        }
                     }
                 }
                     break
