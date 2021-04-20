@@ -353,6 +353,32 @@ export const enum OpCode {
     /**
      * ```txt
      * Stack:
+     *   value
+     * ```
+     */
+    Typeof,
+
+    /**
+     * ```txt
+     * Stack:
+     *   env or object
+     *   name
+     * ```
+     */
+    TypeofReference,
+
+    /**
+     * ```txt
+     * Stack:
+     *   value left
+     *   value right
+     * ```
+     */
+    InstanceOf,
+
+    /**
+     * ```txt
+     * Stack:
      * ```
      */
     ArrayLiteral,
@@ -1367,6 +1393,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             ]
 
             switch (node.operatorToken.kind) {
+                case ts.SyntaxKind.InstanceOfKeyword:
+                    ops.push(op(OpCode.InstanceOf)); break;
                 case ts.SyntaxKind.PlusToken:
                     ops.push(op(OpCode.BPlus)); break;
                 case ts.SyntaxKind.MinusToken:
@@ -1401,6 +1429,22 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             }
 
             return ops
+        }
+
+        if (ts.isTypeOfExpression(node)) {
+            const unwrapped = extractQuote(node.expression)
+            if (ts.isIdentifier(unwrapped)) {
+                return [
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [unwrapped.text]),
+                    op(OpCode.TypeofReference)
+                ]
+            } else {
+                return [
+                    ...generate(node.expression, flag),
+                    op(OpCode.Typeof)
+                ]
+            }
         }
 
         if (ts.isPostfixUnaryExpression(node)) {

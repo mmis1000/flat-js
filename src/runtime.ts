@@ -940,6 +940,29 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     }
                 }
                     break;
+                case OpCode.Typeof: {
+                    const value = currentFrame[Fields.valueStack].pop()
+                    currentFrame[Fields.valueStack].push(typeof value)
+                }
+                    break
+                case OpCode.TypeofReference: {
+                    const name = currentFrame[Fields.valueStack].pop()
+                    const ctx = currentFrame[Fields.valueStack].pop()
+                    if (environments.has(ctx)) {
+                        const frame: Frame = ctx
+                        for (let i = frame[Fields.scopes].length - 1; i >= 0; i--) {
+                            if (Reflect.getOwnPropertyDescriptor(frame[Fields.scopes][i], name)) {
+                                currentFrame[Fields.valueStack].push(typeof frame[Fields.scopes][i][name]) 
+                                break command;
+                            }
+                        }
+                        currentFrame[Fields.valueStack].push('undefined') 
+                    } else {
+                        currentFrame[Fields.valueStack].push(typeof ctx[name])
+                    }
+                }
+                    break
+                case OpCode.InstanceOf:
                 case OpCode.BAmpersand:
                 case OpCode.BBar:
                 case OpCode.BCaret:
@@ -973,6 +996,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         [OpCode.BLessThanEquals]: (left: any, right: any) => left <= right,
                         [OpCode.BPlus]: (left: any, right: any) => left + right,
                         [OpCode.BMinus]: (left: any, right: any) => left - right,
+                        [OpCode.InstanceOf]: (left: any, right: any) => left instanceof right,
                     }
                     const result = ops[command](left, right)
                     currentFrame[Fields.valueStack].push(result)

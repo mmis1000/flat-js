@@ -687,3 +687,23 @@ print((new a()).b)
 testRuntimeThrows('new method cause error', `
 new ({ a () {} }).a
 `, TypeError)
+
+
+testRuntime('instance of', `
+function A () {}
+function B () {}
+
+print(new A instanceof A)
+print(new B instanceof B)
+print(new A instanceof Object)
+print(new B instanceof Object)
+print(new A instanceof B)
+`, [true, true, true, true, false], printProvider)
+
+
+testRuntime('typeof', `
+print(typeof 'string')
+print(typeof 0)
+print(typeof true)
+print(typeof notExist)
+`, ['string', 'number', 'boolean', 'undefined'], printProvider)
