@@ -707,3 +707,9 @@ print(typeof 0)
 print(typeof true)
 print(typeof notExist)
 `, ['string', 'number', 'boolean', 'undefined'], printProvider)
+
+
+testRuntimeThrows('typeof TDZ', `
+print(typeof val)
+let val
+`, ReferenceError)
