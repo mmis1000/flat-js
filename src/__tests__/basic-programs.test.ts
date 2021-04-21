@@ -143,6 +143,12 @@ testRuntime('compare 0 <= 1', 'if (0 <= 1) { print(1) } else { print(0) }', [1],
 
 testRuntime('1 + 2', 'print(1 + 2)', [3], printProvider)
 testRuntime('1 - 2', 'print(1 - 2)', [-1], printProvider)
+testRuntime('1 * 2', 'print(1 * 2)', [2], printProvider)
+testRuntime('1 / 2', 'print(1 / 2)', [0.5], printProvider)
+testRuntime('3 % 2', 'print(3 % 2)', [1], printProvider)
+testRuntime('1 != "1"', 'print(1 != "1")', [false], printProvider)
+testRuntime('1 !== "1"', 'print(1 !== "1")', [true], printProvider)
+testRuntime('"a" in { a: 0 }', 'print("a" in { a: 0 })', [true], printProvider)
 testRuntime('1 & 2', 'print(1 & 2)', [0], printProvider)
 testRuntime('1 | 2', 'print(1 | 2)', [3], printProvider)
 testRuntime('1 ^ 2', 'print(1 ^ 2)', [3], printProvider)
@@ -177,6 +183,18 @@ testRuntime('i-- before', 'let i = { a: 1 }; print(i.a--); print(i.a)', [1, 0], 
 testRuntimeThrows('undefined i++', 'i++;', ReferenceError, printProvider)
 testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
 testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', ReferenceError, printProvider)
+
+testRuntime(
+    'prefix unary expressions', `
+        const a = '1'
+        print(+a)
+        print(-a)
+        print(!a)
+        print(~a)
+    `,
+    [1, -1, false, -2],
+    printProvider
+)
 
 testRuntime('for let', `
 const fns = []
@@ -671,6 +689,15 @@ function a () {
 print((new a()).b)
 `, [10], printProvider)
 
+testRuntime('new with bind', `
+function a (val) {
+    this.b = val
+}
+
+var b = a.bind(null, 10)
+
+print((new b()).b)
+`, [10], printProvider)
 
 testRuntime('new with try catch', `
 function a () {
@@ -743,3 +770,51 @@ testRuntime('regexp', `
 print(/aaa\\ubbb/g.source)
 print(/aaa\\ubbb/g.flags)
 `, ['aaa\\ubbb', 'g'], printProvider)
+
+
+testRuntime('+=', `
+var a = 0
+a += 2
+
+print(a)
+
+var b = {}
+Object.defineProperty(b, 'a', {
+    set (v) {},
+    get () { return 0}
+})
+
+print(b.a += 2)
+`, [2, 2], printProvider)
+
+testRuntime('-=', `
+var a = 0
+a -= 2
+print(a)
+
+var b = {}
+Object.defineProperty(b, 'a', {
+    set (v) {},
+    get () { return 0}
+})
+
+print(b.a -= 2)
+`, [-2, -2], printProvider)
+
+testRuntime('++variable', `
+var a = 0
+print(++a, a)
+`, [1, 1], printProvider)
+
+testRuntime('--variable', `
+var a = 1
+print(--a, a)
+`, [0, 0], printProvider)
+
+testRuntime('delete', `
+var a = { b: 1, c: 1 }
+print('b' in a, 'c' in a)
+delete a.b
+delete a['c']
+print('b' in a, 'c' in a)
+`, [true, true, false, false], printProvider)

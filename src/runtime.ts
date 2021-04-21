@@ -246,6 +246,20 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             }
         }
     }
+    const setValue = (ctx: any, name: string, value: any) => {
+        if (!environments.has(ctx)) {
+            return (ctx[name] = value)
+        } else {
+            const env: Frame = ctx
+            const scope = findScope(env, name)
+
+            if (scope) {
+                return (scope[name] = value)
+            } else {
+                throw new ReferenceError(name + is_not_defined)
+            }
+        }
+    }
 
     while (ptr >= 0 && ptr < program.length) {
         const command: OpCode = read()
@@ -469,6 +483,27 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     } else /* if (command === OpCode.SetKeepCtx) */ {
                         currentFrame[Fields.valueStack].push(ctx)
                     }
+                }
+                    break;
+                // Assign and update
+                case OpCode.BPlusEqual:
+                case OpCode.BMinusEqual: {
+                    const rightVal = currentFrame[Fields.valueStack].pop()
+                    const name = currentFrame[Fields.valueStack].pop()
+                    const ctx = currentFrame[Fields.valueStack].pop()
+
+                    const leftValue = getValue(ctx, name)
+                    const commandCurrent = command
+               
+                    const exprs: Record<typeof commandCurrent, (a: any, b:any) => any> = {
+                        [OpCode.BPlusEqual]: (a, b) => a + b,
+                        [OpCode.BMinusEqual]: (a, b) => a - b
+                    }
+
+                    const r = exprs[command](leftValue, rightVal)
+                    setValue(ctx, name, r)
+
+                    currentFrame[Fields.valueStack].push(r)
                 }
                     break;
                 case OpCode.DefineKeepCtx: {
@@ -1015,7 +1050,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 case OpCode.BPlus:
                 case OpCode.BIn:
                 case OpCode.BAsterisk:
-                case OpCode.BSlash: {
+                case OpCode.BSlash: 
+                case OpCode.BPercent: {
                     const right = currentFrame[Fields.valueStack].pop()
                     const left = currentFrame[Fields.valueStack].pop()
                     const ops = {
@@ -1038,7 +1074,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         [OpCode.InstanceOf]: (left: any, right: any) => left instanceof right,
                         [OpCode.BIn]: (left: any, right: any) => left in right,
                         [OpCode.BAsterisk]: (left: any, right: any) => left * right,
-                        [OpCode.BSlash]: (left: any, right: any) => left / right
+                        [OpCode.BSlash]: (left: any, right: any) => left / right,
+                        [OpCode.BPercent]: (left: any, right: any) => left % right
                     }
                     const result = ops[command](left, right)
                     currentFrame[Fields.valueStack].push(result)
@@ -1071,7 +1108,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     break;
                 case OpCode.PrefixUnaryPlus:
                 case OpCode.PrefixUnaryMinus: 
-                case OpCode.PrefixExclamation: {
+                case OpCode.PrefixExclamation:
+                case OpCode.PrefixTilde: {
                     const value = currentFrame[Fields.valueStack].pop()
                     let result
                     switch (command) {
@@ -1084,9 +1122,33 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         case OpCode.PrefixExclamation:
                             result = !value
                             break
+                        case OpCode.PrefixTilde:
+                            result = ~value
+                            break
                     }
                     currentFrame[Fields.valueStack].push(result)
                 }
+                    break
+                // Prefix updates
+                case OpCode.PrefixPlusPlus:
+                case OpCode.PrefixMinusMinus: {
+                    const name = currentFrame[Fields.valueStack].pop()
+                    const ctx = currentFrame[Fields.valueStack].pop()
+
+                    const currentValue = getValue(ctx, name)
+                    const newVal = command === OpCode.PrefixPlusPlus ? currentValue + 1 : currentValue - 1
+                    setValue(ctx, name, newVal)
+
+                    // Just don't care and push the new value
+                    currentFrame[Fields.valueStack].push(newVal)
+                }
+                    break;
+                case OpCode.Delete: {
+                    const name = currentFrame[Fields.valueStack].pop()
+                    const ctx = currentFrame[Fields.valueStack].pop()
+                    currentFrame[Fields.valueStack].push(delete ctx[name])
+                }
+                    break
                 case OpCode.Debugger:
                     debugger;
                     break;

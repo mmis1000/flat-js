@@ -483,6 +483,21 @@ export const enum OpCode {
     BAsterisk,
     /** / */
     BSlash,
+    /** % */
+    BPercent,
+
+    // assign and update
+    /** += */
+    BPlusEqual,
+    /** -= */
+    BMinusEqual,
+
+    /**
+     * Stack:
+     *   env or object
+     *   name
+     */
+    Delete,
     /** 
      * ```txt
      * a--
@@ -516,6 +531,11 @@ export const enum OpCode {
     PrefixUnaryPlus,
     PrefixUnaryMinus,
     PrefixExclamation,
+    PrefixTilde,
+
+    PrefixPlusPlus,
+    PrefixMinusMinus,
+
     /**
      * debugger;
      */
@@ -920,7 +940,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             ]
         }
 
-        throw new Error('not support')
+        throw new Error('not supported left node: ' + getNameOfKind(rawNode.kind))
     }
     function generate(node: ts.Node, flag: number): Segment {
         switch (node.kind) {
@@ -1097,7 +1117,6 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             }
         }
 
-
         if (ts.isPrefixUnaryExpression(node)) {
             if (ts.isNumericLiteral(node.operand)) {
                 if (node.operator === ts.SyntaxKind.MinusToken) {
@@ -1111,6 +1130,23 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 }
             }
 
+            // Prefix update
+            switch (node.operator) {
+                case ts.SyntaxKind.PlusPlusToken:
+                    return [
+                        ...generateLeft(node.operand, flag),
+                        op(OpCode.PrefixPlusPlus)
+                    ]
+                case ts.SyntaxKind.MinusMinusToken:
+                    return [
+                        ...generateLeft(node.operand, flag),
+                        op(OpCode.PrefixMinusMinus)
+                    ]
+                default:
+                    const nothing = node.operator
+            }
+
+            // Unary
             const expr = generate(node.operand, flag)
             switch (node.operator) {
                 case ts.SyntaxKind.PlusToken:
@@ -1119,6 +1155,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     return [...expr, op(OpCode.PrefixUnaryMinus)]
                 case ts.SyntaxKind.ExclamationToken:
                     return [...expr, op(OpCode.PrefixExclamation)]
+                case ts.SyntaxKind.TildeToken:
+                    return [...expr, op(OpCode.PrefixTilde)]
                 default:
                     throw new Error('unsupported operator ' + ts.SyntaxKind[node.operator])
             }
@@ -1461,7 +1499,10 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
 
         // Assignments
         if (ts.isBinaryExpression(node)) {
-            switch (node.operatorToken.kind) {
+            const kind = node.operatorToken.kind
+            switch (kind) {
+                case ts.SyntaxKind.PlusEqualsToken:
+                case ts.SyntaxKind.MinusEqualsToken:
                 case ts.SyntaxKind.EqualsToken:
                     const left = extractQuote(node.left)
                     if (
@@ -1472,7 +1513,12 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                         return [
                             ...generateLeft(node.left, flag),
                             ...generate(node.right, flag),
-                            op(OpCode.Set)
+                            op(
+                                kind === ts.SyntaxKind.EqualsToken ? OpCode.Set:
+                                kind === ts.SyntaxKind.PlusEqualsToken ? OpCode.BPlusEqual:
+                                kind === ts.SyntaxKind.MinusEqualsToken ? OpCode.BMinusEqual: 
+                                abort('Why Am I here?')
+                            )
                         ]
                     } else {        
                         return [
@@ -1533,6 +1579,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     ops.push(op(OpCode.BAsterisk)); break;
                 case ts.SyntaxKind.SlashToken:
                     ops.push(op(OpCode.BSlash)); break;
+                case ts.SyntaxKind.PercentToken:
+                    ops.push(op(OpCode.BPercent)); break;
                 default:
                     const remain = node.operatorToken.kind
                     throw new Error('unknown token ' + getNameOfKind(remain))
@@ -1775,6 +1823,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     return true
                 }
 
+                if (ts.isTryStatement(node)) abort('Not support break in try catch yet')
+
                 return false
             })
             if (target == null) {
@@ -1801,6 +1851,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 if (continueOps.has(node)) {
                     return true
                 }
+
+                if (ts.isTryStatement(node)) abort('Not support continue in try catch yet')
 
                 return false
             })
@@ -1845,6 +1897,27 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 ...head,
                 ...body,
                 ...exit,
+                nextOp
+            ]
+        }
+
+        if (ts.isDoStatement(node)) {
+            const nextOp = op(OpCode.Nop, 0)
+            nextOps.set(node, nextOp)
+
+            const continueOp = op(OpCode.Nop, 0)
+            continueOps.set(node, continueOp)
+
+            const body = generate(node.statement, flag)
+            const tail = [
+                op(OpCode.NodeOffset, 2, [body[0]]),
+                ...generate(node.expression, flag),
+                op(OpCode.JumpIf)
+            ]
+            return [
+                continueOp,
+                ...body,
+                ...tail,
                 nextOp
             ]
         }
@@ -1993,6 +2066,23 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 ...leave,
                 nextOp
             ]
+        }
+
+        if (ts.isDeleteExpression(node)) {
+            const unwrapped = extractQuote(node.expression)
+            if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
+                return [
+                    ...generateLeft(node.expression, flag),
+                    op(OpCode.Delete)
+               ]
+            } else {
+                // This is not delete-able and we don't care
+                return [
+                    ...generate(node.expression, flag),
+                    op(OpCode.Pop),
+                    op(OpCode.Literal, 2, [true])
+                ]
+            }
         }
 
         throw new Error(`Unknown node ${getNameOfKind(node.kind)}`)
