@@ -435,6 +435,15 @@ export const enum OpCode {
      */
     ObjectLiteral,
 
+    /**
+     * ```txt
+     * Stack:
+     *   Source
+     *   Flags
+     * ```
+     */
+    RegexpLiteral,
+
     // Binary Operations
     /** + */
     BPlus,
@@ -1195,6 +1204,16 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             }
 
             return res
+        }
+
+        if (ts.isRegularExpressionLiteral(node)) {
+            const source = node.text.replace(/^\/(.*)\/(\w*)$/, '$1')
+            const flags = node.text.replace(/^\/(.*)\/(\w*)$/, '$2')
+            return [
+                op(OpCode.Literal, 2, [source]),
+                op(OpCode.Literal, 2, [flags]),
+                op(OpCode.RegexpLiteral)
+            ]
         }
 
         if (ts.isForStatement(node)) {

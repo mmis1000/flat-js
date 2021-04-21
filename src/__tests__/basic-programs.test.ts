@@ -738,3 +738,8 @@ for (const k in a) {
     k = 0
 }
 `, TypeError)
+
+testRuntime('regexp', `
+print(/aaa\\ubbb/g.source)
+print(/aaa\\ubbb/g.flags)
+`, ['aaa\\ubbb', 'g'], printProvider)

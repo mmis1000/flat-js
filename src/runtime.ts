@@ -14,6 +14,7 @@ const isSmallNumber = (a: any): a is number => {
 const CALL = Function.prototype.call
 const APPLY = Function.prototype.apply
 const BIND = Function.prototype.bind
+const REGEXP = RegExp
 
 const enum FrameType {
     Function,
@@ -439,6 +440,12 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     break
                 case OpCode.UndefinedLiteral:
                     currentFrame[Fields.valueStack].push(undefined)
+                    break
+                case OpCode.RegexpLiteral: {
+                    const flags = currentFrame[Fields.valueStack].pop()
+                    const source = currentFrame[Fields.valueStack].pop()
+                    currentFrame[Fields.valueStack].push(new REGEXP(source, flags))
+                }
                     break
                 case OpCode.Set:
                 case OpCode.SetKeepCtx: {
