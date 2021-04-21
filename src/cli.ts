@@ -28,11 +28,11 @@ async function main () {
     const content = await fs.readFile(filename, { encoding: 'utf-8' })
     const contentMinimized = noMinimize ? content : uglify.minify(content).code
 
-    if (debugMode) {
+    if (debugMode && !noMinimize) {
         console.error(contentMinimized)
     }
 
-    const [programDataRaw, textDataRaw] = compile(contentMinimized, debugMode)
+    const [programDataRaw, textDataRaw] = compile(contentMinimized, debugMode, debugMode)
     const textData = JSON.stringify(textDataRaw)
     const programData = Buffer.from(new Uint32Array(programDataRaw).buffer).toString('base64')
 

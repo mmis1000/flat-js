@@ -570,7 +570,8 @@ type Op<Code extends OpCode = OpCode> = {
     length: number
     preData: any[]
     data: number[]
-    offset: number
+    offset: number,
+    source?: { start: number, end: number }
 }
 
 type Segment = Op[]
@@ -903,7 +904,7 @@ function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
 const nextOps = new Map<ts.Node, Op>()
 const continueOps = new Map<ts.Node, Op>()
 
-function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMap): Segment {
+function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMap, withPos = false): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
 
     function extractQuote(node: ts.Node) {
@@ -914,6 +915,25 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
         }
     }
     function generateLeft(node: ts.Node, flag: number): Segment {
+        const res = generateLeft_(node, flag)
+
+        if (withPos) {
+            for (const op of res) {
+                if (
+                    op.source == null
+                    ||op.source.end - op.source.start > node.end - node.pos
+                ) {
+                    op.source = {
+                        start: node.pos,
+                        end: node.end
+                    }
+                }
+            }
+        }
+
+        return res
+    }
+    function generateLeft_(node: ts.Node, flag: number): Segment {
         const rawNode = extractQuote(node)
 
         if (rawNode.kind === ts.SyntaxKind.ThisKeyword) {
@@ -947,6 +967,25 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
         throw new Error('not supported left node: ' + getNameOfKind(rawNode.kind))
     }
     function generate(node: ts.Node, flag: number): Segment {
+        const res = generate_(node, flag)
+
+        if (withPos) {
+            for (const op of res) {
+                if (
+                    op.source == null
+                    ||op.source.end - op.source.start > node.end - node.pos
+                ) {
+                    op.source = {
+                        start: node.pos,
+                        end: node.end
+                    }
+                }
+            }
+        }
+
+        return res
+    }
+    function generate_(node: ts.Node, flag: number): Segment {
         switch (node.kind) {
             case ts.SyntaxKind.TrueKeyword:
                 return [op(OpCode.Literal, 2, [true])]
@@ -2151,11 +2190,27 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
     entry.push(op(OpCode.EnterFunction))
 
 
-    return [
+    const results = [
         ...entry,
         ...functionDeclarationNodes,
         ...bodyNodes
     ]
+
+    if (withPos) {
+        for (const op of results) {
+            if (
+                op.source == null
+                ||op.source.end - op.source.start > node.end - node.pos
+            ) {
+                op.source = {
+                    start: node.pos,
+                    end: node.end
+                }
+            }
+        }
+    }
+
+    return results
 }
 
 function genOffset(nodes: Segment) {
@@ -2219,14 +2274,13 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
     }
 }
 
-export function compile(src: string, debug = false) {
+export function compile(src: string, debug = false, range = false) {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
     const scopeChild: ScopeChild = new Map()
 
     let sourceNode = ts.createSourceFile('aaa.ts', src, ts.ScriptTarget.ESNext, undefined, ts.ScriptKind.TS)
-
 
     markParent(sourceNode, parentMap)
     searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
@@ -2238,7 +2292,7 @@ export function compile(src: string, debug = false) {
     const functionToSegment = new Map<ts.Node, Segment>()
 
     for (let item of functions) {
-        const generated = generateSegment(item, scopes, parentMap)
+        const generated = generateSegment(item, scopes, parentMap, range)
         program.push(generated)
         functionToSegment.set(item, generated)
     }
@@ -2249,6 +2303,17 @@ export function compile(src: string, debug = false) {
 
     // @ts-expect-error
     if (debug && typeof OpCode !== 'undefined') {
+        const map = new Map<number, [number, number]>()
+        if (range) {
+            const lines = src.split(/\r?\n/g)
+            let current = 0
+            for (let [row, line] of lines.entries()) {
+                for (let col = 0; col < line.length + 1; col++) {
+                    map.set(current++, [row, col])
+                }
+            }
+            // current += 2
+        }
         console.error(flattened.map(it => {
             // @ts-expect-error
             let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
@@ -2257,6 +2322,9 @@ export function compile(src: string, debug = false) {
                     ? getNameOfKind(it.preData[0].kind)
                     : JSON.stringify(it.preData[0])
                 : JSON.stringify(it.preData[0])
+            if (range) {
+                res += ' ' + (it.source ? `@${map.get(it.source.start)}-${map.get(it.source.end)}` : '')
+            }
             return res
         }).join('\r\n'))
     }
