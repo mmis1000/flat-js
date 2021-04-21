@@ -631,6 +631,41 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     const invokeType = currentFrame[Fields.valueStack].pop()
 
+                    const getArgumentObject = (scope: Record<any, any>, callee: any) => {
+                        const obj: Record<string, any> = {}
+                        const bindingLength = Math.min(argumentNameCount, parameterCount)
+
+                        for (let i = 0; i < parameterCount; i++) {
+                            if (i < bindingLength) {
+                                Object.defineProperty(obj, i, {
+                                    enumerable: true,
+                                    configurable: true,
+                                    get () {
+                                        return scope[argumentNames[i]]
+                                    },
+                                    set (v) {
+                                        scope[argumentNames[i]] = v
+                                    }
+                                })
+                            } else {
+                                obj[i] = parameters[i]
+                            }
+                        }
+
+                        Object.defineProperty(obj, 'length', {
+                            enumerable: false,
+                            configurable: true,
+                            value: parameterCount
+                        })
+                        Object.defineProperty(obj, 'callee', {
+                            enumerable: false,
+                            configurable: true,
+                            value: callee
+                        })
+
+                        return obj
+                    }
+
                     if (invokeType === InvokeType.Apply) {
                         // TODO: arguments and this/self reference
                         const fn = currentFrame[Fields.valueStack].pop()
@@ -647,6 +682,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             case FunctionTypes.SetAccessor:
                                 defineVariable(scope, SpecialVariable.This, VariableType.Var)
                                 scope[SpecialVariable.This] = self
+                                scope['arguments'] = getArgumentObject(scope, fn)
                         }
 
                         for (let v of variables) {
@@ -673,6 +709,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             case FunctionTypes.FunctionExpression:
                                 defineVariable(scope, SpecialVariable.This, VariableType.Var)
                                 scope[SpecialVariable.This] = Object.create(fn.prototype)
+                                scope['arguments'] = getArgumentObject(scope, fn)
                         }
 
                         for (let v of variables) {
