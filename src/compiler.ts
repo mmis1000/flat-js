@@ -7,7 +7,9 @@ export const isSmallNumber = (a: any): a is number => {
 
 export const enum SpecialVariable {
     This = '[this]',
-    SwitchValue = '[switch]'
+    SwitchValue = '[switch]',
+    LoopIterator = '[iter]',
+    IteratorEntry = '[entry]'
 }
 
 export const enum StatementFlag {
@@ -65,6 +67,10 @@ type ParentMap = Map<ts.Node, { key: string, node: ts.Node }>
 type Scopes = Map<ts.Node, Map<string, VariableDeclaration>>
 type ScopeChild = Map<ts.Node, Set<ts.Node>>
 type Functions = Set<VariableRoot>
+
+const abort = (msg: string): never => {
+    throw new Error(msg)
+}
 
 export const enum OpCode {
     Nop,
@@ -379,6 +385,46 @@ export const enum OpCode {
     /**
      * ```txt
      * Stack:
+     *   value
+     * Result:
+     *   iterator
+     * ```
+     */
+    GetPropertyIterator,
+
+    /**
+     * ```txt
+     * Stack:
+     *   iterator
+     * Result:
+     *   entry
+     * ```
+     */
+    NextEntry,
+
+    /**
+     * ```txt
+     * Stack:
+     *   iterator entry
+     * Result:
+     *   boolean - done
+     * ```
+     */
+    EntryIsDone,
+
+    /**
+     * ```txt
+     * Stack:
+     *   iterator entry
+     * Result:
+     *   value
+     * ```
+     */
+    EntryGetValue,
+
+    /**
+     * ```txt
+     * Stack:
      * ```
      */
     ArrayLiteral,
@@ -600,6 +646,7 @@ function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, functions: 
                     break // this is the body of function, method, constructor
                 }
             case ts.SyntaxKind.ForStatement:
+            case ts.SyntaxKind.ForInStatement:
 
             case ts.SyntaxKind.SwitchStatement:
             case ts.SyntaxKind.CaseBlock:
@@ -638,6 +685,16 @@ function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Functions
                     }
                 )
             }
+        }
+
+        if (ts.isForInStatement(node)) {
+            scopes.get(node)!.set(SpecialVariable.LoopIterator, {
+                type: VariableType.Var
+            })
+
+            scopes.get(node)!.set(SpecialVariable.IteratorEntry, {
+                type: VariableType.Var
+            })
         }
 
         if (ts.isFunctionDeclaration(node)) {
@@ -1715,6 +1772,144 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 ...new Array(forHasScope ? scopeCount - 1 : scopeCount).fill(0).map(it => op(OpCode.LeaveScope)),
                 op(OpCode.NodeOffset, 2, [nextNode]),
                 op(OpCode.Jump)
+            ]
+        }
+
+        if (ts.isForInStatement(node)) {
+            const hasVariable = ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & ts.NodeFlags.BlockScoped)
+            const variableIsConst =
+                ts.isVariableDeclarationList(node.initializer)
+                    ? (node.initializer.flags & ts.NodeFlags.Const)
+                    : 0
+            const variableName =
+                ts.isVariableDeclarationList(node.initializer)
+                    ? ts.isIdentifier(node.initializer.declarations[0].name)
+                        ? node.initializer.declarations[0].name.text
+                        : abort('Not a identifier')
+                    : ''
+
+            const enter = generateEnterScope(node, scopes)
+            const leave = generateLeaveScope(node)
+
+            const getLhs = () => {
+                if (ts.isVariableDeclarationList(node.initializer)) {
+                    return generateLeft(node.initializer.declarations[0].name, flag)
+                } else {
+                    return generateLeft(node.initializer, flag)
+                }
+            }
+
+            const head = [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                ...[
+                    ...generate(node.expression, flag),
+                    op(OpCode.GetPropertyIterator),
+                ],
+                op(OpCode.Set),
+                op(OpCode.Pop)
+            ]
+
+            const condition = [
+                op(OpCode.NodeOffset, 2, [leave[0]]),
+                ...[
+                    ...[
+                        op(OpCode.GetRecord),
+                        op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+                        ...[
+                            op(OpCode.GetRecord),
+                            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                            op(OpCode.Get),
+                            op(OpCode.NextEntry)
+                        ],
+                        op(OpCode.Set),
+                    ],
+                    op(OpCode.EntryIsDone),
+                ],
+                op(OpCode.JumpIf),
+
+                ...getLhs(),
+
+                ...(hasVariable
+                    ?[
+                        op(OpCode.DeTDZ)
+                    ]
+                    :[]
+                ),
+
+                ...[
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+                    op(OpCode.Get),
+                    op(OpCode.EntryGetValue),
+                ],
+
+                op(OpCode.Set),
+                op(OpCode.Pop),
+
+                ...(variableIsConst
+                    ?[
+                        ...getLhs(),
+                        op(OpCode.FreezeVariable),
+                        op(OpCode.Pop),
+                        op(OpCode.Pop)
+                    ]
+                    :[]
+                ),
+            ]
+
+            const body = generate(node.statement, flag)
+
+            const continueOrLeave = hasVariable ? [
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.Get),
+
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+
+                op(OpCode.Literal, 2, [variableName]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [variableName]),
+                op(OpCode.Get),
+
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+                
+                // there is alway two variable (the iterator and initializer) in for in without destructing statement
+                op(OpCode.Literal, 2, [2]),
+                op(OpCode.LeaveScope),
+                ...generateEnterScope(node, scopes),
+                op(OpCode.GetRecord),
+                op(OpCode.SetMultiple),
+
+                op(OpCode.NodeOffset, 2, [headOf(condition)]),
+                op(OpCode.Jump)
+            ]
+            :[
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.Get),
+
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+                // there is alway one variable (the iterator and initializer) in for in without destructing statement
+                op(OpCode.Literal, 2, [1]),
+                op(OpCode.LeaveScope),
+                ...generateEnterScope(node, scopes),
+                op(OpCode.GetRecord),
+                op(OpCode.SetMultiple),
+
+                op(OpCode.NodeOffset, 2, [headOf(condition)]),
+                op(OpCode.Jump)
+            ]
+
+            return [
+                ...enter,
+                ...head,
+                ...condition,
+                ...body,
+                ...continueOrLeave,
+                ...leave
             ]
         }
 

@@ -962,6 +962,31 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     }
                 }
                     break
+                case OpCode.GetPropertyIterator: {
+                    const value = currentFrame[Fields.valueStack].pop()
+                    const iterator = (function * (value: any) {
+                        for (const key in value) {
+                            yield key
+                        }
+                    })(value)
+                    currentFrame[Fields.valueStack].push(iterator)
+                }
+                    break
+                case OpCode.NextEntry: {
+                    const iterator: Iterator<any> = currentFrame[Fields.valueStack].pop()
+                    currentFrame[Fields.valueStack].push(iterator.next())
+                }
+                    break
+                case OpCode.EntryIsDone: {
+                    const entry: IteratorResult<any> = currentFrame[Fields.valueStack].pop()
+                    currentFrame[Fields.valueStack].push(entry.done)
+                }
+                    break
+                case OpCode.EntryGetValue: {
+                    const entry: IteratorResult<any> = currentFrame[Fields.valueStack].pop()
+                    currentFrame[Fields.valueStack].push(entry.value)
+                }
+                    break
                 case OpCode.InstanceOf:
                 case OpCode.BAmpersand:
                 case OpCode.BBar:

@@ -713,3 +713,28 @@ testRuntimeThrows('typeof TDZ', `
 print(typeof val)
 let val
 `, ReferenceError)
+
+
+testRuntime('for in', `
+var a = { a: 1, b: 2}
+for (var k in a) {
+    print(k)
+}
+`, ['a', 'b'], printProvider)
+
+testRuntime('for in let', `
+var a = { a: 1, b: 2}
+var fns = []
+for (let k in a) {
+    fns.push(() => k)
+}
+
+fns.forEach(it => print(it()))
+`, ['a', 'b'], printProvider)
+
+testRuntimeThrows('for in const', `
+var a = { a: 1, b: 2}
+for (const k in a) {
+    k = 0
+}
+`, TypeError)
