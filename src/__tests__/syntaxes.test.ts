@@ -31,7 +31,10 @@ const syntaxes = [
     ['ObjectLiteral String Key', '({ "a": {} })'],
     ['ObjectLiteral Number Key', '({ 0: {} })'],
     ['BinaryExpression Comma', '(0, 1)'],
-    ['BinaryExpression - + ^ | || & && > 1 >> 1 >>> < << >= <= == ===', '1 - 1 + 1 ^ 1 | 1 || 1 & 1 && 1 > 1 >> 1 >>> 1 < 1 << 1 >= 1 <= 1 == 1 === 1'],
+    [
+        'BinaryExpression - + ^ | || & && > 1 >> 1 >>> < << >= <= == === != !== * / in ',
+        '1 - 1 + 1 ^ 1 | 1 || 1 & 1 && 1 > 1 >> 1 >>> 1 < 1 << 1 >= 1 <= 1 == 1 === 1 != 1 !== 1 * 1 / 1 in 1'
+    ],
     ['PostfixUnaryExpression a++', 'a++'],
     ['PostfixUnaryExpression a--', 'a--'],
     ['DebuggerStatement', 'debugger'],

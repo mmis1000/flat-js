@@ -445,6 +445,8 @@ export const enum OpCode {
     RegexpLiteral,
 
     // Binary Operations
+    /** in */
+    BIn,
     /** + */
     BPlus,
     /** - */
@@ -473,6 +475,14 @@ export const enum OpCode {
     BEqualsEquals,
     /** === */
     BEqualsEqualsEquals,
+    /** != */
+    BExclamationEquals,
+    /** !== */
+    BExclamationEqualsEquals,
+    /** * */
+    BAsterisk,
+    /** / */
+    BSlash,
     /** 
      * ```txt
      * a--
@@ -503,6 +513,9 @@ export const enum OpCode {
      * ```
      */
     PostFixPlusPLus,
+    PrefixUnaryPlus,
+    PrefixUnaryMinus,
+    PrefixExclamation,
     /**
      * debugger;
      */
@@ -1091,12 +1104,23 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     return [
                         op(OpCode.Literal, 2, [-Number(node.operand.text)]),
                     ]
-                }
-                if (node.operator === ts.SyntaxKind.PlusToken) {
+                } else if (node.operator === ts.SyntaxKind.PlusToken) {
                     return [
                         op(OpCode.Literal, 2, [+Number(node.operand.text)]),
                     ]
                 }
+            }
+
+            const expr = generate(node.operand, flag)
+            switch (node.operator) {
+                case ts.SyntaxKind.PlusToken:
+                    return [...expr, op(OpCode.PrefixUnaryPlus)]
+                case ts.SyntaxKind.MinusToken:
+                    return [...expr, op(OpCode.PrefixUnaryMinus)]
+                case ts.SyntaxKind.ExclamationToken:
+                    return [...expr, op(OpCode.PrefixExclamation)]
+                default:
+                    throw new Error('unsupported operator ' + ts.SyntaxKind[node.operator])
             }
         }
 
@@ -1499,9 +1523,19 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     ops.push(op(OpCode.BEqualsEquals)); break;
                 case ts.SyntaxKind.EqualsEqualsEqualsToken:
                     ops.push(op(OpCode.BEqualsEqualsEquals)); break;
+                case ts.SyntaxKind.ExclamationEqualsToken:
+                    ops.push(op(OpCode.BExclamationEquals)); break;
+                case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+                    ops.push(op(OpCode.BExclamationEqualsEquals)); break;
+                case ts.SyntaxKind.InKeyword:
+                    ops.push(op(OpCode.BIn)); break;
+                case ts.SyntaxKind.AsteriskToken:
+                    ops.push(op(OpCode.BAsterisk)); break;
+                case ts.SyntaxKind.SlashToken:
+                    ops.push(op(OpCode.BSlash)); break;
                 default:
                     const remain = node.operatorToken.kind
-                    throw new Error('unknown token')
+                    throw new Error('unknown token ' + getNameOfKind(remain))
             }
 
             return ops
@@ -1737,11 +1771,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     scopeCount++
                 }
 
-                if (ts.isForStatement(node)) {
-                    return true
-                }
-
-                if (ts.isSwitchStatement(node)) {
+                if (nextOps.has(node)) {
                     return true
                 }
 
@@ -1768,7 +1798,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                     scopeCount++
                 }
 
-                if (ts.isForStatement(node)) {
+                if (continueOps.has(node)) {
                     return true
                 }
 
@@ -1793,8 +1823,39 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 op(OpCode.Jump)
             ]
         }
+        if (ts.isWhileStatement(node)) {
+            const nextOp = op(OpCode.Nop, 0)
+            nextOps.set(node, nextOp)
+
+            const continueOp = op(OpCode.Nop, 0)
+            continueOps.set(node, continueOp)
+
+            const exit = [
+                op(OpCode.Nop, 0)
+            ]
+            const head = [
+                op(OpCode.NodeOffset, 2, [exit]),
+                ...generate(node.expression, flag),
+                op(OpCode.JumpIfNot)
+            ]
+            const body = generate(node.statement, flag)
+
+            return [
+                continueOp,
+                ...head,
+                ...body,
+                ...exit,
+                nextOp
+            ]
+        }
 
         if (ts.isForInStatement(node)) {
+            const nextOp = op(OpCode.Nop, 0)
+            nextOps.set(node, nextOp)
+
+            const continueOp = op(OpCode.Nop, 0)
+            continueOps.set(node, continueOp)
+
             const hasVariable = ts.isVariableDeclarationList(node.initializer) && (node.initializer.flags & ts.NodeFlags.BlockScoped)
             const variableIsConst =
                 ts.isVariableDeclarationList(node.initializer)
@@ -1927,8 +1988,10 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 ...head,
                 ...condition,
                 ...body,
+                continueOp,
                 ...continueOrLeave,
-                ...leave
+                ...leave,
+                nextOp
             ]
         }
 

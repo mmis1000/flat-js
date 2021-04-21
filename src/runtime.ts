@@ -1009,8 +1009,13 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 case OpCode.BLessThanEquals:
                 case OpCode.BEqualsEquals:
                 case OpCode.BEqualsEqualsEquals:
+                case OpCode.BExclamationEquals:
+                case OpCode.BExclamationEqualsEquals:
                 case OpCode.BMinus:
-                case OpCode.BPlus: {
+                case OpCode.BPlus:
+                case OpCode.BIn:
+                case OpCode.BAsterisk:
+                case OpCode.BSlash: {
                     const right = currentFrame[Fields.valueStack].pop()
                     const left = currentFrame[Fields.valueStack].pop()
                     const ops = {
@@ -1019,6 +1024,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         [OpCode.BCaret]: (left: any, right: any) => left ^ right,
                         [OpCode.BEqualsEquals]: (left: any, right: any) => left == right,
                         [OpCode.BEqualsEqualsEquals]: (left: any, right: any) => left === right,
+                        [OpCode.BExclamationEquals]: (left: any, right: any) => left != right,
+                        [OpCode.BExclamationEqualsEquals]: (left: any, right: any) => left !== right,
                         [OpCode.BGreaterThan]: (left: any, right: any) => left > right,
                         [OpCode.BGreaterThanGreaterThan]: (left: any, right: any) => left >> right,
                         [OpCode.BGreaterThanGreaterThanGreaterThan]: (left: any, right: any) => left >>> right,
@@ -1029,6 +1036,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         [OpCode.BPlus]: (left: any, right: any) => left + right,
                         [OpCode.BMinus]: (left: any, right: any) => left - right,
                         [OpCode.InstanceOf]: (left: any, right: any) => left instanceof right,
+                        [OpCode.BIn]: (left: any, right: any) => left in right,
+                        [OpCode.BAsterisk]: (left: any, right: any) => left * right,
+                        [OpCode.BSlash]: (left: any, right: any) => left / right
                     }
                     const result = ops[command](left, right)
                     currentFrame[Fields.valueStack].push(result)
@@ -1059,6 +1069,24 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     }
                 }
                     break;
+                case OpCode.PrefixUnaryPlus:
+                case OpCode.PrefixUnaryMinus: 
+                case OpCode.PrefixExclamation: {
+                    const value = currentFrame[Fields.valueStack].pop()
+                    let result
+                    switch (command) {
+                        case OpCode.PrefixUnaryPlus:
+                            result = +value
+                            break
+                        case OpCode.PrefixUnaryMinus:
+                            result = -value
+                            break
+                        case OpCode.PrefixExclamation:
+                            result = !value
+                            break
+                    }
+                    currentFrame[Fields.valueStack].push(result)
+                }
                 case OpCode.Debugger:
                     debugger;
                     break;
