@@ -487,7 +487,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     break;
                 // Assign and update
                 case OpCode.BPlusEqual:
-                case OpCode.BMinusEqual: {
+                case OpCode.BMinusEqual: 
+                case OpCode.BSlashEqual:
+                case OpCode.BAsteriskEqual: {
                     const rightVal = currentFrame[Fields.valueStack].pop()
                     const name = currentFrame[Fields.valueStack].pop()
                     const ctx = currentFrame[Fields.valueStack].pop()
@@ -497,7 +499,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                
                     const exprs: Record<typeof commandCurrent, (a: any, b:any) => any> = {
                         [OpCode.BPlusEqual]: (a, b) => a + b,
-                        [OpCode.BMinusEqual]: (a, b) => a - b
+                        [OpCode.BMinusEqual]: (a, b) => a - b,
+                        [OpCode.BSlashEqual]: (a, b) => a / b,
+                        [OpCode.BAsteriskEqual]: (a, b) => a * b
                     }
 
                     const r = exprs[command](leftValue, rightVal)

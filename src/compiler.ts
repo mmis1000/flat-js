@@ -491,6 +491,10 @@ export const enum OpCode {
     BPlusEqual,
     /** -= */
     BMinusEqual,
+    /** /= */
+    BSlashEqual,
+    /** *= */
+    BAsteriskEqual,
 
     /**
      * Stack:
@@ -1483,6 +1487,15 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             }
         }
 
+        if (ts.isVoidExpression(node)) {
+            return [
+                ...generate(node.expression, flag),
+                op(OpCode.Pop),
+                op(OpCode.UndefinedLiteral)
+            ]
+        }
+
+
         // Comma
         if (ts.isBinaryExpression(node)) {
             switch (node.operatorToken.kind) {
@@ -1503,6 +1516,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
             switch (kind) {
                 case ts.SyntaxKind.PlusEqualsToken:
                 case ts.SyntaxKind.MinusEqualsToken:
+                case ts.SyntaxKind.SlashEqualsToken:
+                case ts.SyntaxKind.AsteriskEqualsToken:
                 case ts.SyntaxKind.EqualsToken:
                     const left = extractQuote(node.left)
                     if (
@@ -1517,6 +1532,8 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                                 kind === ts.SyntaxKind.EqualsToken ? OpCode.Set:
                                 kind === ts.SyntaxKind.PlusEqualsToken ? OpCode.BPlusEqual:
                                 kind === ts.SyntaxKind.MinusEqualsToken ? OpCode.BMinusEqual: 
+                                kind === ts.SyntaxKind.SlashEqualsToken ? OpCode.BSlashEqual:
+                                kind === ts.SyntaxKind.AsteriskEqualsToken ? OpCode.BAsteriskEqual: 
                                 abort('Why Am I here?')
                             )
                         ]
