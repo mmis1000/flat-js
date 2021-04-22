@@ -1,1 +1,1123 @@
-{const a=2147483648,b=A=>"number"==typeof A&&(0|A)===A&&0==(A&a),c=Function.prototype.call,d=Function.prototype.apply,e=Function.prototype.bind,f=RegExp,g=" is not defined",h=" is a constant";function run(s,o,A=0,r=[],p=void 0,t=[]){const n=new WeakSet;t={[0]:0,2:r,3:[p,void 0,0,...t,t.length],19:0,4:-1};n.add(t);const u=[t];let i=A;var l=()=>s[i++],v=(A,e=1)=>A[A.length-e];const k=new WeakMap;var w=(A,e,a,r)=>{k.has(A)||k.set(A,new Map);const p={[9]:a,10:r,11:void 0};k.get(A).set(e,p),Reflect.defineProperty(A,e,{configurable:!0,get:function(){if(p[9])throw new ReferenceError(e+g);return p[11]},set:function(A){if(p[9])throw new ReferenceError(e+g);if(p[10])throw new TypeError(e+h);p[11]=A}})},B=(A,e,a)=>{switch(a){case 3:case 2:return w(A,e,!0,!1);case 5:case 4:case 1:return w(A,e,!1,!1)}},E=(A,e)=>{const a=k.get(A);if(a)return a.get(e)};const Q=new WeakMap;const y=new WeakMap;for(var C=(e,a)=>{for(let A=e[2].length-1;0<=A;A--)if(Reflect.has(e[2][A],a))return e[2][A];return null},R=(A,e)=>{if(n.has(A)){var a=C(A,e);if(a)return a[e];throw new ReferenceError(e+g)}return A[e]},I=(A,e,a)=>{if(n.has(A)){const r=C(A,e);if(r)return r[e]=a;throw new ReferenceError(e+g)}return A[e]=a};0<=i&&i<s.length;){var M=l();const xA=u[u.length-1];var U=A=>{var e=v(u);switch(e[0]){case 0:var a=e,r=a[4];if(r<0)return A;u.pop(),i=r,0===a[19]||null!==A&&"object"==typeof A||"function"==typeof A?v(u)[3].push(A):v(u)[3].push(R(a,"[this]"));break;case 1:{const p=e;p[3].push(A),LA()}}};const LA=()=>{const A=v(u);var e=A[3].pop(),a=A[6];A[2]=A[1].slice(0);var r=A[13];switch(r){case 0:case 1:if(!(0<=a))return u.pop(),void U(e);A[13]=2,A[14]=2,A[11]=e,i=a;break;case 2:return u.pop(),void U(e);default:}};var F=A=>{for(;;){if(0===u.length)throw A;const e=v(u);switch(e[0]){case 0:u.pop();break;case 1:if(2!==e[13])return e[3].push(A),void ZA();u.pop()}}throw A};const ZA=()=>{const A=v(u);var e=A[3].pop(),a=A[15],r=A[6],p=A[5];A[2]=A[1].slice(0);var s=A[13];switch(s){case 0:i=0<=p?(A[13]=1,A[14]=1,A[11]=e,void 0!==A[7]&&((A,e,a)=>{const r={};B(r,e,1),r[e]=a,A[2].push(r)})(A,A[7],e),p):a;break;case 1:0<=r?(A[13]=2,A[14]=1,A[11]=e,i=r):(u.pop(),F(e));break;case 2:u.pop(),F(e);break;default:}};try{A:switch(M){case 1:var j=l();b(j)?xA[3].push(j):xA[3].push(o[j^a]);break;case 14:xA[3].pop();break;case 15:xA[3].push(v(xA[3]));break;case 16:xA[3].push(xA);break;case 2:xA[3].push(null);break;case 3:xA[3].push(void 0);break;case 43:var m=xA[3].pop(),T=xA[3].pop();xA[3].push(new f(T,m));break;case 17:case 18:{var W=xA[3].pop(),Y=xA[3].pop();const $A=xA[3].pop();if(n.has($A)){const qA=C($A,Y);if(!qA)throw new ReferenceError(Y+g);qA[Y]=W}else $A[Y]=W;17===M?xA[3].push(W):xA[3].push($A)}break;case 64:case 65:{T=xA[3].pop(),m=xA[3].pop(),Y=xA[3].pop(),W=R(Y,m);const GA={[64]:(A,e)=>A+e,65:(A,e)=>A-e};T=GA[M](W,T);I(Y,m,T),xA[3].push(T)}break;case 20:{var _=xA[3].pop(),D=xA[3].pop();const KA=xA[3].pop();Reflect.defineProperty(KA,D,{configurable:!0,enumerable:!0,writable:!0,value:_}),KA[D]=_,xA[3].push(KA)}break;case 21:D=xA[3].pop(),_=xA[3].pop();xA[3].push(R(_,D));break;case 19:var H=xA[3].pop(),O=xA[3].pop();for(let A=0;A<O;A++){var P=xA[3].pop(),x=xA[3].pop(),L=xA[3].pop();let e=!1;for(let A=H[2].length-1;0<=A;A--)if(Reflect.has(H[2][A],L)){e=!0;const NA=E(H[2][A],L);NA&&1&P&&(NA[9]=!1),xA[2][A][L]=x,NA&&2&P&&(NA[10]=!0);break}if(!e)throw new ReferenceError(L+g)}break;case 8:var Z=xA[3].pop();i=Z;break;case 6:var Z=xA[3].pop(),$=xA[3].pop();Z||(i=$);break;case 7:var $=xA[3].pop(),q=xA[3].pop();$&&(i=q);break;case 9:var q=xA[3].pop(),G=xA[3].pop();xA[3].push(q),q&&(i=G);break;case 10:var G=xA[3].pop(),K=xA[3].pop();xA[3].push(G),G||(i=K);break;case 11:{var N=xA[3].pop(),S=xA[3].pop();const SA=[];for(let A=0;A<S;A++)SA.push({[0]:xA[3].pop(),8:xA[3].pop()});var V=xA[3].pop();const VA=[];for(let A=0;A<V;A++)VA.push(xA[3].pop());var z=xA[3].pop();const zA=[];for(let A=0;A<z;A++)zA.unshift(xA[3].pop());K=xA[3].pop();if(0===K){var J,X,AA;xA[3].pop();const p=xA[3].pop(),JA={};switch(xA[2].push(JA),N){case 1:case 2:case 4:case 5:case 6:B(JA,"[this]",1),JA["[this]"]=p}for(J of SA)B(JA,J[8],J[0]);for([X,AA]of VA.entries())JA[AA]=zA[X]}else if(1===K){var eA,aA,rA,pA=xA[3].pop();xA[3].pop();const XA={};switch(xA[2].push(XA),N){case 4:case 5:case 6:throw new TypeError("- not a constructor");case 1:case 2:B(XA,"[this]",1),XA["[this]"]=Object.create(pA.prototype)}for(eA of SA)B(XA,eA[8],eA[0]);for([aA,rA]of VA.entries())XA[rA]=zA[aA]}}break;case 12:{var sA=xA[3].pop();const Ae=[];for(let A=0;A<sA;A++)Ae.push({[0]:xA[3].pop(),8:xA[3].pop()});var oA,tA={};xA[2].push(tA);for(oA of Ae)B(tA,oA[8],oA[0])}break;case 13:xA[2].pop();break;case 22:var N=v(xA[3],2),cA=v(xA[3]);E(v(N[2]),cA)[9]=!1;break;case 23:var nA=v(xA[3],2),hA=v(xA[3]);E(v(nA[2]),hA)[10]=!0;break;case 24:cA=xA[3].pop(),nA=xA[3].pop(),hA=xA[3].pop();xA[3].push(((A,e,a,r)=>{var p=[...A],e={[8]:e,0:a,12:r,2:p},a=function(...A){return run(s,o,r,p,this,A)};return Q.set(a,e),a})(xA[2],hA,cA,nA));break;case 33:case 31:{var fA,uA=xA[3].pop();let r=[];for(let A=0;A<uA;A++)r.unshift(xA[3].pop());let p,s;for(p=31===M?(fA=xA[3].pop(),s=xA[3].pop(),R(s,fA)):(s=void 0,xA[3].pop());p===c||p===d||y.has(p);){let A,e,a;if(p===c)A=s,e=r[0],a=r.slice(1);else if(p===d){A=s,e=r[0];var iA=r[1],lA=iA.length;a=[];for(let A=0;A<lA;A++)a.push(iA[A])}else{var bA=y.get(p);e=bA[17],a=[...bA[18],...r],A=bA[16]}p=n.has(A)?void 0:A,s=e,r=a}let A=void 0;n.has(s)||(A=s),p===e?(fA=((e,a,r)=>{if("function"==typeof e){function A(...A){return Reflect.apply(e,a,[...r,...A])}return y.set(A,{[16]:e,17:a,18:r}),A}})(A,r[0],r.slice(1)),xA[3].push(fA)):Q.has(p)?(vA={[0]:0,2:[...(kA=Q.get(p))[2]],4:i,3:[A,p,0,...r,r.length],19:0},n.add(vA),u.push(vA),i=kA[12]):xA[3].push(Reflect.apply(p,A,r))}break;case 32:{var vA,kA,wA=xA[3].pop();let a=[];for(let A=0;A<wA;A++)a.unshift(xA[3].pop());let r=xA[3].pop();for(;y.has(r);){let A,e;var BA=y.get(r);e=[...BA[18],...a],A=BA[16],r=n.has(A)?void 0:A,a=e}Q.has(r)?(kA={[0]:0,2:[...(vA=Q.get(r))[2]],4:i,3:[r,r,1,...a,a.length],19:1},n.add(kA),u.push(kA),i=vA[12]):xA[3].push(Reflect.construct(r,a,r))}break;case 25:var EA=xA[3].pop();if(0<xA[3].length)throw new Error("bad return");for(;0!==v(u)[0];)u.pop();var gA=v(u)[4],dA=v(u);if(gA<0)return 0===dA[19]||"function"==typeof EA||"object"==typeof EA?EA:R(dA,"[this]");u.pop(),0===dA[19]||"function"==typeof EA||"object"==typeof EA?v(u)[3].push(EA):v(u)[3].push(R(dA,"[this]")),i=gA;break;case 27:throw xA[3].pop();case 67:var QA=xA[3].pop();throw new ReferenceError(QA);case 41:xA[3].push([]);break;case 42:xA[3].push({});break;case 30:EA=xA[3].pop(),dA=xA[3].pop(),gA=xA[3].pop(),QA=xA[3].pop(),QA={[0]:1,1:xA[2],2:xA[2].slice(0),3:[],13:0,14:0,11:void 0,5:gA,6:dA,7:EA,15:QA};n.add(QA),u.push(QA);break;case 26:LA();break;case 28:ZA();break;case 29:{const ee=xA;var yA=ee[13],CA=ee[14],RA=ee[11],IA=ee[15],MA=ee[6];switch(ee[2]=ee[1].slice(0),yA){case 2:switch(CA){case 0:i=IA;break A;case 1:F(RA);break A;case 2:U(RA);break A}case 0:case 1:if(0<=ee[6]){ee[13]=2,ee[14]=0,ee[11]=void 0,i=MA;break A}i=IA;break A;default:}}break;case 34:var UA=xA[3].pop();xA[3].push(typeof UA);break;case 35:var FA=xA[3].pop(),UA=xA[3].pop();if(n.has(UA)){var jA=UA;for(let A=jA[2].length-1;0<=A;A--)if(Reflect.getOwnPropertyDescriptor(jA[2][A],FA)){xA[3].push(typeof jA[2][A][FA]);break A}xA[3].push("undefined")}else xA[3].push(typeof UA[FA]);break;case 37:var mA=function*(A){for(const e in A)yield e}(xA[3].pop());xA[3].push(mA);break;case 38:{const ae=xA[3].pop();xA[3].push(ae.next())}break;case 39:mA=xA[3].pop();xA[3].push(mA.done);break;case 40:var TA=xA[3].pop();xA[3].push(TA.value);break;case 36:case 48:case 49:case 47:case 57:case 58:case 50:case 51:case 52:case 53:case 54:case 55:case 56:case 57:case 58:case 59:case 60:case 46:case 45:case 44:case 61:case 62:case 63:{var WA=xA[3].pop(),YA=xA[3].pop();const re={[48]:(A,e)=>A&e,49:(A,e)=>A|e,47:(A,e)=>A^e,57:(A,e)=>A==e,58:(A,e)=>A===e,59:(A,e)=>A!=e,60:(A,e)=>A!==e,50:(A,e)=>e<A,51:(A,e)=>A>>e,52:(A,e)=>A>>>e,53:(A,e)=>e<=A,54:(A,e)=>A<e,55:(A,e)=>A<<e,56:(A,e)=>A<=e,45:(A,e)=>A+e,46:(A,e)=>A-e,36:(A,e)=>A instanceof e,44:(A,e)=>A in e,61:(A,e)=>A*e,62:(A,e)=>A/e,63:(A,e)=>A%e};var _A=re[M](YA,WA);xA[3].push(_A)}break;case 69:case 68:TA=xA[3].pop(),YA=xA[3].pop();if(n.has(YA)){const pe=C(YA,TA);if(!pe)throw new ReferenceError(TA+g);WA=pe[TA],_A=69===M?WA+1:WA-1;pe[TA]=_A,xA[3].push(WA)}else{const p=YA;var DA=p[TA],HA=69===M?DA+1:DA-1;p[TA]=HA,xA[3].push(DA)}break;case 70:case 71:case 72:case 73:{var OA=xA[3].pop();let A;switch(M){case 70:A=+OA;break;case 71:A=-OA;break;case 72:A=!OA;break;case 73:A=~OA}xA[3].push(A)}break;case 74:case 75:var HA=xA[3].pop(),DA=xA[3].pop(),PA=R(DA,HA),PA=74===M?PA+1:PA-1;I(DA,HA,PA),xA[3].push(PA);break;case 66:{PA=xA[3].pop();const se=xA[3].pop();xA[3].push(delete se[PA])}break;case 76:break;default:throw new Error("Um?")}}catch(A){F(A)}}}const i=["fetch","./bad-code.json","then","","t","json","_$_","Int32Array","Uint8Array","from","atob","p","buffer","globalThis","charCodeAt"],j=new Int32Array(Uint8Array.from(atob("AQAAAAAAAAABAAAAAAAAAAEAAAAAAAAACwAAABAAAAABAAAAAAAAgAEAAAABAACAAQAAAAEAAAAfAAAAAQAAAAIAAIABAAAAAwAAgAEAAAAqAAAAAQAAAAMAAAAYAAAAAQAAAAEAAAAfAAAAAQAAAAIAAIABAAAAAwAAgAEAAABBAAAAAQAAAAMAAAAYAAAAAQAAAAEAAAAfAAAADgAAAAMAAAAZAAAAAQAAAAQAAIABAAAAAQAAAAEAAAAEAACAAQAAAAQAAAABAAAAAQAAAAEAAAADAAAACwAAABAAAAABAAAABAAAgBUAAAABAAAABQAAgAEAAAAAAAAAHwAAABkAAAABAAAABAAAgAEAAAABAAAAAQAAAAQAAIABAAAABAAAAAEAAAABAAAAAQAAAAMAAAALAAAAEAAAAAEAAAAGAACAEAAAAAEAAAAHAACAFQAAABAAAAABAAAACAAAgBUAAAABAAAACQAAgBAAAAABAAAACgAAgBAAAAABAAAABAAAgBUAAAABAAAACwAAgBUAAAABAAAAAQAAAB8AAAABAAAAAwAAgAEAAACYAAAAAQAAAAMAAAAYAAAAAQAAAAIAAAAfAAAAAQAAAAwAAIAVAAAAAQAAAAEAAAAgAAAAEAAAAAEAAAAEAACAFQAAAAEAAAAEAACAFQAAAAEAAAAAAAAAKQAAAAEAAAAAAAAAEAAAAAEAAAANAACAFQAAABIAAAABAAAAAQAAACoAAAABAAAABgAAgBAAAAABAAAABgAAgBUAAAAUAAAAEgAAAAEAAAAEAAAAHwAAABkAAAABAAAABAAAgAEAAAABAAAAAQAAAAQAAIABAAAABAAAAAEAAAABAAAAAQAAAAMAAAALAAAAEAAAAAEAAAAEAACAFQAAAAEAAAAOAACAAQAAAAAAAAABAAAAAQAAAB8AAAAZAAAA"),A=>A.charCodeAt(0)).buffer);run(j,i,0,[globalThis,{_$_:run}])}
+{
+// [START_HERE]
+// MUST SYNC WITH COMPILER
+const TEXT_DADA_MASK = 0x80000000;
+// MUST SYNC WITH COMPILER
+const isSmallNumber = (a) => {
+    return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0);
+};
+const CALL = Function.prototype.call;
+const APPLY = Function.prototype.apply;
+const BIND = Function.prototype.bind;
+const REGEXP = RegExp;
+const is_not_defined = ' is not defined';
+const is_a_constant = ' is a constant';
+function run(program, textData, entryPoint = 0, scopes = [], self = undefined, args = []) {
+    const environments = new WeakSet();
+    const initialFrame = {
+        [0 /* type */]: 0 /* Function */,
+        [2 /* scopes */]: scopes,
+        [3 /* valueStack */]: [
+            self,
+            undefined,
+            undefined,
+            0 /* Apply */,
+            ...args,
+            args.length
+        ],
+        [19 /* invokeType */]: 0 /* Apply */,
+        [4 /* return */]: -1
+    };
+    environments.add(initialFrame);
+    const stack = [initialFrame];
+    let ptr = entryPoint;
+    const read = () => program[ptr++];
+    const getCurrentFrame = () => stack[stack.length - 1];
+    const peak = (arr, offset = 1) => arr[arr.length - offset];
+    const variableDescriptors = new WeakMap();
+    const defineVariableInternal = (scope, name, tdz, immutable) => {
+        if (!variableDescriptors.has(scope)) {
+            variableDescriptors.set(scope, new Map());
+        }
+        const descriptor = {
+            [9 /* tdz */]: tdz,
+            [10 /* immutable */]: immutable,
+            [11 /* value */]: undefined
+        };
+        variableDescriptors.get(scope).set(name, descriptor);
+        Reflect.defineProperty(scope, name, {
+            configurable: true,
+            get() {
+                if (descriptor[9 /* tdz */]) {
+                    throw new ReferenceError(name + is_not_defined);
+                }
+                return descriptor[11 /* value */];
+            },
+            set(v) {
+                if (descriptor[9 /* tdz */]) {
+                    throw new ReferenceError(name + is_not_defined);
+                }
+                if (descriptor[10 /* immutable */]) {
+                    throw new TypeError(name + is_a_constant);
+                }
+                descriptor[11 /* value */] = v;
+            }
+        });
+    };
+    const defineVariable = (scope, name, type) => {
+        switch (type) {
+            case 3 /* Const */:
+                // seal it later
+                return defineVariableInternal(scope, name, true, false);
+            case 2 /* Let */:
+                return defineVariableInternal(scope, name, true, false);
+            case 5 /* Function */:
+            case 4 /* Parameter */:
+            case 1 /* Var */:
+                //don't have tdz
+                return defineVariableInternal(scope, name, false, false);
+        }
+    };
+    const getVariableDescriptor = (scope, name) => {
+        const map = variableDescriptors.get(scope);
+        if (map) {
+            return map.get(name);
+        }
+    };
+    const functionDescriptors = new WeakMap();
+    const MyArgument = function MyArgument() { };
+    const createArgumentObject = () => {
+        const obj = new MyArgument();
+        Reflect.setPrototypeOf(obj, Object.prototype);
+        return obj;
+    };
+    const defineFunction = (scopes, name, type, offset) => {
+        // TODO: types
+        const scopeClone = [...scopes];
+        const des = {
+            [8 /* name */]: name,
+            [0 /* type */]: type,
+            [12 /* offset */]: offset,
+            [2 /* scopes */]: scopeClone
+        };
+        const fn = function (...args) {
+            return run(program, textData, offset, [...scopeClone], this, args);
+        };
+        functionDescriptors.set(fn, des);
+        return fn;
+    };
+    const bindInfo = new WeakMap();
+    const bindInternal = (fn, self, args) => {
+        if (typeof fn !== 'function') {
+            return undefined;
+        }
+        const bindFn = function (...additionalArgs) {
+            return Reflect.apply(fn, self, [...args, ...additionalArgs]);
+        };
+        bindInfo.set(bindFn, {
+            [16 /* function */]: fn,
+            [17 /* self */]: self,
+            [18 /* arguments */]: args
+        });
+        return bindFn;
+    };
+    const findScope = (ctx, name) => {
+        for (let i = ctx[2 /* scopes */].length - 1; i >= 0; i--) {
+            if (Reflect.has(ctx[2 /* scopes */][i], name)) {
+                return ctx[2 /* scopes */][i];
+            }
+        }
+        return null;
+    };
+    const getValue = (ctx, name) => {
+        if (!environments.has(ctx)) {
+            return ctx[name];
+        }
+        else {
+            const env = ctx;
+            const scope = findScope(env, name);
+            if (scope) {
+                return scope[name];
+            }
+            else {
+                throw new ReferenceError(name + is_not_defined);
+            }
+        }
+    };
+    const setValue = (ctx, name, value) => {
+        if (!environments.has(ctx)) {
+            return (ctx[name] = value);
+        }
+        else {
+            const env = ctx;
+            const scope = findScope(env, name);
+            if (scope) {
+                return (scope[name] = value);
+            }
+            else {
+                throw new ReferenceError(name + is_not_defined);
+            }
+        }
+    };
+    while (ptr >= 0 && ptr < program.length) {
+        const currentPtr = ptr;
+        const command = read();
+        const currentFrame = getCurrentFrame();
+        const addCatchScope = (frame, name, value) => {
+            const newScope = {};
+            defineVariable(newScope, name, 1 /* Var */);
+            newScope[name] = value;
+            frame[2 /* scopes */].push(newScope);
+        };
+        const returnsValueConditional = (value) => {
+            const currentFrame = peak(stack);
+            // try to find upper try frame or return (if any and hand control to it)
+            switch (currentFrame[0 /* type */]) {
+                case 0 /* Function */:
+                    {
+                        const frame = currentFrame;
+                        // exit
+                        const returnAddr = frame[4 /* return */];
+                        if (returnAddr < 0) {
+                            // leave the whole function
+                            return value;
+                        }
+                        else {
+                            stack.pop();
+                            ptr = returnAddr;
+                            if (frame[19 /* invokeType */] === 0 /* Apply */
+                                || (value !== null && typeof value === 'object')
+                                || typeof value === 'function') {
+                                peak(stack)[3 /* valueStack */].push(value);
+                            }
+                            else {
+                                peak(stack)[3 /* valueStack */].push(getValue(frame, "[this]" /* This */));
+                            }
+                        }
+                    }
+                    break;
+                case 1 /* Try */:
+                    {
+                        const frame = currentFrame;
+                        // as if we return on upper try catch
+                        frame[3 /* valueStack */].push(value);
+                        returnsTryFrame();
+                    }
+                    break;
+            }
+        };
+        const returnsTryFrame = () => {
+            const frame = peak(stack);
+            const value = frame[3 /* valueStack */].pop();
+            const finallyAddr = frame[6 /* finally */];
+            // restore scopes
+            frame[2 /* scopes */] = frame[1 /* savedScopes */].slice(0);
+            const state = frame[13 /* state */];
+            switch (state) {
+                case 0 /* Try */:
+                case 1 /* Catch */:
+                    {
+                        if (finallyAddr >= 0) {
+                            frame[13 /* state */] = 2 /* Finally */;
+                            frame[14 /* resolveType */] = 2 /* return */;
+                            frame[11 /* value */] = value;
+                            ptr = finallyAddr;
+                        }
+                        else {
+                            stack.pop();
+                            returnsValueConditional(value);
+                            return;
+                        }
+                    }
+                    break;
+                case 2 /* Finally */:
+                    {
+                        stack.pop();
+                        returnsValueConditional(value);
+                        return;
+                    }
+                    break;
+                default:
+                    const nothing = state;
+            }
+        };
+        const throwsConditional = (value) => {
+            loop: while (true) {
+                if (stack.length === 0) {
+                    throw value;
+                }
+                const currentFrame = peak(stack);
+                switch (currentFrame[0 /* type */]) {
+                    case 0 /* Function */:
+                        {
+                            stack.pop();
+                        }
+                        break;
+                    case 1 /* Try */: {
+                        const frame = currentFrame;
+                        if (frame[13 /* state */] === 2 /* Finally */) {
+                            stack.pop();
+                        }
+                        else {
+                            // as if we return on upper try catch
+                            currentFrame[3 /* valueStack */].push(value);
+                            throwsTryFrame();
+                            return;
+                        }
+                    }
+                }
+            }
+            throw value;
+        };
+        const throwsTryFrame = () => {
+            const frame = peak(stack);
+            const value = frame[3 /* valueStack */].pop();
+            const exitAddr = frame[15 /* exit */];
+            const finallyAddr = frame[6 /* finally */];
+            const catchAddr = frame[5 /* catch */];
+            // restore scopes
+            frame[2 /* scopes */] = frame[1 /* savedScopes */].slice(0);
+            const state = frame[13 /* state */];
+            switch (state) {
+                case 0 /* Try */:
+                    {
+                        if (catchAddr >= 0) {
+                            frame[13 /* state */] = 1 /* Catch */;
+                            frame[14 /* resolveType */] = 1 /* throw */;
+                            frame[11 /* value */] = value;
+                            if (frame[7 /* variable */] !== undefined) {
+                                addCatchScope(frame, frame[7 /* variable */], value);
+                            }
+                            ptr = catchAddr;
+                        }
+                        else {
+                            ptr = exitAddr;
+                        }
+                    }
+                    break;
+                case 1 /* Catch */: {
+                    if (finallyAddr >= 0) {
+                        frame[13 /* state */] = 2 /* Finally */;
+                        frame[14 /* resolveType */] = 1 /* throw */;
+                        frame[11 /* value */] = value;
+                        ptr = finallyAddr;
+                    }
+                    else {
+                        stack.pop();
+                        throwsConditional(value);
+                    }
+                    break;
+                }
+                case 2 /* Finally */:
+                    {
+                        stack.pop();
+                        throwsConditional(value);
+                    }
+                    break;
+                default:
+                    const nothing = state;
+            }
+        };
+        try {
+            command: switch (command) {
+                case 1 /* Literal */:
+                    {
+                        const value = read();
+                        if (isSmallNumber(value)) {
+                            currentFrame[3 /* valueStack */].push(value);
+                        }
+                        else {
+                            currentFrame[3 /* valueStack */].push(textData[value ^ TEXT_DADA_MASK]);
+                        }
+                    }
+                    break;
+                case 14 /* Pop */:
+                    currentFrame[3 /* valueStack */].pop();
+                    break;
+                case 15 /* Duplicate */:
+                    currentFrame[3 /* valueStack */].push(peak(currentFrame[3 /* valueStack */]));
+                    break;
+                case 16 /* GetRecord */:
+                    currentFrame[3 /* valueStack */].push(currentFrame);
+                    break;
+                case 2 /* NullLiteral */:
+                    currentFrame[3 /* valueStack */].push(null);
+                    break;
+                case 3 /* UndefinedLiteral */:
+                    currentFrame[3 /* valueStack */].push(undefined);
+                    break;
+                case 43 /* RegexpLiteral */:
+                    {
+                        const flags = currentFrame[3 /* valueStack */].pop();
+                        const source = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(new REGEXP(source, flags));
+                    }
+                    break;
+                case 17 /* Set */:
+                case 18 /* SetKeepCtx */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        if (!environments.has(ctx)) {
+                            ctx[name] = value;
+                        }
+                        else {
+                            const scope = findScope(ctx, name);
+                            if (scope) {
+                                scope[name] = value;
+                            }
+                            else {
+                                throw new ReferenceError(name + is_not_defined);
+                            }
+                        }
+                        if (command === 17 /* Set */) {
+                            currentFrame[3 /* valueStack */].push(value);
+                        }
+                        else /* if (command === OpCode.SetKeepCtx) */ {
+                            currentFrame[3 /* valueStack */].push(ctx);
+                        }
+                    }
+                    break;
+                // Assign and update
+                case 64 /* BPlusEqual */:
+                case 65 /* BMinusEqual */:
+                case 66 /* BSlashEqual */:
+                case 67 /* BAsteriskEqual */:
+                    {
+                        const rightVal = currentFrame[3 /* valueStack */].pop();
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        const leftValue = getValue(ctx, name);
+                        const commandCurrent = command;
+                        const exprs = {
+                            [64 /* BPlusEqual */]: (a, b) => a + b,
+                            [65 /* BMinusEqual */]: (a, b) => a - b,
+                            [66 /* BSlashEqual */]: (a, b) => a / b,
+                            [67 /* BAsteriskEqual */]: (a, b) => a * b
+                        };
+                        const r = exprs[command](leftValue, rightVal);
+                        setValue(ctx, name, r);
+                        currentFrame[3 /* valueStack */].push(r);
+                    }
+                    break;
+                case 20 /* DefineKeepCtx */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        Reflect.defineProperty(ctx, name, {
+                            configurable: true,
+                            enumerable: true,
+                            writable: true,
+                            value: value
+                        });
+                        ctx[name] = value;
+                        currentFrame[3 /* valueStack */].push(ctx);
+                    }
+                    break;
+                case 21 /* Get */:
+                    {
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(getValue(ctx, name));
+                    }
+                    break;
+                case 19 /* SetMultiple */:
+                    {
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        const length = currentFrame[3 /* valueStack */].pop();
+                        for (let i = 0; i < length; i++) {
+                            const flag = currentFrame[3 /* valueStack */].pop();
+                            const value = currentFrame[3 /* valueStack */].pop();
+                            const name = currentFrame[3 /* valueStack */].pop();
+                            let hit = false;
+                            for (let i = ctx[2 /* scopes */].length - 1; i >= 0; i--) {
+                                if (Reflect.has(ctx[2 /* scopes */][i], name)) {
+                                    hit = true;
+                                    const desc = getVariableDescriptor(ctx[2 /* scopes */][i], name);
+                                    if (desc && (flag & 1 /* DeTDZ */))
+                                        desc[9 /* tdz */] = false;
+                                    currentFrame[2 /* scopes */][i][name] = value;
+                                    if (desc && (flag & 2 /* Freeze */))
+                                        desc[10 /* immutable */] = true;
+                                    break;
+                                }
+                            }
+                            if (!hit) {
+                                throw new ReferenceError(name + is_not_defined);
+                            }
+                        }
+                    }
+                    break;
+                case 8 /* Jump */:
+                    {
+                        const pos = currentFrame[3 /* valueStack */].pop();
+                        ptr = pos;
+                    }
+                    break;
+                case 6 /* JumpIfNot */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        const pos = currentFrame[3 /* valueStack */].pop();
+                        if (value) {
+                            // intentional blank
+                        }
+                        else {
+                            ptr = pos;
+                        }
+                    }
+                    break;
+                case 7 /* JumpIf */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        const pos = currentFrame[3 /* valueStack */].pop();
+                        if (value) {
+                            ptr = pos;
+                        }
+                        else {
+                            // intentional blank
+                        }
+                    }
+                    break;
+                case 9 /* JumpIfAndKeep */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        const pos = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(value);
+                        if (value) {
+                            ptr = pos;
+                        }
+                        else {
+                            // intentional blank
+                        }
+                    }
+                    break;
+                case 10 /* JumpIfNotAndKeep */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        const pos = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(value);
+                        if (value) {
+                            // intentional blank
+                        }
+                        else {
+                            ptr = pos;
+                        }
+                    }
+                    break;
+                case 11 /* EnterFunction */:
+                    {
+                        // TODO: arguments and this/self reference
+                        const functionType = currentFrame[3 /* valueStack */].pop();
+                        const variableCount = currentFrame[3 /* valueStack */].pop();
+                        const variables = [];
+                        for (let i = 0; i < variableCount; i++) {
+                            variables.push({
+                                [0 /* type */]: currentFrame[3 /* valueStack */].pop(),
+                                [8 /* name */]: currentFrame[3 /* valueStack */].pop()
+                            });
+                        }
+                        const argumentNameCount = currentFrame[3 /* valueStack */].pop();
+                        const argumentNames = [];
+                        for (let i = 0; i < argumentNameCount; i++) {
+                            argumentNames.push(currentFrame[3 /* valueStack */].pop());
+                        }
+                        const parameterCount = currentFrame[3 /* valueStack */].pop();
+                        const parameters = [];
+                        for (let i = 0; i < parameterCount; i++) {
+                            parameters.unshift(currentFrame[3 /* valueStack */].pop());
+                        }
+                        const invokeType = currentFrame[3 /* valueStack */].pop();
+                        const getArgumentObject = (scope, callee) => {
+                            const obj = createArgumentObject();
+                            const bindingLength = Math.min(argumentNameCount, parameterCount);
+                            for (let i = 0; i < parameterCount; i++) {
+                                if (i < bindingLength) {
+                                    Object.defineProperty(obj, i, {
+                                        enumerable: true,
+                                        configurable: true,
+                                        get() {
+                                            return scope[argumentNames[i]];
+                                        },
+                                        set(v) {
+                                            scope[argumentNames[i]] = v;
+                                        }
+                                    });
+                                }
+                                else {
+                                    obj[i] = parameters[i];
+                                }
+                            }
+                            Object.defineProperty(obj, 'length', {
+                                enumerable: false,
+                                configurable: true,
+                                value: parameterCount
+                            });
+                            Object.defineProperty(obj, 'callee', {
+                                enumerable: false,
+                                configurable: true,
+                                value: callee
+                            });
+                            return obj;
+                        };
+                        if (invokeType === 0 /* Apply */) {
+                            // TODO: arguments and this/self reference
+                            const name = currentFrame[3 /* valueStack */].pop();
+                            const fn = currentFrame[3 /* valueStack */].pop();
+                            const self = currentFrame[3 /* valueStack */].pop();
+                            const scope = {};
+                            currentFrame[2 /* scopes */].push(scope);
+                            switch (functionType) {
+                                case 1 /* FunctionDeclaration */:
+                                case 2 /* FunctionExpression */:
+                                case 4 /* MethodDeclaration */:
+                                case 5 /* GetAccessor */:
+                                case 6 /* SetAccessor */:
+                                    defineVariable(scope, "[this]" /* This */, 1 /* Var */);
+                                    scope["[this]" /* This */] = self;
+                                    scope['arguments'] = getArgumentObject(scope, fn);
+                            }
+                            switch (functionType) {
+                                case 2 /* FunctionExpression */:
+                                case 4 /* MethodDeclaration */:
+                                    scope[name] = fn;
+                            }
+                            for (let v of variables) {
+                                defineVariable(scope, v[8 /* name */], v[0 /* type */]);
+                            }
+                            for (let [index, name] of argumentNames.entries()) {
+                                scope[name] = parameters[index];
+                            }
+                        }
+                        else if (invokeType === 1 /* Construct */) {
+                            const name = currentFrame[3 /* valueStack */].pop();
+                            const fn = currentFrame[3 /* valueStack */].pop();
+                            const newTarget = currentFrame[3 /* valueStack */].pop();
+                            const scope = {};
+                            currentFrame[2 /* scopes */].push(scope);
+                            switch (functionType) {
+                                case 4 /* MethodDeclaration */:
+                                case 5 /* GetAccessor */:
+                                case 6 /* SetAccessor */:
+                                    throw new TypeError('- not a constructor');
+                                case 1 /* FunctionDeclaration */:
+                                case 2 /* FunctionExpression */:
+                                    defineVariable(scope, "[this]" /* This */, 1 /* Var */);
+                                    scope["[this]" /* This */] = Object.create(fn.prototype);
+                                    scope['arguments'] = getArgumentObject(scope, fn);
+                            }
+                            switch (functionType) {
+                                case 2 /* FunctionExpression */:
+                                    scope[name] = fn;
+                            }
+                            for (let v of variables) {
+                                defineVariable(scope, v[8 /* name */], v[0 /* type */]);
+                            }
+                            for (let [index, name] of argumentNames.entries()) {
+                                scope[name] = parameters[index];
+                            }
+                        }
+                    }
+                    break;
+                case 12 /* EnterScope */:
+                    {
+                        const variableCount = currentFrame[3 /* valueStack */].pop();
+                        const variables = [];
+                        for (let i = 0; i < variableCount; i++) {
+                            variables.push({
+                                [0 /* type */]: currentFrame[3 /* valueStack */].pop(),
+                                [8 /* name */]: currentFrame[3 /* valueStack */].pop()
+                            });
+                        }
+                        const scope = {};
+                        currentFrame[2 /* scopes */].push(scope);
+                        for (let v of variables) {
+                            defineVariable(scope, v[8 /* name */], v[0 /* type */]);
+                        }
+                    }
+                    break;
+                case 13 /* LeaveScope */:
+                    {
+                        currentFrame[2 /* scopes */].pop();
+                    }
+                    break;
+                case 22 /* DeTDZ */:
+                    {
+                        const env = peak(currentFrame[3 /* valueStack */], 2);
+                        const name = peak(currentFrame[3 /* valueStack */]);
+                        getVariableDescriptor(peak(env[2 /* scopes */]), name)[9 /* tdz */] = false;
+                    }
+                    break;
+                case 23 /* FreezeVariable */:
+                    {
+                        const env = peak(currentFrame[3 /* valueStack */], 2);
+                        const name = peak(currentFrame[3 /* valueStack */]);
+                        getVariableDescriptor(peak(env[2 /* scopes */]), name)[10 /* immutable */] = true;
+                    }
+                    break;
+                case 24 /* DefineFunction */:
+                    {
+                        const type = currentFrame[3 /* valueStack */].pop();
+                        const offset = currentFrame[3 /* valueStack */].pop();
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(defineFunction(currentFrame[2 /* scopes */], name, type, offset));
+                    }
+                    break;
+                case 33 /* CallValue */:
+                case 31 /* Call */:
+                    {
+                        const parameterCount = currentFrame[3 /* valueStack */].pop();
+                        let parameters = [];
+                        for (let i = 0; i < parameterCount; i++) {
+                            parameters.unshift(currentFrame[3 /* valueStack */].pop());
+                        }
+                        let fn, envOrRecord, name = '';
+                        if (command === 31 /* Call */) {
+                            name = currentFrame[3 /* valueStack */].pop();
+                            envOrRecord = currentFrame[3 /* valueStack */].pop();
+                            fn = getValue(envOrRecord, name);
+                        }
+                        else /** if (command === OpCode.CallValue) */ {
+                            envOrRecord = undefined;
+                            fn = currentFrame[3 /* valueStack */].pop();
+                        }
+                        while (fn === CALL || fn === APPLY || bindInfo.has(fn)) {
+                            let newFn, newSelf, newParameters;
+                            if (fn === CALL) {
+                                newFn = envOrRecord;
+                                newSelf = parameters[0];
+                                newParameters = parameters.slice(1);
+                            }
+                            else if (fn === APPLY) {
+                                newFn = envOrRecord;
+                                newSelf = parameters[0];
+                                const parameterArrayLike = parameters != null ? parameters[1] : [];
+                                const parameterLength = parameterArrayLike.length;
+                                newParameters = [];
+                                for (let i = 0; i < parameterLength; i++) {
+                                    newParameters.push(parameterArrayLike[i]);
+                                }
+                            }
+                            else /* if (bindInfo.has(fn))*/ {
+                                const info0 = bindInfo.get(fn);
+                                const info = info0;
+                                newSelf = info[17 /* self */];
+                                newParameters = [...info[18 /* arguments */], ...parameters];
+                                newFn = info[16 /* function */];
+                            }
+                            fn = environments.has(newFn) ? undefined : newFn;
+                            envOrRecord = newSelf;
+                            parameters = newParameters;
+                        }
+                        let self = undefined;
+                        if (!environments.has(envOrRecord)) {
+                            self = envOrRecord;
+                        }
+                        if (fn === BIND) {
+                            const bound = bindInternal(self, parameters[0], parameters.slice(1));
+                            currentFrame[3 /* valueStack */].push(bound);
+                        }
+                        else if (!functionDescriptors.has(fn)) {
+                            // extern
+                            if (typeof fn !== 'function') {
+                                if (command === 31 /* Call */) {
+                                    throw new TypeError(`(intermediate value).${name} is not a function`);
+                                }
+                                else /* if (command === OpCode.CallValue) */ {
+                                    throw new TypeError(`(intermediate value) is not a function`);
+                                }
+                            }
+                            else {
+                                currentFrame[3 /* valueStack */].push(Reflect.apply(fn, self, parameters));
+                            }
+                        }
+                        else {
+                            const des = functionDescriptors.get(fn);
+                            const newFrame = {
+                                [0 /* type */]: 0 /* Function */,
+                                [2 /* scopes */]: [...des[2 /* scopes */]],
+                                [4 /* return */]: ptr,
+                                [3 /* valueStack */]: [
+                                    self,
+                                    fn,
+                                    des[8 /* name */],
+                                    0 /* Apply */,
+                                    ...parameters,
+                                    parameters.length
+                                ],
+                                [19 /* invokeType */]: 0 /* Apply */
+                            };
+                            environments.add(newFrame);
+                            stack.push(newFrame);
+                            ptr = des[12 /* offset */];
+                        }
+                    }
+                    break;
+                case 32 /* New */:
+                    {
+                        const parameterCount = currentFrame[3 /* valueStack */].pop();
+                        let parameters = [];
+                        for (let i = 0; i < parameterCount; i++) {
+                            parameters.unshift(currentFrame[3 /* valueStack */].pop());
+                        }
+                        let fn = currentFrame[3 /* valueStack */].pop();
+                        while (bindInfo.has(fn)) {
+                            let newFn, newParameters;
+                            const info0 = bindInfo.get(fn);
+                            const info = info0;
+                            newParameters = [...info[18 /* arguments */], ...parameters];
+                            newFn = info[16 /* function */];
+                            fn = environments.has(newFn) ? undefined : newFn;
+                            parameters = newParameters;
+                        }
+                        if (!functionDescriptors.has(fn)) {
+                            // extern
+                            currentFrame[3 /* valueStack */].push(Reflect.construct(fn, parameters, fn));
+                        }
+                        else {
+                            const des = functionDescriptors.get(fn);
+                            const newFrame = {
+                                [0 /* type */]: 0 /* Function */,
+                                [2 /* scopes */]: [...des[2 /* scopes */]],
+                                [4 /* return */]: ptr,
+                                [3 /* valueStack */]: [
+                                    fn,
+                                    fn,
+                                    des[8 /* name */],
+                                    1 /* Construct */,
+                                    ...parameters,
+                                    parameters.length
+                                ],
+                                [19 /* invokeType */]: 1 /* Construct */
+                            };
+                            environments.add(newFrame);
+                            stack.push(newFrame);
+                            ptr = des[12 /* offset */];
+                        }
+                    }
+                    break;
+                case 25 /* Return */:
+                    {
+                        const result = currentFrame[3 /* valueStack */].pop();
+                        if (currentFrame[3 /* valueStack */].length > 0) {
+                            throw new Error('bad return');
+                        }
+                        // remove all try frames
+                        while (peak(stack)[0 /* type */] !== 0 /* Function */) {
+                            stack.pop();
+                        }
+                        const returnAddr = peak(stack)[4 /* return */];
+                        const functionFrame = peak(stack);
+                        if (returnAddr < 0) {
+                            // leave the whole function
+                            if (functionFrame[19 /* invokeType */] === 0 /* Apply */) {
+                                return result;
+                            }
+                            else {
+                                if (typeof result === 'function' || typeof result === 'object') {
+                                    return result;
+                                }
+                                else {
+                                    return getValue(functionFrame, "[this]" /* This */);
+                                }
+                            }
+                        }
+                        stack.pop();
+                        if (functionFrame[19 /* invokeType */] === 0 /* Apply */) {
+                            peak(stack)[3 /* valueStack */].push(result);
+                        }
+                        else {
+                            if (typeof result === 'function' || typeof result === 'object') {
+                                peak(stack)[3 /* valueStack */].push(result);
+                            }
+                            else {
+                                peak(stack)[3 /* valueStack */].push(getValue(functionFrame, "[this]" /* This */));
+                            }
+                        }
+                        ptr = returnAddr;
+                    }
+                    break;
+                case 27 /* Throw */: {
+                    const err = currentFrame[3 /* valueStack */].pop();
+                    throw err;
+                }
+                case 69 /* ThrowReferenceError */: {
+                    const msg = currentFrame[3 /* valueStack */].pop();
+                    throw new ReferenceError(msg);
+                }
+                case 41 /* ArrayLiteral */:
+                    currentFrame[3 /* valueStack */].push([]);
+                    break;
+                case 42 /* ObjectLiteral */:
+                    currentFrame[3 /* valueStack */].push({});
+                    break;
+                case 30 /* InitTryCatch */:
+                    {
+                        const catchName = currentFrame[3 /* valueStack */].pop();
+                        const finallyAddr = currentFrame[3 /* valueStack */].pop();
+                        const catchAddr = currentFrame[3 /* valueStack */].pop();
+                        const exitAddr = currentFrame[3 /* valueStack */].pop();
+                        const frame = {
+                            [0 /* type */]: 1 /* Try */,
+                            [1 /* savedScopes */]: currentFrame[2 /* scopes */],
+                            [2 /* scopes */]: currentFrame[2 /* scopes */].slice(0),
+                            [3 /* valueStack */]: [],
+                            [13 /* state */]: 0 /* Try */,
+                            [14 /* resolveType */]: 0 /* normal */,
+                            [11 /* value */]: undefined,
+                            [5 /* catch */]: catchAddr,
+                            [6 /* finally */]: finallyAddr,
+                            [7 /* variable */]: catchName,
+                            [15 /* exit */]: exitAddr
+                        };
+                        environments.add(frame);
+                        stack.push(frame);
+                    }
+                    break;
+                case 26 /* ReturnInTryCatchFinally */:
+                    returnsTryFrame();
+                    break;
+                case 28 /* ThrowInTryCatchFinally */:
+                    throwsTryFrame();
+                    break;
+                case 29 /* ExitTryCatchFinally */:
+                    {
+                        const frame = currentFrame;
+                        const prevState = frame[13 /* state */];
+                        const prevResolveType = frame[14 /* resolveType */];
+                        const prevValue = frame[11 /* value */];
+                        const exit = frame[15 /* exit */];
+                        const finallyPtr = frame[6 /* finally */];
+                        // restore scopes
+                        frame[2 /* scopes */] = frame[1 /* savedScopes */].slice(0);
+                        switch (prevState) {
+                            case 2 /* Finally */:
+                                switch (prevResolveType) {
+                                    case 0 /* normal */:
+                                        ptr = exit;
+                                        break command;
+                                    case 1 /* throw */:
+                                        throwsConditional(prevValue);
+                                        break command;
+                                    case 2 /* return */:
+                                        returnsValueConditional(prevValue);
+                                        break command;
+                                }
+                            case 0 /* Try */:
+                            case 1 /* Catch */:
+                                if (frame[6 /* finally */] >= 0) {
+                                    frame[13 /* state */] = 2 /* Finally */;
+                                    frame[14 /* resolveType */] = 0 /* normal */;
+                                    frame[11 /* value */] = undefined;
+                                    ptr = finallyPtr;
+                                    break command;
+                                }
+                                else {
+                                    ptr = exit;
+                                    break command;
+                                }
+                            default:
+                                const nothing = prevState;
+                        }
+                    }
+                    break;
+                case 34 /* Typeof */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(typeof value);
+                    }
+                    break;
+                case 35 /* TypeofReference */:
+                    {
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        if (environments.has(ctx)) {
+                            const frame = ctx;
+                            for (let i = frame[2 /* scopes */].length - 1; i >= 0; i--) {
+                                if (Reflect.getOwnPropertyDescriptor(frame[2 /* scopes */][i], name)) {
+                                    currentFrame[3 /* valueStack */].push(typeof frame[2 /* scopes */][i][name]);
+                                    break command;
+                                }
+                            }
+                            currentFrame[3 /* valueStack */].push('undefined');
+                        }
+                        else {
+                            currentFrame[3 /* valueStack */].push(typeof ctx[name]);
+                        }
+                    }
+                    break;
+                case 37 /* GetPropertyIterator */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        const iterator = (function* (value) {
+                            for (const key in value) {
+                                yield key;
+                            }
+                        })(value);
+                        currentFrame[3 /* valueStack */].push(iterator);
+                    }
+                    break;
+                case 38 /* NextEntry */:
+                    {
+                        const iterator = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(iterator.next());
+                    }
+                    break;
+                case 39 /* EntryIsDone */:
+                    {
+                        const entry = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(entry.done);
+                    }
+                    break;
+                case 40 /* EntryGetValue */:
+                    {
+                        const entry = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(entry.value);
+                    }
+                    break;
+                case 36 /* InstanceOf */:
+                case 48 /* BAmpersand */:
+                case 49 /* BBar */:
+                case 47 /* BCaret */:
+                case 57 /* BEqualsEquals */:
+                case 58 /* BEqualsEqualsEquals */:
+                case 50 /* BGreaterThan */:
+                case 51 /* BGreaterThanGreaterThan */:
+                case 52 /* BGreaterThanGreaterThanGreaterThan */:
+                case 53 /* BGreaterThanEquals */:
+                case 54 /* BLessThan */:
+                case 55 /* BLessThanLessThan */:
+                case 56 /* BLessThanEquals */:
+                case 57 /* BEqualsEquals */:
+                case 58 /* BEqualsEqualsEquals */:
+                case 59 /* BExclamationEquals */:
+                case 60 /* BExclamationEqualsEquals */:
+                case 46 /* BMinus */:
+                case 45 /* BPlus */:
+                case 44 /* BIn */:
+                case 61 /* BAsterisk */:
+                case 62 /* BSlash */:
+                case 63 /* BPercent */:
+                    {
+                        const right = currentFrame[3 /* valueStack */].pop();
+                        const left = currentFrame[3 /* valueStack */].pop();
+                        const ops = {
+                            [48 /* BAmpersand */]: (left, right) => left & right,
+                            [49 /* BBar */]: (left, right) => left | right,
+                            [47 /* BCaret */]: (left, right) => left ^ right,
+                            [57 /* BEqualsEquals */]: (left, right) => left == right,
+                            [58 /* BEqualsEqualsEquals */]: (left, right) => left === right,
+                            [59 /* BExclamationEquals */]: (left, right) => left != right,
+                            [60 /* BExclamationEqualsEquals */]: (left, right) => left !== right,
+                            [50 /* BGreaterThan */]: (left, right) => left > right,
+                            [51 /* BGreaterThanGreaterThan */]: (left, right) => left >> right,
+                            [52 /* BGreaterThanGreaterThanGreaterThan */]: (left, right) => left >>> right,
+                            [53 /* BGreaterThanEquals */]: (left, right) => left >= right,
+                            [54 /* BLessThan */]: (left, right) => left < right,
+                            [55 /* BLessThanLessThan */]: (left, right) => left << right,
+                            [56 /* BLessThanEquals */]: (left, right) => left <= right,
+                            [45 /* BPlus */]: (left, right) => left + right,
+                            [46 /* BMinus */]: (left, right) => left - right,
+                            [36 /* InstanceOf */]: (left, right) => left instanceof right,
+                            [44 /* BIn */]: (left, right) => left in right,
+                            [61 /* BAsterisk */]: (left, right) => left * right,
+                            [62 /* BSlash */]: (left, right) => left / right,
+                            [63 /* BPercent */]: (left, right) => left % right
+                        };
+                        const result = ops[command](left, right);
+                        currentFrame[3 /* valueStack */].push(result);
+                    }
+                    break;
+                case 71 /* PostFixPlusPLus */:
+                case 70 /* PostFixMinusMinus */:
+                    {
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        if (environments.has(ctx)) {
+                            const env = ctx;
+                            const scope = findScope(env, name);
+                            if (scope) {
+                                const old = scope[name];
+                                const newVal = command === 71 /* PostFixPlusPLus */ ? old + 1 : old - 1;
+                                scope[name] = newVal;
+                                currentFrame[3 /* valueStack */].push(old);
+                            }
+                            else {
+                                throw new ReferenceError(name + is_not_defined);
+                            }
+                        }
+                        else {
+                            const self = ctx;
+                            const old = self[name];
+                            const newVal = command === 71 /* PostFixPlusPLus */ ? old + 1 : old - 1;
+                            self[name] = newVal;
+                            currentFrame[3 /* valueStack */].push(old);
+                        }
+                    }
+                    break;
+                case 72 /* PrefixUnaryPlus */:
+                case 73 /* PrefixUnaryMinus */:
+                case 74 /* PrefixExclamation */:
+                case 75 /* PrefixTilde */:
+                    {
+                        const value = currentFrame[3 /* valueStack */].pop();
+                        let result;
+                        switch (command) {
+                            case 72 /* PrefixUnaryPlus */:
+                                result = +value;
+                                break;
+                            case 73 /* PrefixUnaryMinus */:
+                                result = -value;
+                                break;
+                            case 74 /* PrefixExclamation */:
+                                result = !value;
+                                break;
+                            case 75 /* PrefixTilde */:
+                                result = ~value;
+                                break;
+                        }
+                        currentFrame[3 /* valueStack */].push(result);
+                    }
+                    break;
+                // Prefix updates
+                case 76 /* PrefixPlusPlus */:
+                case 77 /* PrefixMinusMinus */:
+                    {
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        const currentValue = getValue(ctx, name);
+                        const newVal = command === 76 /* PrefixPlusPlus */ ? currentValue + 1 : currentValue - 1;
+                        setValue(ctx, name, newVal);
+                        // Just don't care and push the new value
+                        currentFrame[3 /* valueStack */].push(newVal);
+                    }
+                    break;
+                case 68 /* Delete */:
+                    {
+                        const name = currentFrame[3 /* valueStack */].pop();
+                        const ctx = currentFrame[3 /* valueStack */].pop();
+                        currentFrame[3 /* valueStack */].push(delete ctx[name]);
+                    }
+                    break;
+                case 78 /* Debugger */:
+                    debugger;
+                    break;
+                default:
+                    const nothing = command;
+                    throw new Error('Um?');
+            }
+        }
+        catch (err) {
+            if (err != null && typeof err === 'object') {
+                err.pos = currentPtr;
+            }
+            throwsConditional(err);
+        }
+    }
+}
+const textData = ["fetch","./jquery.json","then","","t","json","_$_","Int32Array","Uint8Array","from","atob","p","buffer","globalThis","./bad-code.json","charCodeAt"]
+const programData = new Int32Array(Uint8Array.from(atob('AQAAAAAAAAABAAAAAAAAAAEAAAAAAAAACwAAABAAAAABAAAAAAAAgAEAAAABAACAAQAAAAEAAAAfAAAAAQAAAAIAAIABAAAAAwAAgAEAAAAqAAAAAQAAAAMAAAAYAAAAAQAAAAEAAAAfAAAAAQAAAAIAAIABAAAAAwAAgAEAAABBAAAAAQAAAAMAAAAYAAAAAQAAAAEAAAAfAAAADgAAAAMAAAAZAAAAAQAAAAQAAIABAAAAAQAAAAEAAAAEAACAAQAAAAQAAAABAAAAAQAAAAEAAAADAAAACwAAABAAAAABAAAABAAAgBUAAAABAAAABQAAgAEAAAAAAAAAHwAAABkAAAABAAAABAAAgAEAAAABAAAAAQAAAAQAAIABAAAABAAAAAEAAAABAAAAAQAAAAMAAAALAAAAEAAAAAEAAAAGAACAEAAAAAEAAAAHAACAFQAAABAAAAABAAAACAAAgBUAAAABAAAACQAAgBAAAAABAAAACgAAgBAAAAABAAAABAAAgBUAAAABAAAACwAAgBUAAAABAAAAAQAAAB8AAAABAAAAAwAAgAEAAAC7AAAAAQAAAAMAAAAYAAAAAQAAAAIAAAAfAAAAAQAAAAwAAIAVAAAAAQAAAAEAAAAgAAAAEAAAAAEAAAAEAACAFQAAAAEAAAAEAACAFQAAAAEAAAAAAAAAKQAAAAEAAAAAAAAAEAAAAAEAAAANAACAFQAAABIAAAABAAAAAQAAACoAAAABAAAABgAAgBAAAAABAAAABgAAgBUAAAAUAAAAEgAAAAEAAAAEAAAAHwAAAA4AAAAQAAAAAQAAAAAAAIABAAAADgAAgAEAAAABAAAAHwAAAAEAAAACAACAAQAAAAMAAIABAAAA1AAAAAEAAAADAAAAGAAAAAEAAAABAAAAHwAAAAEAAAACAACAAQAAAAMAAIABAAAA6wAAAAEAAAADAAAAGAAAAAEAAAABAAAAHwAAAA4AAAADAAAAGQAAAAEAAAAEAACAAQAAAAEAAAABAAAABAAAgAEAAAAEAAAAAQAAAAEAAAABAAAAAwAAAAsAAAAQAAAAAQAAAAQAAIAVAAAAAQAAAA8AAIABAAAAAAAAAAEAAAABAAAAHwAAABkAAAABAAAABAAAgAEAAAABAAAAAQAAAAQAAIABAAAABAAAAAEAAAABAAAAAQAAAAMAAAALAAAAEAAAAAEAAAAEAACAFQAAAAEAAAAFAACAAQAAAAAAAAAfAAAAGQAAAAEAAAAEAACAAQAAAAEAAAABAAAABAAAgAEAAAAEAAAAAQAAAAEAAAABAAAAAwAAAAsAAAAQAAAAAQAAAAYAAIAQAAAAAQAAAAcAAIAVAAAAEAAAAAEAAAAIAACAFQAAAAEAAAAJAACAEAAAAAEAAAAKAACAEAAAAAEAAAAEAACAFQAAAAEAAAALAACAFQAAAAEAAAABAAAAHwAAAAEAAAADAACAAQAAAEIBAAABAAAAAwAAABgAAAABAAAAAgAAAB8AAAABAAAADAAAgBUAAAABAAAAAQAAACAAAAAQAAAAAQAAAAQAAIAVAAAAAQAAAAQAAIAVAAAAAQAAAAAAAAApAAAAAQAAAAAAAAAQAAAAAQAAAA0AAIAVAAAAEgAAAAEAAAABAAAAKgAAAAEAAAAGAACAEAAAAAEAAAAGAACAFQAAABQAAAASAAAAAQAAAAQAAAAfAAAAGQAAAAEAAAAEAACAAQAAAAEAAAABAAAABAAAgAEAAAAEAAAAAQAAAAEAAAABAAAAAwAAAAsAAAAQAAAAAQAAAAQAAIAVAAAAAQAAAA8AAIABAAAAAAAAAAEAAAABAAAAHwAAABkAAAA='), c => c.charCodeAt(0)).buffer)
+run(programData, textData, 0, [globalThis, { _$_: run }])
+    }
+

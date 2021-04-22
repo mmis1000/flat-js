@@ -766,6 +766,11 @@ for (const k in a) {
 }
 `, TypeError)
 
+testRuntime('for in', `
+for (var k in undefined) {
+}
+`, [], printProvider)
+
 testRuntime('regexp', `
 print(/aaa\\ubbb/g.source)
 print(/aaa\\ubbb/g.flags)

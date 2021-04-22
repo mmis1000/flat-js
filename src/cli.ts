@@ -42,7 +42,16 @@ const programData = new Int32Array(Uint8Array.from(atob('${programData}'), c => 
 run(programData, textData, 0, [globalThis, { _$_: run }])
     `
         const joined = '{\r\n' + runtime + postFix + '}\r\n'
-        console.log(noMinimize ? joined : uglify.minify(joined).code)
+        if (!noMinimize) {
+            console.log(joined)
+        } else {
+            const res = uglify.minify(joined)
+            if (res.error) {
+                throw res.error
+            } else {
+                console.log(res.code)
+            }
+        }
     } else {
         const result = {
             p: programData,

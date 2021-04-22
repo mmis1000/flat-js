@@ -103,6 +103,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         [Fields.valueStack]: [
             self,
             undefined,
+            undefined,
             InvokeType.Apply,
             ...args,
             args.length
@@ -185,6 +186,13 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
     const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
 
+    const MyArgument: { new(): {} } = function MyArgument () {} as any
+
+    const createArgumentObject = () => {
+        const obj = new MyArgument()
+        Reflect.setPrototypeOf(obj, Object.prototype)
+        return obj
+    }
     const defineFunction = (scopes: Scope[], name: string, type: ts.SyntaxKind, offset: number) => {
         // TODO: types
         const scopeClone = [...scopes]
@@ -197,7 +205,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         }
 
         const fn = function (this: any, ...args: any[]) {
-            return run(program, textData, offset, scopeClone, this, args)
+            return run(program, textData, offset, [...scopeClone], this, args)
         }
 
         functionDescriptors.set(fn, des)
@@ -262,6 +270,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
     }
 
     while (ptr >= 0 && ptr < program.length) {
+        const currentPtr = ptr
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
 
@@ -632,7 +641,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     const invokeType = currentFrame[Fields.valueStack].pop()
 
                     const getArgumentObject = (scope: Record<any, any>, callee: any) => {
-                        const obj: Record<string, any> = {}
+                        const obj: Record<string, any> = createArgumentObject()
                         const bindingLength = Math.min(argumentNameCount, parameterCount)
 
                         for (let i = 0; i < parameterCount; i++) {
@@ -668,6 +677,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     if (invokeType === InvokeType.Apply) {
                         // TODO: arguments and this/self reference
+                        const name = currentFrame[Fields.valueStack].pop()
                         const fn = currentFrame[Fields.valueStack].pop()
                         const self = currentFrame[Fields.valueStack].pop()
 
@@ -684,6 +694,11 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                                 scope[SpecialVariable.This] = self
                                 scope['arguments'] = getArgumentObject(scope, fn)
                         }
+                        switch (functionType) {
+                            case FunctionTypes.FunctionExpression:
+                            case FunctionTypes.MethodDeclaration:
+                                scope[name] = fn
+                        }
 
                         for (let v of variables) {
                             defineVariable(scope, v[Fields.name], v[Fields.type])
@@ -693,7 +708,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             scope[name] = parameters[index]
                         }
                     } else if (invokeType === InvokeType.Construct) {
-                        // FIXME:
+                        const name = currentFrame[Fields.valueStack].pop()
                         const fn = currentFrame[Fields.valueStack].pop()
                         const newTarget = currentFrame[Fields.valueStack].pop()
 
@@ -710,6 +725,11 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                                 defineVariable(scope, SpecialVariable.This, VariableType.Var)
                                 scope[SpecialVariable.This] = Object.create(fn.prototype)
                                 scope['arguments'] = getArgumentObject(scope, fn)
+                        }
+
+                        switch (functionType) {
+                            case FunctionTypes.FunctionExpression:
+                                scope[name] = fn
                         }
 
                         for (let v of variables) {
@@ -771,10 +791,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         parameters.unshift(currentFrame[Fields.valueStack].pop())
                     }
 
-                    let fn, envOrRecord
+                    let fn, envOrRecord, name = ''
 
                     if (command === OpCode.Call) {
-                        const name = currentFrame[Fields.valueStack].pop()
+                        name = currentFrame[Fields.valueStack].pop()
                         envOrRecord = currentFrame[Fields.valueStack].pop()
                         fn = getValue(envOrRecord, name)
                     } else /** if (command === OpCode.CallValue) */ {
@@ -791,7 +811,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         } else if (fn === APPLY) {
                             newFn = envOrRecord
                             newSelf = parameters[0]
-                            const parameterArrayLike = parameters[1]
+                            const parameterArrayLike = parameters != null ? parameters[1] : []
                             const parameterLength = parameterArrayLike.length
                             newParameters = []
                             for (let i = 0; i < parameterLength; i++) {
@@ -821,7 +841,16 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         currentFrame[Fields.valueStack].push(bound)
                     } else if (!functionDescriptors.has(fn)) {
                         // extern
-                        currentFrame[Fields.valueStack].push(Reflect.apply(fn, self, parameters))
+                        if (typeof fn !== 'function') {
+                            if (command === OpCode.Call) {
+                                throw new TypeError(`(intermediate value).${name} is not a function`)
+                            } else /* if (command === OpCode.CallValue) */ {
+                                throw new TypeError(`(intermediate value) is not a function`)
+                            }
+                        } else {
+                            currentFrame[Fields.valueStack].push(Reflect.apply(fn, self, parameters))
+                        }
+                        
                     } else {
                         const des = functionDescriptors.get(fn)!
                         const newFrame: Frame = {
@@ -831,6 +860,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             [Fields.valueStack]: [
                                 self,
                                 fn,
+                                des[Fields.name],
                                 InvokeType.Apply,
                                 ...parameters,
                                 parameters.length
@@ -878,6 +908,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             [Fields.valueStack]: [
                                 fn,
                                 fn,
+                                des[Fields.name],
                                 InvokeType.Construct,
                                 ...parameters,
                                 parameters.length
@@ -1200,6 +1231,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             }
 
         } catch (err) {
+            if (err != null && typeof err === 'object') {
+                err.pos = currentPtr
+            }
             throwsConditional(err)
         }
     }

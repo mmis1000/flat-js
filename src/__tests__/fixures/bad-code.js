@@ -40,4 +40,15 @@
     })
 
     document.body.appendChild(el)
+
+    $(el)
+    .animate({
+        left: '40%'
+    })
+    .animate({
+        left: '60%'
+    })
+    .animate({
+        left: '50%'
+    })
 }

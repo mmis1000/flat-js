@@ -1,9 +1,20 @@
-fetch('./bad-code.json')
+fetch('./jquery.json')
 .then(it => it.json())
-.then(it => _$_(
+.then(it => {
+    _$_(
         new Int32Array(Uint8Array.from(atob(it.p), c => c.charCodeAt(0)).buffer),
         it.t,
         0,
         [globalThis, { _$_ }]
     )
-)
+
+    fetch('./bad-code.json')
+    .then(it => it.json())
+    .then(it => _$_(
+            new Int32Array(Uint8Array.from(atob(it.p), c => c.charCodeAt(0)).buffer),
+            it.t,
+            0,
+            [globalThis, { _$_ }]
+        )
+    )
+})

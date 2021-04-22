@@ -24,6 +24,7 @@ The example
 ```sh
 node ./lib/cli.js ./src/__tests__/fixures/loader.js > ./example/loader.js
 node ./lib/cli.js --json ./src/__tests__/fixures/bad-code.js > ./example/bad-code.json
+node ./lib/cli.js --json ./src/__tests__/fixures/jquery.js > ./example/jquery.json
 ```
 
 ## Design

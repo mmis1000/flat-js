@@ -128,6 +128,7 @@ export const enum OpCode {
      * Stack:
      *   this
      *   function
+     *   function name
      *   InvokeType.Apply
      *   parameter * O
      *   parameter count: O
@@ -145,6 +146,7 @@ export const enum OpCode {
      * Stack:
      *   newTarget
      *   constructor
+     *   constructor name
      *   InvokeType.Construct
      *   parameter * O
      *   parameter count: O
@@ -904,7 +906,7 @@ function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
 const nextOps = new Map<ts.Node, Op>()
 const continueOps = new Map<ts.Node, Op>()
 
-function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMap, withPos = false): Segment {
+function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMap, functions: Functions, withPos = false): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
 
     function extractQuote(node: ts.Node) {
@@ -1878,6 +1880,9 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 if (nextOps.has(node)) {
                     return true
                 }
+                if (functions.has(node as any)) {
+                    throw new Error('bug check')
+                }
 
                 if (ts.isTryStatement(node)) abort('Not support break in try catch yet')
 
@@ -2292,7 +2297,7 @@ export function compile(src: string, debug = false, range = false) {
     const functionToSegment = new Map<ts.Node, Segment>()
 
     for (let item of functions) {
-        const generated = generateSegment(item, scopes, parentMap, range)
+        const generated = generateSegment(item, scopes, parentMap, functions, range)
         program.push(generated)
         functionToSegment.set(item, generated)
     }
