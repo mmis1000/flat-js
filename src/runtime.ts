@@ -438,43 +438,51 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             }
         }
 
+        const popCurrentFrameStack = (): any => {
+            return currentFrame[Fields.valueStack].pop()
+        }
+
+        const pushCurrentFrameStack = (arg: any): number => {
+            return currentFrame[Fields.valueStack].push(arg)
+        }
+
         try {
             command: switch (command) {
                 case OpCode.Literal: {
                     const value = read()
                     if (isSmallNumber(value)) {
-                        currentFrame[Fields.valueStack].push(value)
+                        pushCurrentFrameStack(value)
                     } else {
-                        currentFrame[Fields.valueStack].push(textData[value ^ TEXT_DADA_MASK])
+                        pushCurrentFrameStack(textData[value ^ TEXT_DADA_MASK])
                     }
                 }
                     break;
                 case OpCode.Pop:
-                    currentFrame[Fields.valueStack].pop()
+                    popCurrentFrameStack()
                     break
                 case OpCode.Duplicate:
-                    currentFrame[Fields.valueStack].push(peak(currentFrame[Fields.valueStack]))
+                    pushCurrentFrameStack(peak(currentFrame[Fields.valueStack]))
                     break
                 case OpCode.GetRecord:
-                    currentFrame[Fields.valueStack].push(currentFrame)
+                    pushCurrentFrameStack(currentFrame)
                     break
                 case OpCode.NullLiteral:
-                    currentFrame[Fields.valueStack].push(null)
+                    pushCurrentFrameStack(null)
                     break
                 case OpCode.UndefinedLiteral:
-                    currentFrame[Fields.valueStack].push(undefined)
+                    pushCurrentFrameStack(undefined)
                     break
                 case OpCode.RegexpLiteral: {
-                    const flags = currentFrame[Fields.valueStack].pop()
-                    const source = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(new REGEXP(source, flags))
+                    const flags = popCurrentFrameStack()
+                    const source = popCurrentFrameStack()
+                    pushCurrentFrameStack(new REGEXP(source, flags))
                 }
                     break
                 case OpCode.Set:
                 case OpCode.SetKeepCtx: {
-                    const value = currentFrame[Fields.valueStack].pop()
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
+                    const value = popCurrentFrameStack()
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
 
                     if (!environments.has(ctx)) {
                         ctx[name] = value
@@ -488,9 +496,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     }
 
                     if (command === OpCode.Set) {
-                        currentFrame[Fields.valueStack].push(value)
+                        pushCurrentFrameStack(value)
                     } else /* if (command === OpCode.SetKeepCtx) */ {
-                        currentFrame[Fields.valueStack].push(ctx)
+                        pushCurrentFrameStack(ctx)
                     }
                 }
                     break;
@@ -499,9 +507,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 case OpCode.BMinusEqual: 
                 case OpCode.BSlashEqual:
                 case OpCode.BAsteriskEqual: {
-                    const rightVal = currentFrame[Fields.valueStack].pop()
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
+                    const rightVal = popCurrentFrameStack()
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
 
                     const leftValue = getValue(ctx, name)
                     const commandCurrent = command
@@ -516,13 +524,13 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     const r = exprs[command](leftValue, rightVal)
                     setValue(ctx, name, r)
 
-                    currentFrame[Fields.valueStack].push(r)
+                    pushCurrentFrameStack(r)
                 }
                     break;
                 case OpCode.DefineKeepCtx: {
-                    const value = currentFrame[Fields.valueStack].pop()
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
+                    const value = popCurrentFrameStack()
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
 
                     Reflect.defineProperty(ctx, name, {
                         configurable: true,
@@ -533,23 +541,23 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     ctx[name] = value
 
-                    currentFrame[Fields.valueStack].push(ctx)
+                    pushCurrentFrameStack(ctx)
                 }
                     break;
                 case OpCode.Get: {
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
 
-                    currentFrame[Fields.valueStack].push(getValue(ctx, name))
+                    pushCurrentFrameStack(getValue(ctx, name))
                 }
                     break;
                 case OpCode.SetMultiple: {
-                    const ctx: Frame = currentFrame[Fields.valueStack].pop()
-                    const length = currentFrame[Fields.valueStack].pop()
+                    const ctx: Frame = popCurrentFrameStack()
+                    const length = popCurrentFrameStack()
                     for (let i = 0; i < length; i++) {
-                        const flag = currentFrame[Fields.valueStack].pop()
-                        const value = currentFrame[Fields.valueStack].pop()
-                        const name = currentFrame[Fields.valueStack].pop()
+                        const flag = popCurrentFrameStack()
+                        const value = popCurrentFrameStack()
+                        const name = popCurrentFrameStack()
                         let hit = false
 
                         for (let i = ctx[Fields.scopes].length - 1; i >= 0; i--) {
@@ -570,13 +578,13 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break;
                 case OpCode.Jump: {
-                    const pos = currentFrame[Fields.valueStack].pop()
+                    const pos = popCurrentFrameStack()
                     ptr = pos
                 }
                     break;
                 case OpCode.JumpIfNot: {
-                    const value = currentFrame[Fields.valueStack].pop()
-                    const pos = currentFrame[Fields.valueStack].pop()
+                    const value = popCurrentFrameStack()
+                    const pos = popCurrentFrameStack()
                     if (value) {
                         // intentional blank
                     } else {
@@ -585,8 +593,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break
                 case OpCode.JumpIf: {
-                    const value = currentFrame[Fields.valueStack].pop()
-                    const pos = currentFrame[Fields.valueStack].pop()
+                    const value = popCurrentFrameStack()
+                    const pos = popCurrentFrameStack()
                     if (value) {
                         ptr = pos
                     } else {
@@ -595,9 +603,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break
                 case OpCode.JumpIfAndKeep: {
-                    const value = currentFrame[Fields.valueStack].pop()
-                    const pos = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(value)
+                    const value = popCurrentFrameStack()
+                    const pos = popCurrentFrameStack()
+                    pushCurrentFrameStack(value)
                     if (value) {
                         ptr = pos
                     } else {
@@ -606,9 +614,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break;
                 case OpCode.JumpIfNotAndKeep: {
-                    const value = currentFrame[Fields.valueStack].pop()
-                    const pos = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(value)
+                    const value = popCurrentFrameStack()
+                    const pos = popCurrentFrameStack()
+                    pushCurrentFrameStack(value)
                     if (value) {
                         // intentional blank
                     } else {
@@ -618,27 +626,27 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     break;
                 case OpCode.EnterFunction: {
                     // TODO: arguments and this/self reference
-                    const functionType: FunctionTypes = currentFrame[Fields.valueStack].pop()
-                    const variableCount: number = currentFrame[Fields.valueStack].pop()
+                    const functionType: FunctionTypes = popCurrentFrameStack()
+                    const variableCount: number = popCurrentFrameStack()
                     const variables: VariableRecord[] = []
                     for (let i = 0; i < variableCount; i++) {
                         variables.push({
-                            [Fields.type]: currentFrame[Fields.valueStack].pop(),
-                            [Fields.name]: currentFrame[Fields.valueStack].pop()
+                            [Fields.type]: popCurrentFrameStack(),
+                            [Fields.name]: popCurrentFrameStack()
                         })
                     }
-                    const argumentNameCount: number = currentFrame[Fields.valueStack].pop()
+                    const argumentNameCount: number = popCurrentFrameStack()
                     const argumentNames: string[] = []
                     for (let i = 0; i < argumentNameCount; i++) {
-                        argumentNames.push(currentFrame[Fields.valueStack].pop())
+                        argumentNames.push(popCurrentFrameStack())
                     }
-                    const parameterCount: number = currentFrame[Fields.valueStack].pop()
+                    const parameterCount: number = popCurrentFrameStack()
                     const parameters: any[] = []
                     for (let i = 0; i < parameterCount; i++) {
-                        parameters.unshift(currentFrame[Fields.valueStack].pop())
+                        parameters.unshift(popCurrentFrameStack())
                     }
 
-                    const invokeType = currentFrame[Fields.valueStack].pop()
+                    const invokeType = popCurrentFrameStack()
 
                     const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                         const obj: Record<string, any> = createArgumentObject()
@@ -677,9 +685,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     if (invokeType === InvokeType.Apply) {
                         // TODO: arguments and this/self reference
-                        const name = currentFrame[Fields.valueStack].pop()
-                        const fn = currentFrame[Fields.valueStack].pop()
-                        const self = currentFrame[Fields.valueStack].pop()
+                        const name = popCurrentFrameStack()
+                        const fn = popCurrentFrameStack()
+                        const self = popCurrentFrameStack()
 
                         const scope: Scope = {}
                         currentFrame[Fields.scopes].push(scope)
@@ -708,9 +716,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             scope[name] = parameters[index]
                         }
                     } else if (invokeType === InvokeType.Construct) {
-                        const name = currentFrame[Fields.valueStack].pop()
-                        const fn = currentFrame[Fields.valueStack].pop()
-                        const newTarget = currentFrame[Fields.valueStack].pop()
+                        const name = popCurrentFrameStack()
+                        const fn = popCurrentFrameStack()
+                        const newTarget = popCurrentFrameStack()
 
                         const scope: Scope = {}
                         currentFrame[Fields.scopes].push(scope)
@@ -743,12 +751,12 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break
                 case OpCode.EnterScope: {
-                    const variableCount: number = currentFrame[Fields.valueStack].pop()
+                    const variableCount: number = popCurrentFrameStack()
                     const variables: VariableRecord[] = []
                     for (let i = 0; i < variableCount; i++) {
                         variables.push({
-                            [Fields.type]: currentFrame[Fields.valueStack].pop(),
-                            [Fields.name]: currentFrame[Fields.valueStack].pop()
+                            [Fields.type]: popCurrentFrameStack(),
+                            [Fields.name]: popCurrentFrameStack()
                         })
                     }
 
@@ -777,29 +785,29 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break
                 case OpCode.DefineFunction: {
-                    const type = currentFrame[Fields.valueStack].pop()
-                    const offset = currentFrame[Fields.valueStack].pop()
-                    const name = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(defineFunction(currentFrame[Fields.scopes], name, type, offset))
+                    const type = popCurrentFrameStack()
+                    const offset = popCurrentFrameStack()
+                    const name = popCurrentFrameStack()
+                    pushCurrentFrameStack(defineFunction(currentFrame[Fields.scopes], name, type, offset))
                 }
                     break
                 case OpCode.CallValue:
                 case OpCode.Call: {
-                    const parameterCount: number = currentFrame[Fields.valueStack].pop()
+                    const parameterCount: number = popCurrentFrameStack()
                     let parameters: any[] = []
                     for (let i = 0; i < parameterCount; i++) {
-                        parameters.unshift(currentFrame[Fields.valueStack].pop())
+                        parameters.unshift(popCurrentFrameStack())
                     }
 
                     let fn, envOrRecord, name = ''
 
                     if (command === OpCode.Call) {
-                        name = currentFrame[Fields.valueStack].pop()
-                        envOrRecord = currentFrame[Fields.valueStack].pop()
+                        name = popCurrentFrameStack()
+                        envOrRecord = popCurrentFrameStack()
                         fn = getValue(envOrRecord, name)
                     } else /** if (command === OpCode.CallValue) */ {
                         envOrRecord = undefined
-                        fn = currentFrame[Fields.valueStack].pop()
+                        fn = popCurrentFrameStack()
                     }
 
                     while (fn === CALL || fn === APPLY || bindInfo.has(fn)) {
@@ -838,7 +846,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     if (fn === BIND) {
                         const bound = bindInternal(self, parameters[0], parameters.slice(1))
-                        currentFrame[Fields.valueStack].push(bound)
+                        pushCurrentFrameStack(bound)
                     } else if (!functionDescriptors.has(fn)) {
                         // extern
                         if (typeof fn !== 'function') {
@@ -848,7 +856,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                                 throw new TypeError(`(intermediate value) is not a function`)
                             }
                         } else {
-                            currentFrame[Fields.valueStack].push(Reflect.apply(fn, self, parameters))
+                            pushCurrentFrameStack(Reflect.apply(fn, self, parameters))
                         }
                         
                     } else {
@@ -875,14 +883,14 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break
                 case OpCode.New: {
-                    const parameterCount: number = currentFrame[Fields.valueStack].pop()
+                    const parameterCount: number = popCurrentFrameStack()
                     let parameters: any[] = []
 
                     for (let i = 0; i < parameterCount; i++) {
-                        parameters.unshift(currentFrame[Fields.valueStack].pop())
+                        parameters.unshift(popCurrentFrameStack())
                     }
 
-                    let fn = currentFrame[Fields.valueStack].pop()
+                    let fn = popCurrentFrameStack()
 
                     while (bindInfo.has(fn)) {
                         let newFn, newParameters
@@ -898,7 +906,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     if (!functionDescriptors.has(fn)) {
                         // extern
-                        currentFrame[Fields.valueStack].push(Reflect.construct(fn, parameters, fn))
+                        pushCurrentFrameStack(Reflect.construct(fn, parameters, fn))
                     } else {
                         const des = functionDescriptors.get(fn)!
                         const newFrame: Frame = {
@@ -923,7 +931,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break
                 case OpCode.Return: {
-                    const result = currentFrame[Fields.valueStack].pop()
+                    const result = popCurrentFrameStack()
                     if (currentFrame[Fields.valueStack].length > 0) {
                         throw new Error('bad return')
                     }
@@ -966,24 +974,24 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break
                 case OpCode.Throw: {
-                    const err = currentFrame[Fields.valueStack].pop()
+                    const err = popCurrentFrameStack()
                     throw err
                 }
                 case OpCode.ThrowReferenceError: {
-                    const msg = currentFrame[Fields.valueStack].pop()
+                    const msg = popCurrentFrameStack()
                     throw new ReferenceError(msg)
                 }
                 case OpCode.ArrayLiteral:
-                    currentFrame[Fields.valueStack].push([])
+                    pushCurrentFrameStack([])
                     break
                 case OpCode.ObjectLiteral:
-                    currentFrame[Fields.valueStack].push({})
+                    pushCurrentFrameStack({})
                     break
                 case OpCode.InitTryCatch: {
-                    const catchName = currentFrame[Fields.valueStack].pop()
-                    const finallyAddr = currentFrame[Fields.valueStack].pop()
-                    const catchAddr = currentFrame[Fields.valueStack].pop()
-                    const exitAddr = currentFrame[Fields.valueStack].pop()
+                    const catchName = popCurrentFrameStack()
+                    const finallyAddr = popCurrentFrameStack()
+                    const catchAddr = popCurrentFrameStack()
+                    const exitAddr = popCurrentFrameStack()
 
                     const frame: TryFrame = {
                         [Fields.type]: FrameType.Try,
@@ -1055,50 +1063,50 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 }
                     break;
                 case OpCode.Typeof: {
-                    const value = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(typeof value)
+                    const value = popCurrentFrameStack()
+                    pushCurrentFrameStack(typeof value)
                 }
                     break
                 case OpCode.TypeofReference: {
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
                     if (environments.has(ctx)) {
                         const frame: Frame = ctx
                         for (let i = frame[Fields.scopes].length - 1; i >= 0; i--) {
                             if (Reflect.getOwnPropertyDescriptor(frame[Fields.scopes][i], name)) {
-                                currentFrame[Fields.valueStack].push(typeof frame[Fields.scopes][i][name]) 
+                                pushCurrentFrameStack(typeof frame[Fields.scopes][i][name]) 
                                 break command;
                             }
                         }
-                        currentFrame[Fields.valueStack].push('undefined') 
+                        pushCurrentFrameStack('undefined') 
                     } else {
-                        currentFrame[Fields.valueStack].push(typeof ctx[name])
+                        pushCurrentFrameStack(typeof ctx[name])
                     }
                 }
                     break
                 case OpCode.GetPropertyIterator: {
-                    const value = currentFrame[Fields.valueStack].pop()
+                    const value = popCurrentFrameStack()
                     const iterator = (function * (value: any) {
                         for (const key in value) {
                             yield key
                         }
                     })(value)
-                    currentFrame[Fields.valueStack].push(iterator)
+                    pushCurrentFrameStack(iterator)
                 }
                     break
                 case OpCode.NextEntry: {
-                    const iterator: Iterator<any> = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(iterator.next())
+                    const iterator: Iterator<any> = popCurrentFrameStack()
+                    pushCurrentFrameStack(iterator.next())
                 }
                     break
                 case OpCode.EntryIsDone: {
-                    const entry: IteratorResult<any> = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(entry.done)
+                    const entry: IteratorResult<any> = popCurrentFrameStack()
+                    pushCurrentFrameStack(entry.done)
                 }
                     break
                 case OpCode.EntryGetValue: {
-                    const entry: IteratorResult<any> = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(entry.value)
+                    const entry: IteratorResult<any> = popCurrentFrameStack()
+                    pushCurrentFrameStack(entry.value)
                 }
                     break
                 case OpCode.InstanceOf:
@@ -1124,8 +1132,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 case OpCode.BAsterisk:
                 case OpCode.BSlash: 
                 case OpCode.BPercent: {
-                    const right = currentFrame[Fields.valueStack].pop()
-                    const left = currentFrame[Fields.valueStack].pop()
+                    const right = popCurrentFrameStack()
+                    const left = popCurrentFrameStack()
                     const ops = {
                         [OpCode.BAmpersand]: (left: any, right: any) => left & right,
                         [OpCode.BBar]: (left: any, right: any) => left | right,
@@ -1150,13 +1158,13 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         [OpCode.BPercent]: (left: any, right: any) => left % right
                     }
                     const result = ops[command](left, right)
-                    currentFrame[Fields.valueStack].push(result)
+                    pushCurrentFrameStack(result)
                 }
                     break;
                 case OpCode.PostFixPlusPLus:
                 case OpCode.PostFixMinusMinus: {
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
                     if (environments.has(ctx)) {
                         const env: Frame = ctx
                         const scope = findScope(env, name)
@@ -1165,7 +1173,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             const old = scope[name]
                             const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
                             scope[name] = newVal
-                            currentFrame[Fields.valueStack].push(old)
+                            pushCurrentFrameStack(old)
                         } else {
                             throw new ReferenceError(name + is_not_defined)
                         }
@@ -1174,7 +1182,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         const old = self[name]
                         const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
                         self[name] = newVal
-                        currentFrame[Fields.valueStack].push(old)
+                        pushCurrentFrameStack(old)
                     }
                 }
                     break;
@@ -1182,7 +1190,7 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                 case OpCode.PrefixUnaryMinus: 
                 case OpCode.PrefixExclamation:
                 case OpCode.PrefixTilde: {
-                    const value = currentFrame[Fields.valueStack].pop()
+                    const value = popCurrentFrameStack()
                     let result
                     switch (command) {
                         case OpCode.PrefixUnaryPlus:
@@ -1198,27 +1206,27 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                             result = ~value
                             break
                     }
-                    currentFrame[Fields.valueStack].push(result)
+                    pushCurrentFrameStack(result)
                 }
                     break
                 // Prefix updates
                 case OpCode.PrefixPlusPlus:
                 case OpCode.PrefixMinusMinus: {
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
 
                     const currentValue = getValue(ctx, name)
                     const newVal = command === OpCode.PrefixPlusPlus ? currentValue + 1 : currentValue - 1
                     setValue(ctx, name, newVal)
 
                     // Just don't care and push the new value
-                    currentFrame[Fields.valueStack].push(newVal)
+                    pushCurrentFrameStack(newVal)
                 }
                     break;
                 case OpCode.Delete: {
-                    const name = currentFrame[Fields.valueStack].pop()
-                    const ctx = currentFrame[Fields.valueStack].pop()
-                    currentFrame[Fields.valueStack].push(delete ctx[name])
+                    const name = popCurrentFrameStack()
+                    const ctx = popCurrentFrameStack()
+                    pushCurrentFrameStack(delete ctx[name])
                 }
                     break
                 case OpCode.Debugger:
