@@ -274,6 +274,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
 
+        let returnsExternal = false
+        let returnValue = null
+
         const addCatchScope = (frame: TryFrame, name: string, value: any) => {
             const newScope: Scope = {}
             defineVariable(newScope, name, VariableType.Var)
@@ -293,6 +296,8 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
 
                     if (returnAddr < 0) {
                         // leave the whole function
+                        returnsExternal = true
+                        returnValue = value
                         return value
                     } else {
                         stack.pop()
@@ -1236,6 +1241,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                     type NonRuntimeCommands = OpCode.NodeFunctionType | OpCode.NodeOffset | OpCode.Nop
                     const nothing: NonRuntimeCommands = command
                     throw new Error('Um?')
+            }
+
+            if (returnsExternal) {
+                return returnValue
             }
 
         } catch (err) {
