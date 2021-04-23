@@ -863,6 +863,8 @@ export function getNameOfKind(kind: ts.SyntaxKind): string {
     return name
 }
 
+function op(op: OpCode.NodeOffset, length?: number, preData?: (Op | ts.Node)[]): Op<OpCode>
+function op(op: Exclude<OpCode, OpCode.NodeOffset>, length?: number, preData?: any[]): Op<OpCode>
 function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
     return {
         op,
@@ -1947,11 +1949,15 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
                 op(OpCode.Nop, 0)
             ]
             const head = [
-                op(OpCode.NodeOffset, 2, [exit]),
+                op(OpCode.NodeOffset, 2, [exit[0]]),
                 ...generate(node.expression, flag),
                 op(OpCode.JumpIfNot)
             ]
-            const body = generate(node.statement, flag)
+            const body = [
+                ...generate(node.statement, flag),
+                op(OpCode.NodeOffset, 2, [head[0]]),
+                op(OpCode.Jump)
+            ]
 
             return [
                 continueOp,

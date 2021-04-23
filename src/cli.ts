@@ -26,7 +26,14 @@ async function main () {
     const runtime = runtimeFull.slice(startPos, endPos)
 
     const content = await fs.readFile(filename, { encoding: 'utf-8' })
-    const contentMinimized = noMinimize ? content : uglify.minify(content).code
+    const contentMinimized = noMinimize ? content : uglify.minify(content, {
+        compress: {
+            drop_debugger: false,
+        },
+        output: {
+            beautify: debugMode
+        }
+    }).code
 
     if (debugMode && !noMinimize) {
         console.error(contentMinimized)
@@ -45,7 +52,15 @@ run(programData, textData, 0, [globalThis, { _$_: run }])
         if (noMinimize) {
             console.log(joined)
         } else {
-            const res = uglify.minify(joined)
+            const res = uglify.minify(joined, {
+                compress: {
+                    drop_debugger: false,
+                },
+                output: {
+                    beautify: debugMode
+                }
+            })
+
             if (res.error) {
                 throw res.error
             } else {

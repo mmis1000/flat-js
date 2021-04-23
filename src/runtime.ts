@@ -204,9 +204,11 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
             [Fields.scopes]: scopeClone
         }
 
-        const fn = function (this: any, ...args: any[]) {
+        const fn = function externalFn (this: any, ...args: any[]) {
             return run(program, textData, offset, [...scopeClone], this, args)
         }
+
+        ;(fn as any).__pos__ = offset
 
         functionDescriptors.set(fn, des)
 
@@ -273,6 +275,10 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
         const currentPtr = ptr
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
+
+        if (currentFrame[Fields.scopes].length > 50) {
+            debugger
+        }
 
         let returnsExternal = false
         let returnValue = null
@@ -710,7 +716,9 @@ export function run(program: number[], textData: any[], entryPoint: number = 0, 
                         switch (functionType) {
                             case FunctionTypes.FunctionExpression:
                             case FunctionTypes.MethodDeclaration:
-                                scope[name] = fn
+                                if (name !== '') {
+                                    scope[name] = fn
+                                }
                         }
 
                         for (let v of variables) {
