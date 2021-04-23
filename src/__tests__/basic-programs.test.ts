@@ -823,3 +823,74 @@ delete a.b
 delete a['c']
 print('b' in a, 'c' in a)
 `, [true, true, false, false], printProvider)
+
+
+testRuntime('while', `
+let i = 0
+
+print(-1)
+while (i < 3) {
+    print(i)
+    i++
+}
+print(-2)
+`, [-1, 0, 1, 2, -2], printProvider)
+
+testRuntime('while continue', `
+let i = 0
+
+print(-1)
+while (i < 5) {
+    i++
+    if (i % 2 === 0) {
+        continue
+    }
+    print(i)
+}
+print(-2)
+`, [-1, 1, 3, 5, -2], printProvider)
+
+testRuntime('while break', `
+let i = 0
+
+print(-1)
+while (true) {
+    i++
+    print(i)
+    break
+}
+print(-2)
+`, [-1, 1, -2], printProvider)
+
+testRuntime('do while', `
+let i = 0
+
+print(-1)
+do {
+    print(i)
+    i++
+} while (i < 0)
+print(-2)
+`, [-1, 0, -2], printProvider)
+
+testRuntime('do while continue', `
+let i = 0
+
+print(-1)
+do {
+    print(i++)
+    if (i < 5) continue
+} while (false)
+print(-2)
+`, [-1, 0, 1, 2, 3, 4, -2], printProvider)
+
+testRuntime('do while break', `
+let i = 0
+
+print(-1)
+do {
+    print(i++)
+    if (i >= 5) break
+} while (true)
+print(-2)
+`, [-1, 0, 1, 2, 3, 4, -2], printProvider)
