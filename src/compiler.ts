@@ -863,8 +863,9 @@ export function getNameOfKind(kind: ts.SyntaxKind): string {
     return name
 }
 
+function op(op: OpCode.Nop, length: 0, preData?: never[]): Op<OpCode>
 function op(op: OpCode.NodeOffset, length?: number, preData?: (Op | ts.Node)[]): Op<OpCode>
-function op(op: Exclude<OpCode, OpCode.NodeOffset>, length?: number, preData?: any[]): Op<OpCode>
+function op(op: Exclude<OpCode, OpCode.NodeOffset | OpCode.Nop>, length?: number, preData?: any[]): Op<OpCode>
 function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
     return {
         op,
