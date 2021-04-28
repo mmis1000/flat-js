@@ -1,4 +1,6 @@
 const HtmlWebpackPlugin = require('html-webpack-plugin')
+const VueLoaderPlugin = require('vue-loader/lib/plugin')
+const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 const path = require('path')
 
@@ -8,8 +10,26 @@ module.exports = {
   module: {
     rules: [
       {
+        test: /\.vue$/,
+        loader: 'vue-loader'
+      },
+      {
+        test: /\.css$/,
+        use: [
+          'vue-style-loader',
+          'css-loader'
+        ]
+      },
+      {
+        test: /\.ttf$/,
+        use: ['file-loader']
+      },
+      {
         test: /\.tsx?$/,
-        use: 'ts-loader',
+        use: {
+          loader: 'ts-loader',
+          options: { appendTsSuffixTo: [/\.vue$/] },
+        },
         exclude: /node_modules/
       }
     ]
@@ -20,7 +40,9 @@ module.exports = {
   plugins: [
     new HtmlWebpackPlugin({
       template: path.join(__dirname, 'web/index.html')
-    })
+    }),
+    new MonacoWebpackPlugin(),
+    new VueLoaderPlugin()
   ],
   optimization: {
     minimizer: [

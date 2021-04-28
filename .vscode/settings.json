@@ -15,5 +15,7 @@
         "titleBar.inactiveBackground": "#00000299",
         "titleBar.inactiveForeground": "#e7e7e799"
     },
-    "peacock.remoteColor": "#000002"
+    "peacock.remoteColor": "#000002",
+    "prettier.tabWidth": 4,
+    "vetur.format.options.tabSize": 4
 }
