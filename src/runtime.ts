@@ -20,7 +20,7 @@ const enum FrameType {
     Try
 }
 
-type Scope = Record<string, any>
+export type Scope = Record<string, any>
 
 export const enum Fields {
     type,
@@ -81,9 +81,9 @@ type TryFrame = {
     [Fields.variable]: string
 }
 
-type Frame = FunctionFrame | TryFrame
+export type Frame = FunctionFrame | TryFrame
 
-type Stack = Frame[]
+export type Stack = Frame[]
 
 type VariableRecord = {
     [Fields.type]: VariableType
@@ -98,8 +98,9 @@ type VariableDescriptor = {
 
 const is_not_defined = ' is not defined'
 const is_a_constant = ' is a constant'
+const getEmptyObject = Object.create.bind(Object, null, {})
 
-type Result = {
+export type Result = {
     done: false,
 } | {
     done: true,
@@ -113,7 +114,15 @@ type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
 
 type Context = Record<string, any> | Frame
 
-const getExecution = (program: number[], textData: any[], entryPoint: number = 0, scopes: Scope[] = [], self: undefined = undefined, args: any[] = []) => {
+const getExecution = (
+    program: number[],
+    textData: any[],
+    entryPoint: number = 0,
+    scopes: Scope[] = [],
+    self: undefined = undefined,
+    args: any[] = [],
+    getDebugFunction: () => null | (() => void) = () => null
+) => {
     const environments = new WeakSet() as unknown as RefinedEnvSet
     const initialFrame: Frame = {
         [Fields.type]: FrameType.Function,
@@ -223,7 +232,7 @@ const getExecution = (program: number[], textData: any[], entryPoint: number = 0
         }
 
         const fn = function externalFn (this: any, ...args: any[]) {
-            return run(program, textData, offset, [...scopeClone], this, args)
+            return run_(program, textData, offset, [...scopeClone], this, args, getDebugFunction)
         }
 
         ;(fn as any).__pos__ = offset
@@ -289,11 +298,7 @@ const getExecution = (program: number[], textData: any[], entryPoint: number = 0
         }
     }
 
-    let debugFn = () => {
-        debugger
-    }
-
-    const step = (): Result => {
+    const step = (debug: boolean = false): Result => {
         const currentPtr = ptr
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
@@ -722,7 +727,7 @@ const getExecution = (program: number[], textData: any[], entryPoint: number = 0
                         const fn = popCurrentFrameStack()
                         const self = popCurrentFrameStack()
 
-                        const scope: Scope = {}
+                        const scope: Scope = getEmptyObject()
                         currentFrame[Fields.scopes].push(scope)
 
                         switch (functionType) {
@@ -755,7 +760,7 @@ const getExecution = (program: number[], textData: any[], entryPoint: number = 0
                         const fn = popCurrentFrameStack()
                         const newTarget = popCurrentFrameStack<{ new(...args: any[]): any } >()
 
-                        const scope: Scope = {}
+                        const scope: Scope = getEmptyObject()
                         currentFrame[Fields.scopes].push(scope)
 
                         switch (functionType) {
@@ -795,7 +800,7 @@ const getExecution = (program: number[], textData: any[], entryPoint: number = 0
                         })
                     }
 
-                    const scope: Scope = {}
+                    const scope: Scope = getEmptyObject()
                     currentFrame[Fields.scopes].push(scope)
 
                     for (let v of variables) {
@@ -1270,8 +1275,19 @@ const getExecution = (program: number[], textData: any[], entryPoint: number = 0
                     pushCurrentFrameStack(delete ctx[name])
                 }
                     break
-                case OpCode.Debugger:
-                    debugFn()
+                case OpCode.Debugger: {
+                    const debugFn = getDebugFunction()
+
+                    if (debugFn) {
+                        if (debug) {
+                            debugFn()
+                        } else {
+                            console.warn('Custom debug function did not work when called from native function')
+                        }
+                    } else {
+                        debugger
+                    }
+                }
                     break;
                 default:
                     type NonRuntimeCommands = OpCode.NodeFunctionType | OpCode.NodeOffset | OpCode.Nop
@@ -1305,15 +1321,20 @@ const getExecution = (program: number[], textData: any[], entryPoint: number = 0
         get [Fields.stack] () {
             return stack
         },
-        [Fields.setDebugFunction] (fn: () => void) {
-            debugFn = fn
-        },
         [Fields.step]: step
     }
 }
 
-const run = (program: number[], textData: any[], entryPoint: number = 0, scopes: Scope[] = [], self: undefined = undefined, args: any[] = []) => {
-    const execution = getExecution(program, textData, entryPoint, scopes, self, args)
+const run_ = (
+    program: number[],
+    textData: any[],
+    entryPoint: number,
+    scopes: Scope[],
+    self: undefined,
+    args: any[],
+    getDebugFunction: () => null | (() => void)
+) => {
+    const execution = getExecution(program, textData, entryPoint, scopes, self, args, getDebugFunction)
 
     let res
 
@@ -1322,6 +1343,26 @@ const run = (program: number[], textData: any[], entryPoint: number = 0, scopes:
     } while (!res.done)
 
     return res.value
+}
+
+const run = (
+    program: number[],
+    textData: any[],
+    entryPoint: number = 0,
+    scopes: Scope[] = [],
+    self: undefined = undefined,
+    args: any[] = []
+) => {
+    // The debug function is always null because it did not work in one shot
+    return run_(
+        program,
+        textData,
+        entryPoint,
+        scopes,
+        self,
+        args,
+        () => null
+    )
 }
 
 export {

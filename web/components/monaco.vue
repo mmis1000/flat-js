@@ -5,24 +5,42 @@
 <script lang="ts">
 import * as monaco from 'monaco-editor';
 import Vue from 'vue'
+function withNonReactive<TData>(data: TData) {
+    return <TNonReactive>() => data as TData & TNonReactive;
+}
+
 export default Vue.extend({
     props: {
         value: {
             type: String,
             default: ''
+        },
+        readonly: {
+            type: Boolean,
+            default: false
         }
+    },
+    data () {
+        return withNonReactive({})<{
+            editor: monaco.editor.IStandaloneCodeEditor
+        }>()
     },
     watch: {
         value (newVal) {
-            const editor = ((this as any).editor as monaco.editor.IStandaloneCodeEditor)
+            const editor = this .editor
             const current = editor.getValue()
             if (current !== newVal) {
                 editor.setValue(newVal)
             }
+        },
+        readonly (newVal) {
+            this.editor.updateOptions({
+                readOnly: newVal
+            })
         }
     },
     mounted () {
-        const editor = (this as any).editor = monaco.editor.create(this.$refs.editor as any, {
+        const editor = this.editor = monaco.editor.create(this.$refs.editor as any, {
             value: this.value,
             language: 'javascript',
             scrollBeyondLastLine: false,
@@ -35,6 +53,12 @@ export default Vue.extend({
                 this.$emit('input', editor.getValue())
             }
         })
+
+        if (this.readonly) {
+            this.editor.updateOptions({
+                readOnly: true
+            })
+        }
     }
 })
 </script>
