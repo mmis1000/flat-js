@@ -3,16 +3,17 @@ import { run } from "./runtime"
 
 
 function compileAndRun(src: string) {
-    const [programData, textData] = compile(src, true)
+    const [programData, textData] = compile(src, { debug: true, evalMode: true })
     console.log(JSON.stringify(textData))
     console.log(programData.length, Buffer.from(new Uint32Array(programData).buffer).toString('base64'))
     console.time()
-    run(programData, textData, 0, [globalThis, {
+    const res = run(programData, textData, 0, [globalThis, {
         location: {
             href: 'AAAA'
         }
     }])
     console.timeEnd()
+    return res
 }
 
 // compileAndRun(`
@@ -28,6 +29,6 @@ function compileAndRun(src: string) {
 // }
 // `)
 
-compileAndRun(`
-console.log(0, 1, 2) = 3
-`)
+console.log(compileAndRun(`
+12
+`))

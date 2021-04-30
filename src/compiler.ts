@@ -1079,7 +1079,7 @@ function generateSegment(
         }
 
         if (ts.isExpressionStatement(node)) {
-            if (flag & StatementFlag.Eval) {
+            if (flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)) {
                 return [
                     ...generate(node.expression, flag),
                     op(OpCode.SetEvalResult),
