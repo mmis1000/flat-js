@@ -49,7 +49,10 @@ async function main () {
         throw new Error('fail to minimize')
     }
 
-    const [programDataRaw, textDataRaw] = compile(contentMinimized, debugMode, debugMode)
+    const [programDataRaw, textDataRaw] = compile(contentMinimized, {
+        debug: debugMode,
+        range: debugMode
+    })
     const textData = JSON.stringify(textDataRaw)
     const programData = Buffer.from(new Uint32Array(programDataRaw).buffer).toString('base64')
 

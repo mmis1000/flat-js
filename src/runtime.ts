@@ -51,7 +51,8 @@ export const enum Fields {
     step,
 
     programSection,
-    textSection
+    textSection,
+    evalResult
 }
 
 interface BaseFrame {
@@ -113,7 +114,8 @@ export type Result = {
     done: false,
 } | {
     done: true,
-    value: any
+    value: unknown,
+    evalValue: unknown
 }
 
 type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
@@ -321,6 +323,8 @@ const getExecution = (
             }
         }
     }
+
+    let evalResult: any = undefined;
 
     const step = (debug: boolean = false): Result => {
         const currentPtr = ptr
@@ -534,6 +538,9 @@ const getExecution = (
                     break;
                 case OpCode.Pop:
                     popCurrentFrameStack()
+                    break
+                case OpCode.SetEvalResult:
+                    evalResult = peak(currentFrame[Fields.valueStack])
                     break
                 case OpCode.Duplicate:
                     pushCurrentFrameStack(peak(currentFrame[Fields.valueStack]))
@@ -1349,7 +1356,8 @@ const getExecution = (
             if (returnsExternal) {
                 return {
                     done: true,
-                    value: returnValue
+                    value: returnValue,
+                    evalValue: evalResult
                 }
             }
 
@@ -1383,7 +1391,8 @@ const run_ = (
     scopes: Scope[],
     self: undefined,
     args: any[],
-    getDebugFunction: () => null | (() => void)
+    getDebugFunction: () => null | (() => void),
+    evalResultInstead = false
 ) => {
     const execution = getExecution(program, textData, entryPoint, scopes, self, args, getDebugFunction)
 
@@ -1393,7 +1402,11 @@ const run_ = (
         res = execution[Fields.step]()
     } while (!res.done)
 
-    return res.value
+    if (!evalResultInstead) {
+        return res.value
+    } else {
+        return res.evalValue
+    }
 }
 
 const run = (
@@ -1412,7 +1425,8 @@ const run = (
         scopes,
         self,
         args,
-        () => null
+        () => null,
+        true
     )
 }
 

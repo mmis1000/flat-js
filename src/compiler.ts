@@ -16,7 +16,8 @@ export const enum StatementFlag {
     Try              = 1 << 0,
     Catch            = 1 << 1,
     Finally          = 1 << 2,
-    TryCatchFlags = Try | Catch | Finally
+    TryCatchFlags = Try | Catch | Finally,
+    Eval             = 1 << 3,
 }
 
 export const enum TryCatchFinallyState {
@@ -179,6 +180,8 @@ export const enum OpCode {
 
     // stack ops
     Pop,
+
+    SetEvalResult,
 
     /**
      * ```txt
@@ -909,7 +912,18 @@ function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
 const nextOps = new Map<ts.Node, Op>()
 const continueOps = new Map<ts.Node, Op>()
 
-function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMap, functions: Functions, withPos = false): Segment {
+type SegmentOptions = {
+    withPos?: boolean,
+    withEval?: boolean
+}
+
+function generateSegment(
+    node: VariableRoot,
+    scopes: Scopes,
+    parentMap: ParentMap,
+    functions: Functions,
+    { withPos = false, withEval = false }: SegmentOptions = {}
+): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
 
     function extractQuote(node: ts.Node) {
@@ -1065,10 +1079,18 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
         }
 
         if (ts.isExpressionStatement(node)) {
-            return [
-                ...generate(node.expression, flag),
-                op(OpCode.Pop)
-            ]
+            if (flag & StatementFlag.Eval) {
+                return [
+                    ...generate(node.expression, flag),
+                    op(OpCode.SetEvalResult),
+                    op(OpCode.Pop)
+                ]
+            } else {
+                return [
+                    ...generate(node.expression, flag),
+                    op(OpCode.Pop)
+                ]
+            }
         }
 
         if (ts.isNumericLiteral(node)) {
@@ -2160,7 +2182,7 @@ function generateSegment(node: VariableRoot, scopes: Scopes, parentMap: ParentMa
 
     if (ts.isSourceFile(node)) {
         const statements = [...node.statements]
-        bodyNodes = statements.map(s => generate(s, 0)).flat().concat(op(OpCode.UndefinedLiteral), op(OpCode.Return))
+        bodyNodes = statements.map(s => generate(s, withEval ? StatementFlag.Eval : 0)).flat().concat(op(OpCode.UndefinedLiteral), op(OpCode.Return))
     } else if (node.body != undefined && ts.isBlock(node.body)) {
         const statements = [...node.body.statements]
         bodyNodes = statements.map(s => generate(s, 0)).flat().concat(op(OpCode.UndefinedLiteral), op(OpCode.Return))
@@ -2286,7 +2308,13 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
     }
 }
 
-export function compile(src: string, debug = false, range = false) {
+export type CompileOptions = {
+    debug?: boolean,
+    range?: boolean,
+    evalMode?: boolean
+}
+
+export function compile(src: string,  { debug = false, range = false, evalMode = false }: CompileOptions = {}) {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
@@ -2304,7 +2332,10 @@ export function compile(src: string, debug = false, range = false) {
     const functionToSegment = new Map<ts.Node, Segment>()
 
     for (let item of functions) {
-        const generated = generateSegment(item, scopes, parentMap, functions, range)
+        const generated = generateSegment(item, scopes, parentMap, functions, {
+            withPos: range,
+            withEval: (item.kind === ts.SyntaxKind.SourceFile) && evalMode
+        })
         program.push(generated)
         functionToSegment.set(item, generated)
     }
