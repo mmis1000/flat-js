@@ -48,18 +48,27 @@ export const enum Fields {
     ptr,
     stack,
     setDebugFunction,
-    step
+    step,
+
+    programSection,
+    textSection
 }
 
-type FunctionFrame = {
-    [Fields.type]: FrameType.Function
+interface BaseFrame {
+    [Fields.type]: FrameType
+    [Fields.programSection]: number[]
+    [Fields.textSection]: any[]
     [Fields.scopes]: Scope[]
     [Fields.valueStack]: any[]
+}
+
+interface FunctionFrame extends BaseFrame {
+    [Fields.type]: FrameType.Function
     [Fields.return]: number,
     [Fields.invokeType]: InvokeType
 }
 
-type TryFrame = {
+interface TryFrame extends BaseFrame {
     [Fields.type]: FrameType.Try,
     // scope snapshot
     [Fields.savedScopes]: Scope[],
@@ -114,6 +123,23 @@ type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
 
 type Context = Record<string, any> | Frame
 
+type FunctionDescriptor = {
+    [Fields.name]: string,
+    [Fields.type]: FunctionTypes,
+    [Fields.offset]: number,
+    [Fields.scopes]: Scope[],
+    [Fields.programSection]: number[],
+    [Fields.textSection]: any[]
+}
+
+const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
+
+const environments = new WeakSet() as unknown as RefinedEnvSet
+
+const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
+
+const variableDescriptors = new WeakMap<Scope, Map<string, VariableDescriptor>>()
+
 const getExecution = (
     program: number[],
     textData: any[],
@@ -123,7 +149,9 @@ const getExecution = (
     args: any[] = [],
     getDebugFunction: () => null | (() => void) = () => null
 ) => {
-    const environments = new WeakSet() as unknown as RefinedEnvSet
+    let currentProgram = program
+    let currentTextData = textData
+
     const initialFrame: Frame = {
         [Fields.type]: FrameType.Function,
         [Fields.scopes]: scopes,
@@ -136,7 +164,9 @@ const getExecution = (
             args.length
         ],
         [Fields.invokeType]: InvokeType.Apply,
-        [Fields.return]: -1
+        [Fields.return]: -1,
+        [Fields.programSection]: currentProgram,
+        [Fields.textSection]: currentTextData
     }
 
     environments.add(initialFrame)
@@ -144,11 +174,9 @@ const getExecution = (
     const stack: Stack = [initialFrame]
     let ptr: number = entryPoint
 
-    const read = () => program[ptr++]
+    const read = () => currentProgram[ptr++]
     const getCurrentFrame = () => stack[stack.length - 1]
     const peak = <T>(arr: T[], offset = 1): T => arr[arr.length - offset]
-
-    const variableDescriptors = new WeakMap<Scope, Map<string, VariableDescriptor>>()
 
     const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean) => {
         if (!variableDescriptors.has(scope)) {
@@ -204,15 +232,6 @@ const getExecution = (
         }
     }
 
-    type FunctionDescriptor = {
-        [Fields.name]: string,
-        [Fields.type]: FunctionTypes,
-        [Fields.offset]: number,
-        [Fields.scopes]: Scope[]
-    }
-
-    const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
-
     const MyArgument: { new(): {} } = function MyArgument () {} as any
 
     const createArgumentObject = () => {
@@ -224,15 +243,20 @@ const getExecution = (
         // TODO: types
         const scopeClone = [...scopes]
 
+        const pr = currentProgram
+        const txt = currentTextData
+
         const des: FunctionDescriptor = {
             [Fields.name]: name,
             [Fields.type]: type,
             [Fields.offset]: offset,
-            [Fields.scopes]: scopeClone
+            [Fields.scopes]: scopeClone,
+            [Fields.programSection]: pr,
+            [Fields.textSection]: txt
         }
 
         const fn = function externalFn (this: any, ...args: any[]) {
-            return run_(program, textData, offset, [...scopeClone], this, args, getDebugFunction)
+            return run_(pr, txt, offset, [...scopeClone], this, args, getDebugFunction)
         }
 
         ;(fn as any).__pos__ = offset
@@ -241,7 +265,7 @@ const getExecution = (
 
         return fn
     }
-    const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
+
     const bindInternal = (fn: any, self: any, args: any[]) => {
         if (typeof fn !== 'function') {
             return undefined
@@ -303,6 +327,10 @@ const getExecution = (
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
 
+        if (currentFrame[Fields.programSection].length !== currentProgram.length) {
+            debugger
+        }
+
         if (currentFrame[Fields.scopes].length > 50) {
             debugger
         }
@@ -335,6 +363,9 @@ const getExecution = (
                     } else {
                         stack.pop()
                         ptr = returnAddr
+                        currentProgram = peak(stack)[Fields.programSection]
+                        currentTextData = peak(stack)[Fields.textSection]
+
                         if (
                             frame[Fields.invokeType] === InvokeType.Apply
                             || ( value !== null && typeof value === 'object')
@@ -412,7 +443,7 @@ const getExecution = (
                             stack.pop()
                         } else {
 
-                            // as if we return on upper try catch
+                            // as if we throw on upper try catch
                             currentFrame[Fields.valueStack].push(value)
                             throwsTryFrame();
                             return
@@ -448,8 +479,12 @@ const getExecution = (
                         }
 
                         ptr = catchAddr
+                        currentProgram = frame[Fields.programSection]
+                        currentTextData = frame[Fields.textSection]
                     } else {
                         ptr = exitAddr
+                        currentProgram = frame[Fields.programSection]
+                        currentTextData = frame[Fields.textSection]
                     }
                 }
                     break;
@@ -459,6 +494,8 @@ const getExecution = (
                         frame[Fields.resolveType] = ResolveType.throw
                         frame[Fields.value] = value
                         ptr = finallyAddr
+                        currentProgram = frame[Fields.programSection]
+                        currentTextData = frame[Fields.textSection]
                     } else {
                         stack.pop()
                         throwsConditional(value)
@@ -491,7 +528,7 @@ const getExecution = (
                     if (isSmallNumber(value)) {
                         pushCurrentFrameStack(value)
                     } else {
-                        pushCurrentFrameStack(textData[value ^ TEXT_DADA_MASK])
+                        pushCurrentFrameStack(currentTextData[value ^ TEXT_DADA_MASK])
                     }
                 }
                     break;
@@ -913,12 +950,16 @@ const getExecution = (
                                 ...parameters,
                                 parameters.length
                             ],
-                            [Fields.invokeType]: InvokeType.Apply
+                            [Fields.invokeType]: InvokeType.Apply,
+                            [Fields.programSection]: des[Fields.programSection],
+                            [Fields.textSection]: des[Fields.textSection]
                         }
                         environments.add(newFrame)
 
                         stack.push(newFrame)
                         ptr = des[Fields.offset]
+                        currentTextData = des[Fields.textSection]
+                        currentProgram = des[Fields.programSection]
                     }
                 }
                     break
@@ -961,12 +1002,16 @@ const getExecution = (
                                 ...parameters,
                                 parameters.length
                             ],
-                            [Fields.invokeType]: InvokeType.Construct
+                            [Fields.invokeType]: InvokeType.Construct,
+                            [Fields.programSection]: des[Fields.programSection],
+                            [Fields.textSection]: des[Fields.textSection]
                         }
                         environments.add(newFrame)
 
                         stack.push(newFrame)
                         ptr = des[Fields.offset]
+                        currentTextData = des[Fields.textSection]
+                        currentProgram = des[Fields.programSection]
                     }
                 }
                     break
@@ -1006,17 +1051,21 @@ const getExecution = (
 
                     stack.pop()
 
+                    const prevFrame = peak(stack)
+
                     if (functionFrame[Fields.invokeType] === InvokeType.Apply) {
-                        peak(stack)[Fields.valueStack].push(result)
+                        prevFrame[Fields.valueStack].push(result)
                     } else {
                         if (typeof result === 'function' || typeof result === 'object') {
-                            peak(stack)[Fields.valueStack].push(result)
+                            prevFrame[Fields.valueStack].push(result)
                         } else {
-                            peak(stack)[Fields.valueStack].push(getValue(functionFrame, SpecialVariable.This))
+                            prevFrame[Fields.valueStack].push(getValue(functionFrame, SpecialVariable.This))
                         }
                     }
 
                     ptr = returnAddr
+                    currentProgram = prevFrame[Fields.programSection]
+                    currentTextData = prevFrame[Fields.textSection]
                 }
                     break
                 case OpCode.Throw: {
@@ -1050,7 +1099,9 @@ const getExecution = (
                         [Fields.catch]: catchAddr,
                         [Fields.finally]: finallyAddr,
                         [Fields.variable]: catchName,
-                        [Fields.exit]: exitAddr
+                        [Fields.exit]: exitAddr,
+                        [Fields.textSection]: currentTextData,
+                        [Fields.programSection]: currentProgram
                     }
 
                     environments.add(frame)
