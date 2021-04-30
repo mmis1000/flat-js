@@ -80,6 +80,7 @@ jobs:
           ${{ runner.os }}-
     - run: npm ci
     - run: npm run build-web
+    - run: npm run build-example
     - run: cp -R example dist-web/example
     - run: git config user.email "${GITHUB_ACTOR}@ci"
     - run: git config user.name "${GITHUB_ACTOR}"

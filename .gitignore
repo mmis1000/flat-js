@@ -119,3 +119,5 @@ dist
 
 lib/
 dist-web/
+example/*.json
+example/*.js
