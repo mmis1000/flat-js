@@ -18,5 +18,6 @@
     "peacock.remoteColor": "#000002",
     "prettier.tabWidth": 4,
     "vetur.format.options.tabSize": 4,
-    "vetur.experimental.templateInterpolationService": true
+    "vetur.experimental.templateInterpolationService": true,
+    "typescript.tsdk": "node_modules/typescript/lib"
 }

@@ -52,7 +52,8 @@ export const enum Fields {
 
     programSection,
     textSection,
-    evalResult
+    evalResult,
+    newTarget
 }
 
 interface BaseFrame {
@@ -142,12 +143,32 @@ const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, 
 
 const variableDescriptors = new WeakMap<Scope, Map<string, VariableDescriptor>>()
 
+type InvokeParamApply = {
+    [Fields.type]: InvokeType.Apply,
+    [Fields.function]: unknown,
+    [Fields.name]: string,
+    [Fields.self]: unknown,
+}
+type InvokeParamConstruct = {
+    [Fields.type]: InvokeType.Construct,
+    [Fields.function]: unknown,
+    [Fields.name]: string,
+    [Fields.newTarget]: unknown
+}
+
+export type InvokeParam = InvokeParamApply | InvokeParamConstruct
+
 const getExecution = (
     program: number[],
     textData: any[],
     entryPoint: number = 0,
     scopes: Scope[] = [],
-    self: undefined = undefined,
+    invokeData: InvokeParam = {
+        [Fields.type]: InvokeType.Apply,
+        [Fields.function]: undefined,
+        [Fields.name]: '',
+        [Fields.self]: undefined
+    },
     args: any[] = [],
     getDebugFunction: () => null | (() => void) = () => null
 ) => {
@@ -158,14 +179,15 @@ const getExecution = (
         [Fields.type]: FrameType.Function,
         [Fields.scopes]: scopes,
         [Fields.valueStack]: [
-            self,
-            undefined,
-            undefined,
-            InvokeType.Apply,
+            // @ts-expect-error
+            invokeData[Fields.type] === InvokeType.Apply ? invokeData[Fields.self] : invokeData[Fields.newTarget],
+            invokeData[Fields.function],
+            invokeData[Fields.name],
+            invokeData[Fields.type],
             ...args,
             args.length
         ],
-        [Fields.invokeType]: InvokeType.Apply,
+        [Fields.invokeType]: invokeData[Fields.type],
         [Fields.return]: -1,
         [Fields.programSection]: currentProgram,
         [Fields.textSection]: currentTextData
@@ -258,7 +280,27 @@ const getExecution = (
         }
 
         const fn = function externalFn (this: any, ...args: any[]) {
-            return run_(pr, txt, offset, [...scopeClone], this, args, getDebugFunction)
+            return run_(
+                pr,
+                txt,
+                offset,
+                [...scopeClone], 
+                new.target
+                    ? {
+                        [Fields.type]: InvokeType.Construct,
+                        [Fields.function]: fn,
+                        [Fields.name]: name,
+                        [Fields.newTarget]: new.target
+                    }
+                    : {
+                        [Fields.type]: InvokeType.Apply,
+                        [Fields.function]: fn,
+                        [Fields.name]: name,
+                        [Fields.self]: this
+                    }, 
+                args, 
+                getDebugFunction
+            )
         }
 
         ;(fn as any).__pos__ = offset
@@ -1389,12 +1431,12 @@ const run_ = (
     textData: any[],
     entryPoint: number,
     scopes: Scope[],
-    self: undefined,
+    invokeData: InvokeParam,
     args: any[],
     getDebugFunction: () => null | (() => void),
     evalResultInstead = false
 ) => {
-    const execution = getExecution(program, textData, entryPoint, scopes, self, args, getDebugFunction)
+    const execution = getExecution(program, textData, entryPoint, scopes, invokeData, args, getDebugFunction)
 
     let res
 
@@ -1423,7 +1465,12 @@ const run = (
         textData,
         entryPoint,
         scopes,
-        self,
+        {
+            [Fields.type]: InvokeType.Apply,
+            [Fields.function]: undefined,
+            [Fields.name]: '',
+            [Fields.self]: self
+        },
         args,
         () => null,
         true

@@ -274,7 +274,21 @@ run(fn)
         }
     })
 )
-
+testRuntime(
+    'new function',
+    `
+function fn () {
+    this.a = 0
+}
+run(fn)
+`,
+    [{a: 0}],
+    (results) => ({
+        run(fn: new (...args: any[]) => any) {
+            results.push(JSON.parse(JSON.stringify(new fn())))
+        }
+    })
+)
 testRuntime(
     'local function without return',
     `
