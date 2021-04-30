@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "tsc --project ./src/tsconfig.json",
     "watch": "tsc --project ./src/tsconfig.json --watch",
     "serve-coverage": "npx serve ./coverage/lcov-report",
     "test": "jest --runInBand",
