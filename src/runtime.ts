@@ -1422,6 +1422,9 @@ const getExecution = (
         get [Fields.stack] () {
             return stack
         },
+        get [Fields.scopes] () {
+            return peak(stack)[Fields.scopes]
+        },
         [Fields.step]: step
     }
 }

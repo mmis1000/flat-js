@@ -24,12 +24,20 @@
             <div ref="result" class="result-pane pane-content">
                 <pre class="result">{{ result }}</pre>
             </div>
+            <input
+                v-if="state === 'paused'"
+                class="pane-footer repl"
+                v-model="replText"
+                @keydown.enter="runRepl"
+                type="text"
+                placeholder="Code here..."
+            >
         </div>
     </div>
 </template>
 
 <script lang="ts">
-import { compile, getExecution } from '../src'
+import { compile, getExecution, run } from '../src'
 import Vue from 'vue'
 import Monaco from './components/monaco.vue'
 import Debugger from './components/debugger.vue'
@@ -62,6 +70,7 @@ debugger
 print('total time: ' + (Date.now() - start) + 'ms')
 `,
             result: '',
+            replText: '',
             stackContainer: {
                 stack: [] as Stack
             },
@@ -87,11 +96,16 @@ print('total time: ' + (Date.now() - start) + 'ms')
 
             let result: Result
 
-            do {
-                result = execution[Fields.step](true)
-            } while (this.state === 'play' && !result.done)
+            try {
+                do {
+                    result = execution[Fields.step](true)
+                } while (this.state === 'play' && !result.done)
 
-            if (result.done) {
+                if (result.done) {
+                    this.state = 'idle'
+                }
+            } catch (err) {
+                this.result += err ? err.stack || err.message || String(err): String(err) + '\n'
                 this.state = 'idle'
             }
         },
@@ -129,6 +143,20 @@ print('total time: ' + (Date.now() - start) + 'ms')
         },
         resume() {
             this.runExecution()
+        },
+        runRepl() {
+            const text = this.replText
+            this.replText = ''
+
+            const [programData, textData] = compile(text, { evalMode: true })
+
+            try {
+                this.result += '> ' + text + '\n'
+                const result = run(programData, textData, 0, [...this.execution[Fields.scopes]])
+                this.result += result + '\n'
+            } catch (err) {
+                this.result += String(err) + '\n'
+            }
         }
     }
 })
@@ -144,6 +172,9 @@ html {
 
 body {
     color: #eee;
+}
+pre {
+    margin: 0;
 }
 </style>
 <style scoped>
@@ -202,9 +233,22 @@ body {
 }
 .result-pane {
     overflow-y: auto;
+    position: relative;
 }
 .result {
     padding: 1em;
     line-height: 2em;
+}
+.repl {
+    width: 100%;
+    width: available;
+    border: 0;
+    padding: 1em;
+    outline: 0;
+    background: #333;
+    color: white;
+}
+.repl::placeholder {
+    color: #777;
 }
 </style>
