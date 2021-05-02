@@ -597,6 +597,8 @@ function findAncient(node: ts.Node, parentMap: ParentMap, predicate: (node: ts.N
 function markParent(node: ts.Node, parentMap: ParentMap) {
     function findFunction(node: ts.Node) {
         for (let [key, v] of Object.entries(node)) {
+            if (key === 'parent') continue
+
             if (Array.isArray(v)) {
                 for (let item of v) {
                     if (item !== null && typeof item === 'object' && typeof item.kind == 'number') {
@@ -940,10 +942,10 @@ function generateSegment(
             for (const op of res) {
                 if (
                     op.source == null
-                    ||op.source.end - op.source.start > node.end - node.pos
+                    ||op.source.end - op.source.start > node.end - node.getStart()
                 ) {
                     op.source = {
-                        start: node.pos,
+                        start: node.getStart(),
                         end: node.end
                     }
                 }
@@ -992,10 +994,10 @@ function generateSegment(
             for (const op of res) {
                 if (
                     op.source == null
-                    ||op.source.end - op.source.start > node.end - node.pos
+                    ||op.source.end - op.source.start > node.end - node.getStart()
                 ) {
                     op.source = {
-                        start: node.pos,
+                        start: node.getStart(),
                         end: node.end
                     }
                 }
@@ -2309,9 +2311,16 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
 }
 
 export type CompileOptions = {
+    /** prints debug info to stdout */
     debug?: boolean,
+    /** generate sourcemap */
     range?: boolean,
+    /** generate with eval result op inserted */
     evalMode?: boolean
+}
+
+export type DebugInfo = {
+    sourceMap: [number, number, number, number][]
 }
 
 export function compile(src: string,  { debug = false, range = false, evalMode = false }: CompileOptions = {}) {
@@ -2320,7 +2329,7 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
     const functions: Functions = new Set()
     const scopeChild: ScopeChild = new Map()
 
-    let sourceNode = ts.createSourceFile('aaa.ts', src, ts.ScriptTarget.ESNext, undefined, ts.ScriptKind.TS)
+    let sourceNode = ts.createSourceFile('aaa.ts', src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
 
     markParent(sourceNode, parentMap)
     searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
@@ -2344,19 +2353,33 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
 
     genOffset(flattened)
 
+    const locationMap = new Map<number, [number, number]>()
+
+    if (range) {
+        let row = 0
+        let col = 0
+        for (let i = 0; i < src.length + 1; i++) {
+            locationMap.set(i, [row, col])
+            if (src[i] === '\n') {
+                row += 1
+                col = 0
+            } else {
+                col++
+            }
+        }
+
+        // const lines = src.split(/\r?\n/g)
+        // let current = 0
+        // for (let [row, line] of lines.entries()) {
+        //     for (let col = 0; col < line.length + 1; col++) {
+        //         locationMap.set(current++, [row, col])
+        //     }
+        // }
+        // current += 2
+    }
+
     // @ts-expect-error
     if (debug && typeof OpCode !== 'undefined') {
-        const map = new Map<number, [number, number]>()
-        if (range) {
-            const lines = src.split(/\r?\n/g)
-            let current = 0
-            for (let [row, line] of lines.entries()) {
-                for (let col = 0; col < line.length + 1; col++) {
-                    map.set(current++, [row, col])
-                }
-            }
-            // current += 2
-        }
         console.error(flattened.map(it => {
             // @ts-expect-error
             let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
@@ -2366,7 +2389,7 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
                     : JSON.stringify(it.preData[0])
                 : JSON.stringify(it.preData[0])
             if (range) {
-                res += ' ' + (it.source ? `@${map.get(it.source.start)}-${map.get(it.source.end)}` : '')
+                res += ' ' + (it.source ? `@${locationMap.get(it.source.start)}-${locationMap.get(it.source.end)}` : '')
             }
             return res
         }).join('\r\n'))
@@ -2374,8 +2397,19 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
 
     const textData: any[] = []
     const programData: number[] = []
+    const sourceMap: [number, number, number, number][] = []
+
+    if (range) {
+        for (let it of flattened) {
+            const start = it.offset
+            const end = it.offset + it.length
+            for (let index = start; index < end; index++) {
+                sourceMap[index] = [...locationMap.get(it.source!.start)!, ...locationMap.get(it.source!.end)!]
+            }
+        }
+    }
 
     generateData(flattened, functionToSegment, programData, textData)
 
-    return [programData, textData] as [number[], any[]]
+    return [programData, textData, { sourceMap }] as [number[], any[], DebugInfo]
 }

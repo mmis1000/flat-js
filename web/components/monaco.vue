@@ -18,12 +18,24 @@ export default Vue.extend({
         readonly: {
             type: Boolean,
             default: false
+        },
+        highlights: {
+            type: Array as () => [number, number, number, number][],
+            default () {
+                return []
+            }
         }
     },
     data () {
         return withNonReactive({})<{
-            editor: monaco.editor.IStandaloneCodeEditor
+            editor: monaco.editor.IStandaloneCodeEditor,
+            currentDecorations: string[]
         }>()
+    },
+    computed: {
+        highlightSerialized (): string {
+            return JSON.stringify(this.highlights)
+        }
     },
     watch: {
         value (newVal) {
@@ -37,9 +49,19 @@ export default Vue.extend({
             this.editor.updateOptions({
                 readOnly: newVal
             })
+        },
+        highlightSerialized () {
+            this.currentDecorations = this.editor.deltaDecorations(
+                this.currentDecorations,
+                this.highlights.map(([r1, c1, r2, c2]) => ({
+                    range: new monaco.Range(r1, c1, r2, c2), 
+                    options: { inlineClassName: 'inline-highlight' }
+                }))
+            )
         }
     },
     mounted () {
+        this.currentDecorations = []
         const editor = this.editor = monaco.editor.create(this.$refs.editor as any, {
             value: this.value,
             language: 'javascript',
@@ -59,10 +81,22 @@ export default Vue.extend({
                 readOnly: true
             })
         }
+
+        if (this.highlights.length > 0) {
+            this.currentDecorations = this.editor.deltaDecorations(
+                this.currentDecorations,
+                this.highlights.map(([r1, c1, r2, c2]) => ({
+                    range: new monaco.Range(r1, c1, r2, c2), 
+                    options: { inlineClassName: 'inline-highlight' }
+                }))
+            )
+        }
     }
 })
 </script>
 
-<style>
-
+<style scoped>
+::v-deep .inline-highlight {
+    background: rgb(251, 255, 0);
+}
 </style>

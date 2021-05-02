@@ -12,7 +12,12 @@
             <div class="pane-title">
                 Code
             </div>
-            <monaco class="pane-content" v-model="text" :readonly="state !== 'idle'"></monaco>
+            <monaco
+                class="pane-content"
+                v-model="text"
+                :readonly="state !== 'idle'"
+                :highlights="highlights"
+            ></monaco>
             <button v-if="state === 'idle'" class="run-button pane-footer" @click="run">Run</button>
             <button v-if="state === 'paused'" class="run-button pane-footer" @click="resume">Continue</button>
             <button v-if="state === 'play'" class="run-button pane-footer">Running...</button>
@@ -43,6 +48,7 @@ import Monaco from './components/monaco.vue'
 import Debugger from './components/debugger.vue'
 import { Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
+import { DebugInfo } from '../src/compiler'
 
 type State = 'play' | 'paused' | 'idle'
 
@@ -75,9 +81,12 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 stack: [] as Stack
             },
             state: 'idle' as State,
-            refreshKey: Math.random()
+            refreshKey: Math.random(),
+            debugInfo: <DebugInfo>{ sourceMap: [] },
+            highlights: <[number, number, number, number][]>[]
         })<{
-            execution: ReturnType<typeof getExecution>
+            execution: ReturnType<typeof getExecution>,
+            program: number[]
         }>()
     },
     watch: {
@@ -101,12 +110,21 @@ print('total time: ' + (Date.now() - start) + 'ms')
                     result = execution[Fields.step](true)
                 } while (this.state === 'play' && !result.done)
 
+                if (<State>this.state === 'paused') {
+                    const currentPosition = execution[Fields.ptr]
+                    const [r1, c1, r2, c2] = this.debugInfo.sourceMap[currentPosition]
+                    this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+                }
+                
                 if (result.done) {
                     this.state = 'idle'
+                    this.highlights = []
                 }
+
             } catch (err) {
                 this.result += err ? err.stack || err.message || String(err): String(err) + '\n'
                 this.state = 'idle'
+                this.highlights = []
             }
         },
         run() {
@@ -118,7 +136,10 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
             }
 
-            const [programData, textData] = compile(this.text)
+            const [programData, textData, debugInfo] = compile(this.text, { range: true })
+
+            this.debugInfo = debugInfo
+            this.program = programData
             this.execution = getExecution(
                 programData,
                 textData,
@@ -128,6 +149,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 [],
                 () => () => this.pause()
             )
+
             this.runExecution()
         },
         pause() {

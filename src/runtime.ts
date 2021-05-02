@@ -368,8 +368,9 @@ const getExecution = (
 
     let evalResult: any = undefined;
 
+    let commandPtr = 0
     const step = (debug: boolean = false): Result => {
-        const currentPtr = ptr
+        const currentPtr = commandPtr = ptr
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
 
@@ -1417,7 +1418,7 @@ const getExecution = (
 
     return {
         get [Fields.ptr] () {
-            return ptr
+            return commandPtr
         },
         get [Fields.stack] () {
             return stack

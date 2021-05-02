@@ -4,8 +4,8 @@
             Scopes
         </div>
         <div class="area">
-            <div v-for="(scope, index) in scopes" :key="getKey(scope)">
-                <debuggerValue displayKey="Scope" :initialExpand="index !== scopes.length - 1" :refreshKey="refreshKey + refreshKeyInternal" :value="scope" :forcedProp="true"/>
+            <div v-for="scope in scopes" :key="getKey(scope)" :key1="getKey(scope)">
+                <debuggerValue displayKey="Scope" :initialExpand="!isGlobalThis(scope)" :refreshKey="refreshKey + refreshKeyInternal" :value="scope" :forcedProp="true"/>
             </div>
         </div>
     </div>
@@ -17,16 +17,15 @@ import { Fields, Scope, Stack } from '../../src/runtime'
 import DebuggerValue from './debugger-value.vue'
 
 let id = 0
-let map = new WeakMap()
+let map = new WeakMap<any, number>()
 
 const getKey = (obj: any) => {
-    if (map.has(obj)) {
-        return map.get(obj)
-    } else {
+    if (!map.has(obj)) {
         const newId = id++
-        map.set(obj, id)
-        return newId
+        map.set(obj, newId)
     }
+
+    return map.get(obj)!
 }
 
 export default Vue.extend({
@@ -58,7 +57,10 @@ export default Vue.extend({
         }
     },
     methods: {
-        getKey
+        getKey,
+        isGlobalThis (v: any) {
+            return v === globalThis
+        }
     }
 })
 </script>

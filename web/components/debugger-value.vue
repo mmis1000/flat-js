@@ -13,7 +13,7 @@
             {{serialized}} {{ expand ? '[-] Collapse' : '[+] Expand' }}
         </span>
         <div v-if="expand" class="properties">
-            <div v-for="entry of childEntries" :key="JSON.stringify([entry[0], entry[1]])">
+            <div v-for="entry of childEntries" :key="JSON.stringify([entry[0], entry[1]])" :key1="JSON.stringify([entry[0], entry[1]])">
                 <debugger-value :refreshKey="refreshKey" :displayKey="entry[1]" :value="entry[2]" />
             </div>
         </div>
