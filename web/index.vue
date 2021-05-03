@@ -21,11 +21,12 @@
             <div class="pane-footer">
                 <button v-if="state === 'idle'" class="run-button" @click="run">Run</button>
                 <button v-if="state === 'idle'" class="run-button" @click="runAndPause">Run and pause</button>
-                <button v-if="state === 'paused'" class="run-button" @click="resume">Continue</button>
+                <button v-if="state === 'paused'" class="run-button" @click="resume">Resume</button>
                 <button v-if="state === 'paused'" class="run-button" @click="stepExecution(false)">Step</button>
                 <button v-if="state === 'paused'" class="run-button" @click="stepExecution(true)">Step in</button>
-                <button v-if="state === 'paused'" class="run-button" @click="stop">Stop</button>
-                <button v-if="state === 'play'" class="run-button" @click="state = 'idle'">Running...[stop]</button>
+                <button v-if="state === 'paused'" class="run-button" @click="stop">Kill</button>
+                <button v-if="state === 'play'" class="run-button" @click="pause">Pause</button>
+                <button v-if="state === 'play'" class="run-button" @click="stop">Kill</button>
             </div>
         </div>
         <div class="area-result pane">

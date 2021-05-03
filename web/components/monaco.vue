@@ -98,5 +98,6 @@ export default Vue.extend({
 <style scoped>
 ::v-deep .inline-highlight {
     background: rgb(251, 255, 0);
+    outline: 1px solid rgba(255, 0, 0, 0.3);
 }
 </style>
