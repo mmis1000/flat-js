@@ -97,7 +97,19 @@ export default Vue.extend({
 
 <style scoped>
 ::v-deep .inline-highlight {
+    position: relative;
     background: rgb(251, 255, 0);
     outline: 1px solid rgba(255, 0, 0, 0.3);
+}
+
+::v-deep .inline-highlight ~ .inline-highlight::before{
+    position: absolute;
+    display: block;
+    content: "";
+    left: -1px;
+    top: 0.5px;
+    bottom: 0.5px;
+    width: 2px;
+    background: rgb(251, 255, 0);
 }
 </style>
