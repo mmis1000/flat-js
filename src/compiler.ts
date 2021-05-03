@@ -576,6 +576,8 @@ type Op<Code extends OpCode = OpCode> = {
     preData: any[]
     data: number[]
     offset: number,
+    // indicate this is a instruction than shouldn't be paused at
+    internal: boolean,
     source?: { start: number, end: number }
 }
 
@@ -877,6 +879,7 @@ function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
         length,
         preData,
         data: [],
+        internal: false,
         offset: -1
     }
 }
@@ -884,12 +887,12 @@ function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
 function generateVariableList(node: ts.Node, scopes: Scopes): Op[] {
     const variables = scopes.get(node)!
 
-    return [...variables].map(([name, type]) => [
+    return markInternals([...variables].map(([name, type]) => [
         op(OpCode.Literal, 2, [name]),
         op(OpCode.Literal, 2, [type.type])
     ]).flat().concat([
         op(OpCode.Literal, 2, [variables.size])
-    ])
+    ]))
 }
 
 function generateEnterScope(node: ts.Node, scopes: Scopes): Op<OpCode>[] {
@@ -902,13 +905,13 @@ function generateEnterScope(node: ts.Node, scopes: Scopes): Op<OpCode>[] {
         throw new Error('tries to generate empty block')
     }
 
-    return result
+    return markInternals(result)
 }
 
 function generateLeaveScope(node: ts.Node): Op<OpCode>[] {
-    return [
+    return markInternals([
         op(OpCode.LeaveScope)
-    ]
+    ])
 }
 
 const nextOps = new Map<ts.Node, Op>()
@@ -917,6 +920,19 @@ const continueOps = new Map<ts.Node, Op>()
 type SegmentOptions = {
     withPos?: boolean,
     withEval?: boolean
+}
+
+const markInternals = (ops: Op<OpCode>[]): Op<OpCode>[] => {
+    for (let op of ops) {
+        op.internal = true
+    }
+
+    return ops
+}
+
+const markInternal = (op: Op<OpCode>): Op<OpCode> => {
+    op.internal = true
+    return op
 }
 
 function generateSegment(
@@ -1048,12 +1064,12 @@ function generateSegment(
                     ops.push(op(OpCode.Set))
                     ops.push(op(OpCode.Pop))
                     if (node.flags & ts.NodeFlags.Const) {
-                        ops.push(
+                        ops.push(...markInternals([
                             ...generateLeft(declaration.name, flag),
                             op(OpCode.FreezeVariable),
                             op(OpCode.Pop),
                             op(OpCode.Pop)
-                        )
+                        ]))
                     }
                 } else if (node.flags & ts.NodeFlags.Let) {
                     // unblock without doing anything
@@ -1386,7 +1402,7 @@ function generateSegment(
                 : [op(OpCode.Nop, 0)]
 
             var exit = hasScope
-                ? [op(OpCode.LeaveScope)]
+                ? generateLeaveScope(node)
                 : [op(OpCode.Nop, 0)]
 
             var conditionS = condition
@@ -1418,7 +1434,7 @@ function generateSegment(
 
                 update0.push(
                     op(OpCode.Literal, 2, [initializer.declarations.length]),
-                    op(OpCode.LeaveScope),
+                    ...generateLeaveScope(node),
                     ...generateEnterScope(node, scopes),
                     op(OpCode.GetRecord),
                     op(OpCode.SetMultiple)
@@ -1446,12 +1462,12 @@ function generateSegment(
             var body = generate(node.statement, flag)
 
             return [
-                ...entry0,
+                ...markInternals(entry0),
                 ...entry1,
                 ...conditionS,
                 ...body,
                 continueOp,
-                ...update0,
+                ...markInternals(update0),
                 ...update1,
                 ...exit,
                 nextOp
@@ -1859,7 +1875,7 @@ function generateSegment(
             const connectedBodyRules: Op[] = []
             const connectedBody: Op[] = []
             const connectedBodyExit = op(OpCode.Nop, 0)
-            const connectedBodyEnd = hasVariables ? op(OpCode.LeaveScope) : op(OpCode.Nop, 0)
+            const connectedBodyEnd = hasVariables ? generateLeaveScope(node.caseBlock) : [op(OpCode.Nop, 0)]
 
             for (const [index, item] of bodies.entries()) {
                 connectedBody.push(...item.body)
@@ -1891,7 +1907,7 @@ function generateSegment(
                 ...connectedBodyRules,
                 ...connectedBody,
                 connectedBodyExit,
-                connectedBodyEnd,
+                ...connectedBodyEnd,
                 ...switchTail,
                 nextOp
             ]
@@ -2122,7 +2138,7 @@ function generateSegment(
                 
                 // there is alway two variable (the iterator and initializer) in for in without destructing statement
                 op(OpCode.Literal, 2, [2]),
-                op(OpCode.LeaveScope),
+                ...generateLeaveScope(node),
                 ...generateEnterScope(node, scopes),
                 op(OpCode.GetRecord),
                 op(OpCode.SetMultiple),
@@ -2139,7 +2155,7 @@ function generateSegment(
                 op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
                 // there is alway one variable (the iterator and initializer) in for in without destructing statement
                 op(OpCode.Literal, 2, [1]),
-                op(OpCode.LeaveScope),
+                ...generateLeaveScope(node),
                 ...generateEnterScope(node, scopes),
                 op(OpCode.GetRecord),
                 op(OpCode.SetMultiple),
@@ -2184,14 +2200,16 @@ function generateSegment(
 
     if (ts.isSourceFile(node)) {
         const statements = [...node.statements]
-        bodyNodes = statements.map(s => generate(s, withEval ? StatementFlag.Eval : 0)).flat().concat(op(OpCode.UndefinedLiteral), op(OpCode.Return))
+        bodyNodes = statements.map(s => generate(s, withEval ? StatementFlag.Eval : 0)).flat()
+            .concat(markInternals([op(OpCode.UndefinedLiteral), op(OpCode.Return)]))
     } else if (node.body != undefined && ts.isBlock(node.body)) {
         const statements = [...node.body.statements]
-        bodyNodes = statements.map(s => generate(s, 0)).flat().concat(op(OpCode.UndefinedLiteral), op(OpCode.Return))
+        bodyNodes = statements.map(s => generate(s, 0)).flat()
+            .concat(markInternals([op(OpCode.UndefinedLiteral), op(OpCode.Return)]))
     } else {
         bodyNodes = [
             ...generate(node.body!, 0),
-            op(OpCode.Return)
+            markInternal(op(OpCode.Return))
         ]
     }
 
@@ -2225,6 +2243,7 @@ function generateSegment(
     entry.push(op(OpCode.NodeFunctionType, 2, [node]))
     entry.push(op(OpCode.EnterFunction))
 
+    markInternals(entry)
 
     const results = [
         ...entry,
@@ -2320,10 +2339,11 @@ export type CompileOptions = {
 }
 
 export type DebugInfo = {
-    sourceMap: [number, number, number, number][]
+    sourceMap: [number, number, number, number][],
+    internals: boolean[]
 }
 
-export function compile(src: string,  { debug = false, range = false, evalMode = false }: CompileOptions = {}) {
+export function compile(src: string,  { debug = false, range = false, evalMode = false }: CompileOptions = {}): [number[], any[], DebugInfo] {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
@@ -2398,6 +2418,7 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
     const textData: any[] = []
     const programData: number[] = []
     const sourceMap: [number, number, number, number][] = []
+    const internals: boolean[] = []
 
     if (range) {
         for (let it of flattened) {
@@ -2405,11 +2426,23 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
             const end = it.offset + it.length
             for (let index = start; index < end; index++) {
                 sourceMap[index] = [...locationMap.get(it.source!.start)!, ...locationMap.get(it.source!.end)!]
+                internals[index] = it.internal
+                    || it.op === OpCode.DeTDZ
+                    || it.op === OpCode.FreezeVariable
+                    || it.op === OpCode.NodeFunctionType
+                    || it.op === OpCode.NextEntry
+                    || it.op === OpCode.Pop
+                    || it.op === OpCode.Jump
+                    || it.op === OpCode.JumpIf
+                    || it.op === OpCode.JumpIfAndKeep
+                    || it.op === OpCode.JumpIfNot
+                    || it.op === OpCode.JumpIfNotAndKeep
+                    || it.op === OpCode.NodeOffset
             }
         }
     }
 
     generateData(flattened, functionToSegment, programData, textData)
 
-    return [programData, textData, { sourceMap }] as [number[], any[], DebugInfo]
+    return [programData, textData, { sourceMap, internals }]
 }
