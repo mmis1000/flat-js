@@ -2,13 +2,16 @@
 
 flow flattening for javascript
 
---
+================
 
 ## Motivation
 
 1. Learn how javascript internally works, and evaluate whether did I learn it correctly.
 2. Bypass the csp `eval` restriction with minimal size overhead.
 3. Obfuscate codes across all functions for obfuscation purpose
+4. Learn how do debuggers work and try to implement it
+
+![Example debugger](./example.jpg)
 
 ## To run this project
 
