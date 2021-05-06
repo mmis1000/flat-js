@@ -627,6 +627,18 @@ const getExecution = (
                     }
                 }
                     break;
+                case OpCode.SetInitialized: {
+                    const value = popCurrentFrameStack()
+                    const name = popCurrentFrameStack<string>()
+                    const ctx = popCurrentFrameStack<Frame>()
+                    
+                    const scope = findScope(ctx, name)!
+                    
+                    const desc = variableDescriptors.get(scope)!.get(name)!
+                    desc[Fields.tdz] = false
+                    desc[Fields.value] = value  
+                }
+                    break
                 // Assign and update
                 case OpCode.BPlusEqual:
                 case OpCode.BMinusEqual: 

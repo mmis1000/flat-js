@@ -908,3 +908,42 @@ do {
 } while (true)
 print(-2)
 `, [-1, 0, 1, 2, 3, 4, -2], printProvider)
+
+
+testRuntime('tdz removed after only variable initialized successfully', `
+let b
+
+const success = () => {
+    return 1
+}
+
+const a = () => {
+    b = () => badVal
+    let badVal = success()
+}
+
+try {
+    a()
+} catch (err) {}
+
+print(b())
+`, [1], printProvider)
+
+testRuntimeThrows('tdz removed after only variable initialized successfully', `
+let b
+
+const panic = () => {
+    throw 0
+}
+
+const a = () => {
+    b = () => badVal
+    let badVal = panic()
+}
+
+try {
+    a()
+} catch (err) {}
+
+b()
+`, ReferenceError)

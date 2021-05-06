@@ -199,6 +199,17 @@ export const enum OpCode {
     /**
      * ```txt
      * Stack:
+     *   env
+     *   name
+     *   value
+     * Result:
+     *   value
+     * ```
+     */
+    SetInitialized,
+    /**
+     * ```txt
+     * Stack:
      *   env or object
      *   name
      *   value
@@ -1055,13 +1066,9 @@ function generateSegment(
                 if (declaration.initializer) {
                     ops.push(...generateLeft(declaration.name, flag))
 
-                    if (node.flags & ts.NodeFlags.BlockScoped) {
-                        ops.push(op(OpCode.DeTDZ))
-                    }
-
                     ops.push(...generate(declaration.initializer, flag))
 
-                    ops.push(op(OpCode.Set))
+                    ops.push(op(OpCode.SetInitialized))
                     ops.push(op(OpCode.Pop))
                     if (node.flags & ts.NodeFlags.Const) {
                         ops.push(...markInternals([
@@ -2091,13 +2098,6 @@ function generateSegment(
 
                 ...getLhs(),
 
-                ...(hasVariable
-                    ?[
-                        op(OpCode.DeTDZ)
-                    ]
-                    :[]
-                ),
-
                 ...[
                     op(OpCode.GetRecord),
                     op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
@@ -2105,7 +2105,7 @@ function generateSegment(
                     op(OpCode.EntryGetValue),
                 ],
 
-                op(OpCode.Set),
+                op(OpCode.SetInitialized),
                 op(OpCode.Pop),
 
                 ...(variableIsConst
