@@ -1,0 +1,168 @@
+
+[data-v-19cb2101] .inline-highlight {
+    position: relative;
+    background: rgb(251, 255, 0);
+    outline: 1px solid rgba(255, 0, 0, 0.3);
+}
+[data-v-19cb2101] .inline-highlight ~ .inline-highlight::before{
+    position: absolute;
+    display: block;
+    content: "";
+    left: -1px;
+    top: 0.5px;
+    bottom: 0.5px;
+    width: 2px;
+    background: rgb(251, 255, 0);
+}
+
+
+.debugger-value[data-v-24f9e476] {
+    font-family: monospace;
+}
+.properties[data-v-24f9e476] {
+    margin-left: 1em;
+}
+.error[data-v-24f9e476] {
+    color: #ff0000;
+}
+.number[data-v-24f9e476] {
+    color: #ff4800;
+}
+.boolean[data-v-24f9e476] {
+    color: #64a100;
+}
+.null[data-v-24f9e476] {
+    color: #76a100;
+}
+.undefined[data-v-24f9e476] {
+    color: #a1001b;
+}
+.string[data-v-24f9e476] {
+    color: #d400ff;
+}
+.object[data-v-24f9e476] {
+    color: #36c000;
+}
+.function[data-v-24f9e476] {
+    color: #4e5cd6;
+}
+
+
+.header[data-v-35158521] {
+    padding: 0.5em 1em;
+}
+.area[data-v-35158521] {
+    padding: 0 1em;
+}
+.header[data-v-35158521], .area[data-v-35158521] {
+    border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+}
+
+
+body,
+html {
+    background: black;
+    margin: 0;
+    padding: 0;
+}
+body {
+    color: #eee;
+}
+pre {
+    margin: 0;
+}
+
+
+.app[data-v-2af2a58e] {
+    height: 100vh;
+    width: 100vw;
+    display: grid;
+    grid-template-areas: "code"
+                   "result";
+    grid-template-rows: 1fr 1fr;
+}
+.app.running[data-v-2af2a58e] {
+    grid-template-areas: "debug code"
+                   "debug result";
+    grid-template-rows: 1fr 1fr;
+    grid-template-columns: 400px 1fr;
+}
+.area-debug[data-v-2af2a58e] {
+    grid-area: debug;
+    border-right: 1px solid rgba(127, 127, 127, 0.5);
+}
+.area-debug .pane-content[data-v-2af2a58e] {
+    overflow-y: auto;
+}
+.area-code[data-v-2af2a58e] {
+    grid-area: code;
+}
+.area-code .pane-footer[data-v-2af2a58e] {
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+}
+.area-code .pane-footer > *[data-v-2af2a58e] {
+    flex: 1 1 0;
+    position: relative;
+}
+.area-code .pane-footer > *[data-v-2af2a58e]:not(:first-child)::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.5);
+}
+.area-result[data-v-2af2a58e] {
+    grid-area: result;
+}
+.pane[data-v-2af2a58e] {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    overflow: clip;
+}
+.pane-title[data-v-2af2a58e] {
+    padding: 1em;
+    flex-grow: 0;
+    border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+}
+.pane-content[data-v-2af2a58e] {
+    flex-grow: 1;
+    overflow: hidden;
+    overflow: clip;
+}
+.pane-footer[data-v-2af2a58e] {
+    flex-grow: 0;
+}
+.run-button[data-v-2af2a58e] {
+    border: 0;
+    background: #777;
+    padding: 1em;
+    color: white;
+}
+.result-pane[data-v-2af2a58e] {
+    overflow-y: auto;
+    position: relative;
+}
+.result[data-v-2af2a58e] {
+    padding: 1em;
+    line-height: 2em;
+}
+.repl[data-v-2af2a58e] {
+    width: 100%;
+    width: available;
+    border: 0;
+    padding: 1em;
+    outline: 0;
+    background: #333;
+    color: white;
+}
+.repl[data-v-2af2a58e]::placeholder {
+    color: #777;
+}
+
+
+/*# sourceMappingURL=main.css.map*/
