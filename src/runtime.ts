@@ -53,7 +53,9 @@ export const enum Fields {
     programSection,
     textSection,
     evalResult,
-    newTarget
+    newTarget,
+    break,
+    depth
 }
 
 interface BaseFrame {
@@ -84,10 +86,17 @@ interface TryFrame extends BaseFrame {
 
     /** address */
     [Fields.catch]: number,
+
     /** address */
     [Fields.finally]: number,
+
     /** address */
     [Fields.exit]: number,
+
+    /** address */
+    [Fields.break]: number,
+    /** how deep did it break out, jump to the break address on reach 0 */
+    [Fields.depth]: number,
 
     [Fields.variable]: string
 }
@@ -370,6 +379,7 @@ const getExecution = (
 
     let commandPtr = 0
     const step = (debug: boolean = false): Result => {
+        // console.log(ptr)
         const currentPtr = commandPtr = ptr
         const command: OpCode = read()
         const currentFrame = getCurrentFrame()
@@ -516,16 +526,21 @@ const getExecution = (
             const state = frame[Fields.state]
             switch (state) {
                 case TryCatchFinallyState.Try: {
+                    frame[Fields.resolveType] = ResolveType.throw
+                    frame[Fields.value] = value
+
                     if (catchAddr >= 0) {
                         frame[Fields.state] = TryCatchFinallyState.Catch
-                        frame[Fields.resolveType] = ResolveType.throw
-                        frame[Fields.value] = value
-
                         if (frame[Fields.variable] !== undefined) {
                             addCatchScope(frame, frame[Fields.variable], value)
                         }
 
                         ptr = catchAddr
+                        currentProgram = frame[Fields.programSection]
+                        currentTextData = frame[Fields.textSection]
+                    } else if (finallyAddr >= 0) {
+                        frame[Fields.state] = TryCatchFinallyState.Finally
+                        ptr = finallyAddr
                         currentProgram = frame[Fields.programSection]
                         currentTextData = frame[Fields.textSection]
                     } else {
@@ -536,10 +551,11 @@ const getExecution = (
                 }
                     break;
                 case TryCatchFinallyState.Catch: {
+                    frame[Fields.state] = TryCatchFinallyState.Finally
+                    frame[Fields.resolveType] = ResolveType.throw
+                    frame[Fields.value] = value
+
                     if (finallyAddr >= 0) {
-                        frame[Fields.state] = TryCatchFinallyState.Finally
-                        frame[Fields.resolveType] = ResolveType.throw
-                        frame[Fields.value] = value
                         ptr = finallyAddr
                         currentProgram = frame[Fields.programSection]
                         currentTextData = frame[Fields.textSection]
@@ -553,6 +569,82 @@ const getExecution = (
                 case TryCatchFinallyState.Finally: {
                     stack.pop()
                     throwsConditional(value)
+                }
+                    break
+                default:
+                    const nothing: never = state
+            }
+        }
+
+        const breaksConditional = () => {
+            const frame = peak(stack) as TryFrame
+            let depth: number = frame[Fields.depth]
+            // stack.pop()
+
+            loop: while (true) {
+                depth--
+                if (depth < 0) {
+                    throw new Error('something went wrong')
+                } if (depth === 0) {
+                    // actually break
+                    ptr = frame[Fields.break]
+                    break loop
+                } else {
+                    // try to jump to next try catch
+                    const frame = peak(stack) as TryFrame
+                    const finallyAddr = frame[Fields.finally]
+                    if (finallyAddr >= 0) {
+                        const state = frame[Fields.state]
+                        switch (state) {
+                            case TryCatchFinallyState.Try:
+                            case TryCatchFinallyState.Catch: {
+                                frame[Fields.resolveType] = ResolveType.break
+                                frame[Fields.depth] = depth
+                                ptr = finallyAddr
+                                break loop
+                            }
+                        }
+                    } else {
+                        // nothing
+                    }
+                }
+            }
+        }
+
+        const breaksTryFrame = () => {
+            const frame = peak(stack) as TryFrame
+            const breakAddr: number = frame[Fields.valueStack].pop()
+            const depth: number = frame[Fields.valueStack].pop()
+            const finallyAddr = frame[Fields.finally]
+
+            
+            frame[Fields.break] = breakAddr
+            frame[Fields.depth] = depth
+
+            // restore scopes
+            frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
+
+            const state = frame[Fields.state]
+            switch (state) {
+                case TryCatchFinallyState.Try:
+                case TryCatchFinallyState.Catch: {
+                    if (finallyAddr >= 0) {
+                        frame[Fields.state] = TryCatchFinallyState.Finally
+                        frame[Fields.resolveType] = ResolveType.break
+                        // frame[Fields.value] = value
+                        ptr = finallyAddr
+                        currentProgram = frame[Fields.programSection]
+                        currentTextData = frame[Fields.textSection]
+                    } else {
+                        // stack.pop()
+                        breaksConditional()
+                    }
+                    break
+                }
+
+                case TryCatchFinallyState.Finally: {
+                    // stack.pop()
+                    breaksConditional()
                 }
                     break
                 default:
@@ -1160,6 +1252,8 @@ const getExecution = (
                         [Fields.value]: undefined,
                         [Fields.catch]: catchAddr,
                         [Fields.finally]: finallyAddr,
+                        [Fields.break]: 0,
+                        [Fields.depth]: 0,
                         [Fields.variable]: catchName,
                         [Fields.exit]: exitAddr,
                         [Fields.textSection]: currentTextData,
@@ -1177,6 +1271,10 @@ const getExecution = (
                     break;
                 case OpCode.ThrowInTryCatchFinally:
                     throwsTryFrame()
+
+                    break
+                case OpCode.BreakInTryCatchFinally:
+                    breaksTryFrame()
 
                     break
                 case OpCode.ExitTryCatchFinally: {
@@ -1201,6 +1299,9 @@ const getExecution = (
                                     break command
                                 case ResolveType.return:
                                     returnsValueConditional(prevValue)
+                                    break command
+                                case ResolveType.break:
+                                    breaksConditional()
                                     break command
                             }
                         case TryCatchFinallyState.Try:

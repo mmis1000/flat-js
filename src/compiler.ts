@@ -28,7 +28,8 @@ export const enum TryCatchFinallyState {
 export const enum ResultType {
     Normal,
     Return,
-    Throw
+    Throw,
+    Break
 }
 
 export const enum VariableType {
@@ -294,8 +295,6 @@ export const enum OpCode {
     /**
      * ```tst
      * Stack:
-     *   TryCatchFinallyState
-     *   ReturnType
      *   Value
      * ```
      */
@@ -312,12 +311,19 @@ export const enum OpCode {
     /**
      * ```tst
      * Stack:
-     *   TryCatchFinallyState
-     *   ReturnType
      *   Value
      * ```
      */
     ThrowInTryCatchFinally,
+
+    /**
+     * ```tst
+     * Stack:
+     *   Depth
+     *   Addr
+     * ```
+     */
+    BreakInTryCatchFinally,
 
     /**
      * ```tst
@@ -566,7 +572,8 @@ export const enum OpCode {
 export const enum ResolveType {
     normal,
     throw,
-    return
+    return,
+    break
 }
 
 export const enum FunctionTypes {
@@ -1787,9 +1794,9 @@ function generateSegment(
 
             const exitAll = [op(OpCode.Nop, 0)]
 
-            const catchIdentifier =node.catchClause?.variableDeclaration?.name
+            const catchIdentifier = node.catchClause?.variableDeclaration?.name
 
-            if (catchIdentifier === undefined || catchIdentifier.kind !== ts.SyntaxKind.Identifier) {
+            if (catchIdentifier && catchIdentifier.kind !== ts.SyntaxKind.Identifier) {
                 throw new Error('not support non identifier binding')
             }
 
@@ -1802,7 +1809,7 @@ function generateSegment(
                     ? op(OpCode.NodeOffset, 2, [headOf(finallyStatement)])
                     : op(OpCode.Literal, 2, [-1]),
                 node.catchClause?.variableDeclaration 
-                    ? op(OpCode.Literal, 2, [catchIdentifier.text]) 
+                    ? op(OpCode.Literal, 2, [catchIdentifier?.text]) 
                     : op(OpCode.UndefinedLiteral),
                 op(OpCode.InitTryCatch)
             ]
@@ -1921,6 +1928,8 @@ function generateSegment(
         }
 
         if (ts.isBreakStatement(node) && node.label == null) {
+            // only when cross try catch
+            let crossedTryCatch = 0
             let scopeCount = 0
             const target = findAncient(node, parentMap, (node) => {
                 if ((scopes.get(node)?.size ?? 0) > 0) {
@@ -1934,7 +1943,10 @@ function generateSegment(
                     throw new Error('bug check')
                 }
 
-                if (ts.isTryStatement(node)) abort('Not support break in try catch yet')
+                if (ts.isTryStatement(node)) {
+                    crossedTryCatch++
+                    scopeCount = 0
+                }
 
                 return false
             })
@@ -1945,11 +1957,29 @@ function generateSegment(
             if (nextNode == null) {
                 throw new Error('did not get nextNode')
             }
-            return [
-                ...new Array(scopeCount).fill(0).map(it => op(OpCode.LeaveScope)),
-                op(OpCode.NodeOffset, 2, [nextNode]),
-                op(OpCode.Jump)
-            ]
+            if (crossedTryCatch === 0) {
+                return [
+                    ...new Array(scopeCount).fill(0).map(it => op(OpCode.LeaveScope)),
+                    op(OpCode.NodeOffset, 2, [nextNode]),
+                    op(OpCode.Jump)
+                ]
+            } else {
+                const exitStub: Op[] = [
+                    op(OpCode.Nop, 0),
+                    ...new Array(scopeCount).fill(0).map(it => op(OpCode.LeaveScope)),
+                    op(OpCode.NodeOffset, 2, [nextNode]),
+                    op(OpCode.Jump)
+                ]
+                const breakCommand: Op[] = [
+                    op(OpCode.Literal, 2, [crossedTryCatch]),
+                    op(OpCode.NodeOffset, 2, [exitStub[0]]),
+                    op(OpCode.BreakInTryCatchFinally)
+                ]
+                return [
+                    ...breakCommand,
+                    ...exitStub
+                ]
+            }
         }
 
         if (ts.isContinueStatement(node) && node.label == null) {

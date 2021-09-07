@@ -486,6 +486,38 @@ testRuntimeThrows(
     "FQ",
     printProvider
 )
+testRuntime(
+    'try no catch',
+    `
+    try {
+        try {
+            throw 2
+        } finally {
+            print(1)
+        }
+    } catch (err) {
+        print(err)
+    }
+    `,
+    [1, 2],
+    printProvider
+)
+
+testRuntime(
+    'try break',
+    `
+    do {
+        try {
+            throw 'FQ'
+        } finally {
+            break
+        }
+    } while (false)
+    print(0)
+    `,
+    [0],
+    printProvider
+)
 
 testRuntime('call', `
 const fn = function (b) {
