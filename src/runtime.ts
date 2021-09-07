@@ -402,7 +402,7 @@ const getExecution = (
             frame[Fields.scopes].push(newScope)
         }
 
-        const returnsValueConditional = (value: any) => {
+        const executeReturn = (value: any) => {
             const currentFrame = peak(stack)
             // try to find upper try frame or return (if any and hand control to it)
             switch (currentFrame[Fields.type]) {
@@ -440,13 +440,13 @@ const getExecution = (
 
                     // as if we return on upper try catch
                     frame[Fields.valueStack].push(value)
-                    returnsTryFrame()
+                    initiateReturn()
                 }
                     break
             }
         }
 
-        const returnsTryFrame = () => {
+        const initiateReturn = () => {
             const frame = peak(stack) as TryFrame
             const value = frame[Fields.valueStack].pop()
             const finallyAddr = frame[Fields.finally]
@@ -465,14 +465,14 @@ const getExecution = (
                         ptr = finallyAddr
                     } else {
                         stack.pop()
-                        returnsValueConditional(value)
+                        executeReturn(value)
                         return
                     }
                 }
                     break;
                 case TryCatchFinallyState.Finally: {
                     stack.pop()
-                    returnsValueConditional(value)
+                    executeReturn(value)
                     return
                 }
                     break;
@@ -482,7 +482,7 @@ const getExecution = (
             }
         }
 
-        const throwsConditional = (value: any) => {
+        const executeThrow = (value: any) => {
             loop: while (true) {
                 if (stack.length === 0) {
                     throw value
@@ -502,7 +502,7 @@ const getExecution = (
 
                             // as if we throw on upper try catch
                             currentFrame[Fields.valueStack].push(value)
-                            throwsTryFrame();
+                            initiateThrow();
                             return
                         }
                     }
@@ -513,7 +513,7 @@ const getExecution = (
             throw value
         }
 
-        const throwsTryFrame = () => {
+        const initiateThrow = () => {
             const frame = peak(stack) as TryFrame
             const value = frame[Fields.valueStack].pop()
             const exitAddr = frame[Fields.exit]
@@ -561,14 +561,14 @@ const getExecution = (
                         currentTextData = frame[Fields.textSection]
                     } else {
                         stack.pop()
-                        throwsConditional(value)
+                        executeThrow(value)
                     }
                     break
                 }
 
                 case TryCatchFinallyState.Finally: {
                     stack.pop()
-                    throwsConditional(value)
+                    executeThrow(value)
                 }
                     break
                 default:
@@ -576,7 +576,7 @@ const getExecution = (
             }
         }
 
-        const breaksConditional = () => {
+        const executeBreak = () => {
             const frame = stack.pop() as TryFrame
             let depth: number = frame[Fields.depth]
             // stack.pop()
@@ -614,7 +614,7 @@ const getExecution = (
             }
         }
 
-        const breaksTryFrame = () => {
+        const initiateBreak = () => {
             const frame = peak(stack) as TryFrame
             const breakAddr: number = frame[Fields.valueStack].pop()
             const depth: number = frame[Fields.valueStack].pop()
@@ -640,14 +640,14 @@ const getExecution = (
                         currentTextData = frame[Fields.textSection]
                     } else {
                         // stack.pop()
-                        breaksConditional()
+                        executeBreak()
                     }
                     break
                 }
 
                 case TryCatchFinallyState.Finally: {
                     // stack.pop()
-                    breaksConditional()
+                    executeBreak()
                 }
                     break
                 default:
@@ -1269,15 +1269,15 @@ const getExecution = (
                 }
                     break
                 case OpCode.ReturnInTryCatchFinally:
-                    returnsTryFrame()
+                    initiateReturn()
 
                     break;
                 case OpCode.ThrowInTryCatchFinally:
-                    throwsTryFrame()
+                    initiateThrow()
 
                     break
                 case OpCode.BreakInTryCatchFinally:
-                    breaksTryFrame()
+                    initiateBreak()
 
                     break
                 case OpCode.ExitTryCatchFinally: {
@@ -1298,13 +1298,13 @@ const getExecution = (
                                     ptr = exit
                                     break command
                                 case ResolveType.throw:
-                                    throwsConditional(prevValue)
+                                    executeThrow(prevValue)
                                     break command
                                 case ResolveType.return:
-                                    returnsValueConditional(prevValue)
+                                    executeReturn(prevValue)
                                     break command
                                 case ResolveType.break:
-                                    breaksConditional()
+                                    executeBreak()
                                     break command
                             }
                         case TryCatchFinallyState.Try:
@@ -1524,7 +1524,7 @@ const getExecution = (
             if (err != null && typeof err === 'object') {
                 err.pos = currentPtr
             }
-            throwsConditional(err)
+            executeThrow(err)
         }
 
         return {
