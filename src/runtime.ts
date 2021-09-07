@@ -577,7 +577,7 @@ const getExecution = (
         }
 
         const breaksConditional = () => {
-            const frame = peak(stack) as TryFrame
+            const frame = stack.pop() as TryFrame
             let depth: number = frame[Fields.depth]
             // stack.pop()
 
@@ -587,25 +587,28 @@ const getExecution = (
                     throw new Error('something went wrong')
                 } if (depth === 0) {
                     // actually break
+                    // break always happens within the same vm
                     ptr = frame[Fields.break]
                     break loop
                 } else {
                     // try to jump to next try catch
-                    const frame = peak(stack) as TryFrame
-                    const finallyAddr = frame[Fields.finally]
+                    const nextFrame = peak(stack) as TryFrame
+                    const finallyAddr = nextFrame[Fields.finally]
                     if (finallyAddr >= 0) {
-                        const state = frame[Fields.state]
+                        const state = nextFrame[Fields.state]
                         switch (state) {
                             case TryCatchFinallyState.Try:
                             case TryCatchFinallyState.Catch: {
-                                frame[Fields.resolveType] = ResolveType.break
-                                frame[Fields.depth] = depth
+                                nextFrame[Fields.state] = TryCatchFinallyState.Finally
+                                nextFrame[Fields.resolveType] = ResolveType.break
+                                nextFrame[Fields.depth] = depth
+                                nextFrame[Fields.break] = frame[Fields.break]
                                 ptr = finallyAddr
                                 break loop
                             }
                         }
                     } else {
-                        // nothing
+                        stack.pop()
                     }
                 }
             }
@@ -1517,7 +1520,7 @@ const getExecution = (
                 }
             }
 
-        } catch (err) {
+        } catch (err: any) {
             if (err != null && typeof err === 'object') {
                 err.pos = currentPtr
             }

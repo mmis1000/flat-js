@@ -519,6 +519,65 @@ testRuntime(
     printProvider
 )
 
+testRuntime(
+    'try break nested',
+    `
+    do {
+        try {
+            try {
+                throw 'FQ'
+            } finally {
+                break
+            }
+            print('fail')
+        } finally {}
+        print('fail')
+    } while (false)
+    print(0)
+    do {
+        try {
+            throw 1
+        } catch (err) {
+            try {
+                throw 'FQ'
+            } finally {
+                break
+            }
+            print('fail')
+        }
+        print('fail')
+    } while (false)
+    print(1)
+    do {
+        try {
+            throw 1
+        } catch (err) {
+            try {
+                break
+            } finally {
+                print(2)
+            }
+            print('fail')
+        } finally {
+            print(2.5)
+        }
+        print('fail')
+    } while (false)
+    print(3)
+    do {
+        try {
+            throw 1
+        } catch (err) {
+            break
+        }
+        print('fail')
+    } while (false)
+    print(4)
+    `,
+    [0, 1, 2, 2.5, 3, 4],
+    printProvider
+)
+
 testRuntime('call', `
 const fn = function (b) {
     return this.a + b
