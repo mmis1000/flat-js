@@ -73,14 +73,27 @@ export default Vue.extend({
             text: `clear()
 const start = Date.now()
 let a = 0
+
 const fn = (b) => {
   print(b)
 }
+
 for (let i = 0; i < 50; i++) {
   a = a + 1
   fn(a)
 }
+
 print(a)
+
+do {
+  try {
+    print(1)
+    throw new Error('')
+  } finally {
+    break
+  }
+} while (false)
+
 debugger
 print('total time: ' + (Date.now() - start) + 'ms')
 
