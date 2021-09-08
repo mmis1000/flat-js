@@ -53,7 +53,7 @@ import { compile, getExecution, run } from '../src'
 import Vue from 'vue'
 import Monaco from './components/monaco.vue'
 import Debugger from './components/debugger.vue'
-import { Result, Stack } from '../src/runtime'
+import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
 
@@ -128,7 +128,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 }
 
                 const originalPos = getPos().join(',')
-                const getCurrentStackLength = () => execution[Fields.stack].length
+                const getCurrentStackLength = () => execution[Fields.stack].filter(it => it[Fields.type] === FrameType.Function).length
                 let maxStack = getCurrentStackLength()
                 let skipping = false
                 let firstIgnored = false
