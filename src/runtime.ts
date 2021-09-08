@@ -15,7 +15,7 @@ const APPLY = Function.prototype.apply
 const BIND = Function.prototype.bind
 const REGEXP = RegExp
 
-const enum FrameType {
+export const enum FrameType {
     Function,
     Try
 }
@@ -388,9 +388,9 @@ const getExecution = (
             debugger
         }
 
-        if (currentFrame[Fields.scopes].length > 50) {
-            debugger
-        }
+        // if (currentFrame[Fields.scopes].length > 50) {
+        //     debugger
+        // }
 
         let returnsExternal = false
         let returnValue: unknown = null
