@@ -55,14 +55,17 @@ export const enum Fields {
     evalResult,
     newTarget,
     break,
-    depth
+    depth,
+
+    globalThis
 }
 
 interface BaseFrame {
     [Fields.type]: FrameType
     [Fields.programSection]: number[]
     [Fields.textSection]: any[]
-    [Fields.scopes]: Scope[]
+    [Fields.scopes]: Scope[],
+    [Fields.globalThis]: any
     [Fields.valueStack]: any[]
 }
 
@@ -142,6 +145,7 @@ type FunctionDescriptor = {
     [Fields.scopes]: Scope[],
     [Fields.programSection]: number[],
     [Fields.textSection]: any[]
+    [Fields.globalThis]: any
 }
 
 const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
@@ -200,7 +204,8 @@ const getExecution = (
         [Fields.invokeType]: invokeData[Fields.type],
         [Fields.return]: -1,
         [Fields.programSection]: currentProgram,
-        [Fields.textSection]: currentTextData
+        [Fields.textSection]: currentTextData,
+        [Fields.globalThis]: globalThis
     }
 
     environments.add(initialFrame)
@@ -273,7 +278,7 @@ const getExecution = (
         Reflect.setPrototypeOf(obj, Object.prototype)
         return obj
     }
-    const defineFunction = (scopes: Scope[], name: string, type: FunctionTypes, offset: number) => {
+    const defineFunction = (globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number) => {
         // TODO: types
         const scopeClone = [...scopes]
 
@@ -286,7 +291,8 @@ const getExecution = (
             [Fields.offset]: offset,
             [Fields.scopes]: scopeClone,
             [Fields.programSection]: pr,
-            [Fields.textSection]: txt
+            [Fields.textSection]: txt,
+            [Fields.globalThis]: globalThis
         }
 
         const fn = function externalFn (this: any, ...args: any[]) {
@@ -294,7 +300,7 @@ const getExecution = (
                 pr,
                 txt,
                 offset,
-                globalThis,
+                des[Fields.globalThis],
                 [...scopeClone], 
                 new.target
                     ? {
@@ -359,10 +365,11 @@ const getExecution = (
             if (scope) {
                 return scope[name]
             } else {
+                const currentGlobal = env[Fields.globalThis]
                 if (name === SpecialVariable.This) {
-                    return globalThis
-                } else if (name in globalThis) {
-                    return (globalThis as any)[name]
+                    return currentGlobal
+                } else if (name in currentGlobal) {
+                    return (currentGlobal as any)[name]
                 } else {
                     throw new ReferenceError(name + is_not_defined)
                 }
@@ -380,8 +387,9 @@ const getExecution = (
             if (scope) {
                 return (scope[name] = value)
             } else {
-                if (name in globalThis) {
-                    return ((globalThis as any)[name] = value)
+                const currentGlobal = env[Fields.globalThis]
+                if (name in currentGlobal) {
+                    return ((currentGlobal as any)[name] = value)
                 } else {
                     throw new ReferenceError(name + is_not_defined)
                 }
@@ -1036,7 +1044,7 @@ const getExecution = (
                     const type = popCurrentFrameStack<FunctionTypes>()
                     const offset = popCurrentFrameStack<number>()
                     const name = popCurrentFrameStack<string>()
-                    pushCurrentFrameStack(defineFunction(currentFrame[Fields.scopes], name, type, offset))
+                    pushCurrentFrameStack(defineFunction(currentFrame[Fields.globalThis], currentFrame[Fields.scopes], name, type, offset))
                 }
                     break
                 case OpCode.CallValue:
@@ -1123,7 +1131,8 @@ const getExecution = (
                             ],
                             [Fields.invokeType]: InvokeType.Apply,
                             [Fields.programSection]: des[Fields.programSection],
-                            [Fields.textSection]: des[Fields.textSection]
+                            [Fields.textSection]: des[Fields.textSection],
+                            [Fields.globalThis]: des[Fields.globalThis]
                         }
                         environments.add(newFrame)
 
@@ -1175,7 +1184,8 @@ const getExecution = (
                             ],
                             [Fields.invokeType]: InvokeType.Construct,
                             [Fields.programSection]: des[Fields.programSection],
-                            [Fields.textSection]: des[Fields.textSection]
+                            [Fields.textSection]: des[Fields.textSection],
+                            [Fields.globalThis]: des[Fields.globalThis]
                         }
                         environments.add(newFrame)
 
@@ -1274,7 +1284,8 @@ const getExecution = (
                         [Fields.variable]: catchName,
                         [Fields.exit]: exitAddr,
                         [Fields.textSection]: currentTextData,
-                        [Fields.programSection]: currentProgram
+                        [Fields.programSection]: currentProgram,
+                        [Fields.globalThis]: currentFrame[Fields.globalThis]
                     }
 
                     environments.add(frame)
