@@ -5,7 +5,8 @@ fetch('./jquery.json')
         new Int32Array(Uint8Array.from(atob(it.p), c => c.charCodeAt(0)).buffer),
         it.t,
         0,
-        [globalThis, { _$_ }]
+        globalThis,
+        [{ _$_ }]
     )
 
     fetch('./bad-code.json')
@@ -14,7 +15,8 @@ fetch('./jquery.json')
             new Int32Array(Uint8Array.from(atob(it.p), c => c.charCodeAt(0)).buffer),
             it.t,
             0,
-            [globalThis, { _$_ }]
+            globalThis,
+            [{ _$_ }]
         )
     )
 })
