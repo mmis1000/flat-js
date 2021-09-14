@@ -57,6 +57,91 @@ test('Example: crc location', () => {
     runtime.run(program, text, 0, globalThis, [context2])
 })
 
+
+function makeGlobalThis() {
+    const names = [
+        'Infinity',
+        'NaN',
+        'undefined',
+        'Math',
+        
+        'isFinite',
+        'isNaN',
+        'parseFloat',
+        'parseInt',
+        'decodeURI',
+        'decodeURIComponent',
+        'encodeURI',
+        'encodeURIComponent',
+        'Array',
+        'ArrayBuffer',
+        'Boolean',
+        'DataView',
+        'Date', 
+        'Error',
+        'EvalError',
+        'Float32Array',
+        'Float64Array',
+        'Function',
+
+
+        'Int8Array',
+        'Int16Array',
+        'Int32Array',
+
+        'Map',
+        'Number',
+        'Object',
+        'Promise',
+        'Proxy',
+        'RangeError',
+        'ReferenceError',
+        'RegExp',
+        'Set',
+        'SharedArrayBuffer',
+        'String',
+        'Symbol',
+        'SyntaxError',
+        'TypeError',
+
+        'Uint8Array',
+        'Uint8ClampedArray',
+        'Uint16Array',
+        'Uint32Array',
+
+        'URIError',
+        'WeakMap',
+        'WeakSet',
+    
+        'Atomics',
+        'JSON',
+        'Reflect',
+    
+        'escape',
+        'unescape',
+    
+        'Intl',
+    ]
+
+    const obj: any = {}
+
+    for (let name of names) {
+        if (Reflect.has(globalThis, name)) {
+            obj[name] = (globalThis as any)[name]
+        }
+    }
+
+    Reflect.defineProperty(obj, 'globalThis', {
+        enumerable: true,
+        configurable: false,
+        value: obj
+    })
+
+    return obj
+}
+
+const fakeGlobalThis = makeGlobalThis()
+
 function testRuntime(
     testName: string,
     code: string,
@@ -71,7 +156,7 @@ function testRuntime(
         const context = ctxProvider(results)
 
 
-        runtime.run(program, text, 0, globalThis, [context])
+        runtime.run(program, text, 0, fakeGlobalThis, [context])
 
         expect(resultTransform(results)).toEqual(expectResults)
     })
@@ -90,7 +175,7 @@ function testRuntimeThrows(
         const context = ctxProvider(results)
 
         expect(() => {
-            runtime.run(program, text, 0, globalThis, [context])
+            runtime.run(program, text, 0, fakeGlobalThis, [context])
         }).toThrowError(error)
     })
 }
@@ -183,6 +268,8 @@ testRuntime('i-- before', 'let i = { a: 1 }; print(i.a--); print(i.a)', [1, 0], 
 testRuntimeThrows('undefined i++', 'i++;', ReferenceError, printProvider)
 testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
 testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', ReferenceError, printProvider)
+
+testRuntime('this', 'print(this === globalThis)', [true], printProvider)
 
 testRuntime(
     'prefix unary expressions', `
@@ -1038,3 +1125,4 @@ try {
 
 b()
 `, ReferenceError)
+
