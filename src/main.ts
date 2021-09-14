@@ -7,7 +7,7 @@ function compileAndRun(src: string) {
     console.log(JSON.stringify(textData))
     console.log(programData.length, Buffer.from(new Uint32Array(programData).buffer).toString('base64'))
     console.time()
-    const res = run(programData, textData, 0, [globalThis, {
+    const res = run(programData, textData, 0, globalThis, [{
         location: {
             href: 'AAAA'
         }
@@ -30,5 +30,20 @@ function compileAndRun(src: string) {
 // `)
 
 console.log(compileAndRun(`
-12
+do {
+    try {
+        throw 1
+    } catch (err) {
+        try {
+            break
+        } finally {
+            console.log(2)
+        }
+        console.log('fail')
+    } finally {
+        debugger
+        console.log(2.5)
+    }
+    console.log('fail')
+} while (false)
 `))

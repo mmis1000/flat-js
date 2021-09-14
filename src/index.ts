@@ -5,5 +5,5 @@ export { run, getExecution } from './runtime'
 
 export function compileAndRun(src: string) {
     const [programData, textData] = compile(src, { evalMode: true })
-    return run(programData, textData, 0, [globalThis])
+    return run(programData, textData, 0, globalThis, [])
 }

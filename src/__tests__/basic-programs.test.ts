@@ -54,7 +54,7 @@ test('Example: crc location', () => {
         }
     }
 
-    runtime.run(program, text, 0, [globalThis, context2])
+    runtime.run(program, text, 0, globalThis, [context2])
 })
 
 function testRuntime(
@@ -71,7 +71,7 @@ function testRuntime(
         const context = ctxProvider(results)
 
 
-        runtime.run(program, text, 0, [globalThis, context])
+        runtime.run(program, text, 0, globalThis, [context])
 
         expect(resultTransform(results)).toEqual(expectResults)
     })
@@ -90,7 +90,7 @@ function testRuntimeThrows(
         const context = ctxProvider(results)
 
         expect(() => {
-            runtime.run(program, text, 0, [globalThis, context])
+            runtime.run(program, text, 0, globalThis, [context])
         }).toThrowError(error)
     })
 }

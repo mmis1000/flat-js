@@ -171,6 +171,7 @@ const getExecution = (
     program: number[],
     textData: any[],
     entryPoint: number = 0,
+    globalThis: object,
     scopes: Scope[] = [],
     invokeData: InvokeParam = {
         [Fields.type]: InvokeType.Apply,
@@ -293,6 +294,7 @@ const getExecution = (
                 pr,
                 txt,
                 offset,
+                globalThis,
                 [...scopeClone], 
                 new.target
                     ? {
@@ -339,13 +341,14 @@ const getExecution = (
 
     const findScope = (ctx: Frame, name: string): Scope | null => {
         for (let i = ctx[Fields.scopes].length - 1; i >= 0; i--) {
-            if (Reflect.has(ctx[Fields.scopes][i], name)) {
+            if (name in ctx[Fields.scopes][i]) {
                 return ctx[Fields.scopes][i]
             }
         }
 
         return null
     }
+
     const getValue = (ctx: any, name: string) => {
         if (!environments.has(ctx)) {
             return ctx[name]
@@ -356,10 +359,17 @@ const getExecution = (
             if (scope) {
                 return scope[name]
             } else {
-                throw new ReferenceError(name + is_not_defined)
+                if (name === SpecialVariable.This) {
+                    return globalThis
+                } else if (name in globalThis) {
+                    return (globalThis as any)[name]
+                } else {
+                    throw new ReferenceError(name + is_not_defined)
+                }
             }
         }
     }
+
     const setValue = (ctx: any, name: string, value: any) => {
         if (!environments.has(ctx)) {
             return (ctx[name] = value)
@@ -370,7 +380,11 @@ const getExecution = (
             if (scope) {
                 return (scope[name] = value)
             } else {
-                throw new ReferenceError(name + is_not_defined)
+                if (name in globalThis) {
+                    return ((globalThis as any)[name] = value)
+                } else {
+                    throw new ReferenceError(name + is_not_defined)
+                }
             }
         }
     }
@@ -1489,7 +1503,18 @@ const getExecution = (
                 case OpCode.Delete: {
                     const name = popCurrentFrameStack<string>()
                     const ctx = popCurrentFrameStack<Record<string, any>>()
-                    pushCurrentFrameStack(delete ctx[name])
+                    if (!environments.has(ctx)) {
+                        pushCurrentFrameStack(delete ctx[name])
+                    } else {
+                        const env: Frame = ctx
+                        const scope = findScope(env, name)
+
+                        if (scope) {
+                            pushCurrentFrameStack(delete scope[name])
+                        } else {
+                            pushCurrentFrameStack(true)
+                        }
+                    }
                 }
                     break
                 case OpCode.Debugger: {
@@ -1550,13 +1575,14 @@ const run_ = (
     program: number[],
     textData: any[],
     entryPoint: number,
+    globalThis: object,
     scopes: Scope[],
     invokeData: InvokeParam,
     args: any[],
     getDebugFunction: () => null | (() => void),
     evalResultInstead = false
 ) => {
-    const execution = getExecution(program, textData, entryPoint, scopes, invokeData, args, getDebugFunction)
+    const execution = getExecution(program, textData, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction)
 
     let res
 
@@ -1575,6 +1601,7 @@ const run = (
     program: number[],
     textData: any[],
     entryPoint: number = 0,
+    globalThis: object,
     scopes: Scope[] = [],
     self: undefined = undefined,
     args: any[] = []
@@ -1584,6 +1611,7 @@ const run = (
         program,
         textData,
         entryPoint,
+        globalThis,
         scopes,
         {
             [Fields.type]: InvokeType.Apply,

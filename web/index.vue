@@ -63,6 +63,90 @@ function withNonReactive<TData>(data: TData) {
     return <TNonReactive>() => data as TData & TNonReactive;
 }
 
+function makeGlobalThis() {
+    const names = [
+        'Infinity',
+        'NaN',
+        'undefined',
+        'Math',
+        
+        'isFinite',
+        'isNaN',
+        'parseFloat',
+        'parseInt',
+        'decodeURI',
+        'decodeURIComponent',
+        'encodeURI',
+        'encodeURIComponent',
+        'Array',
+        'ArrayBuffer',
+        'Boolean',
+        'DataView',
+        'Date', 
+        'Error',
+        'EvalError',
+        'Float32Array',
+        'Float64Array',
+        'Function',
+
+
+        'Int8Array',
+        'Int16Array',
+        'Int32Array',
+
+        'Map',
+        'Number',
+        'Object',
+        'Promise',
+        'Proxy',
+        'RangeError',
+        'ReferenceError',
+        'RegExp',
+        'Set',
+        'SharedArrayBuffer',
+        'String',
+        'Symbol',
+        'SyntaxError',
+        'TypeError',
+
+        'Uint8Array',
+        'Uint8ClampedArray',
+        'Uint16Array',
+        'Uint32Array',
+
+        'URIError',
+        'WeakMap',
+        'WeakSet',
+    
+        'Atomics',
+        'JSON',
+        'Reflect',
+    
+        'escape',
+        'unescape',
+    
+        'Intl',
+    ]
+
+    const obj: any = {}
+
+    for (let name of names) {
+        if (Reflect.has(globalThis, name)) {
+            obj[name] = (globalThis as any)[name]
+        }
+    }
+
+    Reflect.defineProperty(obj, 'globalThis', {
+        enumerable: true,
+        configurable: false,
+        value: obj
+    })
+
+    return obj
+}
+
+const fakeGlobalThis = makeGlobalThis()
+
 export default Vue.extend({
     components: {
         Monaco,
@@ -78,7 +162,7 @@ const fn = (b) => {
   print(b)
 }
 
-for (let i = 0; i < 50; i++) {
+for (let i = 0; i < 5; i++) {
   a = a + 1
   fn(a)
 }
@@ -93,6 +177,15 @@ do {
     break
   }
 } while (false)
+
+Object.defineProperty(Object.prototype, '__magic__', {
+	get: function() {
+		return this;
+	},
+	configurable: true
+});
+print(Object.keys(__magic__));
+delete Object.prototype.__magic__;
 
 debugger
 print('total time: ' + (Date.now() - start) + 'ms')
@@ -183,7 +276,10 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 }
 
             } catch (err) {
-                this.result += err ? err.stack || err.message || String(err): String(err) + '\n'
+                this.result += String(err) + '\n'
+                if ('stack' in err) {
+                    this.result += err.stack + '\n'
+                }
                 this.state = 'idle'
                 this.highlights = []
             }
@@ -243,7 +339,10 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 }
 
             } catch (err) {
-                this.result += err ? err.stack || err.message || String(err): String(err) + '\n'
+                this.result += String(err) + '\n'
+                if ('stack' in err) {
+                    this.result += err.stack + '\n'
+                }
                 this.state = 'idle'
                 this.highlights = []
             }
@@ -265,7 +364,8 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 programData,
                 textData,
                 0,
-                [globalThis, { print, clear }],
+                fakeGlobalThis,
+                [{ print, clear, __proto__: null }],
                 undefined,
                 [],
                 () => () => this.pause()
@@ -290,7 +390,8 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 programData,
                 textData,
                 0,
-                [globalThis, { print, clear }],
+                fakeGlobalThis,
+                [{ print, clear, __proto__: null }],
                 undefined,
                 [],
                 () => () => this.pause()
@@ -324,10 +425,13 @@ print('total time: ' + (Date.now() - start) + 'ms')
 
             try {
                 this.result += '> ' + text + '\n'
-                const result = run(programData, textData, 0, [...this.execution[Fields.scopes]])
+                const result = run(programData, textData, 0, fakeGlobalThis, [...this.execution[Fields.scopes]])
                 this.result += result + '\n'
             } catch (err) {
                 this.result += String(err) + '\n'
+                if ('stack' in err) {
+                    this.result += err.stack + '\n'
+                }
             }
         }
     }
