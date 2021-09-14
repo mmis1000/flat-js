@@ -59,7 +59,7 @@ async function main () {
     if (!JSONMode) {
         const postFix = `const textData = ${textData}
 const programData = new Int32Array(Uint8Array.from(atob('${programData}'), c => c.charCodeAt(0)).buffer)
-run(programData, textData, 0, [globalThis, { _$_: run }])
+run(programData, textData, 0, globalThis, [{ _$_: run }])
 `
         const joined = '{\r\n' + runtime + postFix + '}\r\n'
         if (noMinimize) {
