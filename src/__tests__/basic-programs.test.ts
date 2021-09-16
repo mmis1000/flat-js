@@ -881,7 +881,8 @@ function a () {
 }
 
 print((new a()).b)
-`, [10], printProvider)
+print(new a() != new a())
+`, [10, true], printProvider)
 
 testRuntime('new with bind', `
 function a (val) {
