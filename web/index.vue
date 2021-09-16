@@ -219,6 +219,14 @@ print('total time: ' + (Date.now() - start) + 'ms')
         }
     },
     methods: {
+        printError(err: any) {
+            this.result += String(err) + '\n'
+            if (err != null && typeof err === 'object') {
+                if ('stack' in err) {
+                    this.result += err.stack + '\n'
+                }
+            }
+        },
         stepExecution(stepIn = false) {
             const execution = this.execution
 
@@ -280,10 +288,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 }
 
             } catch (err) {
-                this.result += String(err) + '\n'
-                if ('stack' in err) {
-                    this.result += err.stack + '\n'
-                }
+                this.printError(err)
                 this.state = 'idle'
                 this.highlights = []
             }
@@ -343,10 +348,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 }
 
             } catch (err) {
-                this.result += String(err) + '\n'
-                if ('stack' in err) {
-                    this.result += err.stack + '\n'
-                }
+                this.printError(err)
                 this.state = 'idle'
                 this.highlights = []
             }
@@ -364,10 +366,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
             try {
                 [programData, textData, debugInfo] = compile(this.text, { range: true })
             } catch (err) {
-                this.result += String(err) + '\n'
-                if ('stack' in err) {
-                    this.result += err.stack + '\n'
-                }
+                this.printError(err)
                 return
             }
 
@@ -401,10 +400,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
             try {
                 [programData, textData, debugInfo] = compile(this.text, { range: true })
             } catch (err) {
-                this.result += String(err) + '\n'
-                if ('stack' in err) {
-                    this.result += err.stack + '\n'
-                }
+                this.printError(err)
                 return
             }
 
@@ -446,17 +442,22 @@ print('total time: ' + (Date.now() - start) + 'ms')
             const text = this.replText
             this.replText = ''
 
-            const [programData, textData] = compile(text, { evalMode: true })
+            let programData: number[], textData: any[]
+
+            this.result += '> ' + text + '\n'
 
             try {
-                this.result += '> ' + text + '\n'
+                [programData, textData] = compile(text, { evalMode: true })
+            } catch (err) {
+                this.printError(err)
+                return
+            }
+
+            try {
                 const result = run(programData, textData, 0, fakeGlobalThis, [...this.execution[Fields.scopes]])
                 this.result += result + '\n'
             } catch (err) {
-                this.result += String(err) + '\n'
-                if ('stack' in err) {
-                    this.result += err.stack + '\n'
-                }
+                this.printError(err)
             }
         }
     }
