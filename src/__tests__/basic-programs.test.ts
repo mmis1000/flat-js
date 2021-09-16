@@ -1149,3 +1149,12 @@ const fn = () => {
 }
 fn()
 `, ReferenceError, printProvider)
+
+testRuntimeThrows('aliased eval not read local scope', `
+const eval1 = eval
+const fn = () => {
+    var a = 42
+    print(eval1('a'))
+}
+fn()
+`, ReferenceError, printProvider)
