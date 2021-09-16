@@ -904,6 +904,14 @@ function a () {
 print((new a()).b)
 `, [10], printProvider)
 
+testRuntime('new but returns', `
+var obj = {}
+function a () {
+    return obj
+}
+
+print(new a() === obj)
+`, [true], printProvider)
 
 testRuntimeThrows('new method cause error', `
 new ({ a () {} }).a
