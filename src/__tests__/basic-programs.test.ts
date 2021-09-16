@@ -121,6 +121,8 @@ function makeGlobalThis() {
         'unescape',
     
         'Intl',
+
+        'eval'
     ]
 
     const obj: any = {}
@@ -156,7 +158,7 @@ function testRuntime(
         const context = ctxProvider(results)
 
 
-        runtime.run(program, text, 0, fakeGlobalThis, [context])
+        runtime.run(program, text, 0, fakeGlobalThis, [context], undefined, [], compiler.compile)
 
         expect(resultTransform(results)).toEqual(expectResults)
     })
@@ -175,7 +177,7 @@ function testRuntimeThrows(
         const context = ctxProvider(results)
 
         expect(() => {
-            runtime.run(program, text, 0, fakeGlobalThis, [context])
+            runtime.run(program, text, 0, fakeGlobalThis, [context], undefined, [], compiler.compile)
         }).toThrowError(error)
     })
 }
@@ -1126,3 +1128,24 @@ try {
 b()
 `, ReferenceError)
 
+
+testRuntime('eval', `
+var a = 42
+print(eval('a'))
+`, [42], printProvider)
+
+testRuntime('eval', `
+const fn = () => {
+    var a = 42
+    print(eval('a'))
+}
+fn()
+`, [42], printProvider)
+
+testRuntimeThrows('indirect eval not read local scope', `
+const fn = () => {
+    var a = 42
+    print((0, eval)('a'))
+}
+fn()
+`, ReferenceError, printProvider)

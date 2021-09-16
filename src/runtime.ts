@@ -184,7 +184,8 @@ const getExecution = (
         [Fields.self]: undefined
     },
     args: any[] = [],
-    getDebugFunction: () => null | (() => void) = () => null
+    getDebugFunction: () => null | (() => void) = () => null,
+    compileFunction: typeof import('./compiler').compile = (...args: any[]) => { throw new Error('not supported') }
 ) => {
     let currentProgram = program
     let currentTextData = textData
@@ -400,6 +401,43 @@ const getExecution = (
     let evalResult: any = undefined;
 
     let commandPtr = 0
+
+    const redirectedFunctions = new WeakMap()
+
+    // redirectedFunctions.set(eval, (str: string) => {
+    //     str = String(str)
+
+    //     const [programData, textData] = compileFunction(str, { evalMode: true })
+
+    //     const result = run(
+    //         programData,
+    //         textData,
+    //         0,
+    //         getCurrentFrame()[Fields.globalThis],
+    //         [...getCurrentFrame()[Fields.scopes]]
+    //     )
+
+    //     return result
+    // })
+
+    const EVAL_FUNCTION = eval
+
+    const emulateEval = (str: string, includesLocalScope: boolean) => {
+        str = String(str)
+
+        const [programData, textData] = compileFunction(str, { evalMode: true })
+
+        const result = run(
+            programData,
+            textData,
+            0,
+            getCurrentFrame()[Fields.globalThis],
+            includesLocalScope ? [...getCurrentFrame()[Fields.scopes]] : []
+        )
+
+        return result
+    }
+
     const step = (debug: boolean = false): Result => {
         // console.log(ptr)
         const currentPtr = commandPtr = ptr
@@ -1048,7 +1086,9 @@ const getExecution = (
                 }
                     break
                 case OpCode.CallValue:
-                case OpCode.Call: {
+
+                case OpCode.Call: 
+                case OpCode.CallAsEval: {
                     const parameterCount: number = popCurrentFrameStack()
                     let parameters: any[] = []
                     for (let i = 0; i < parameterCount; i++) {
@@ -1057,7 +1097,7 @@ const getExecution = (
 
                     let fn, envOrRecord, name = ''
 
-                    if (command === OpCode.Call) {
+                    if (command === OpCode.Call || command === OpCode.CallAsEval) {
                         name = popCurrentFrameStack()
                         envOrRecord = popCurrentFrameStack()
                         fn = getValue(envOrRecord, name)
@@ -1106,13 +1146,22 @@ const getExecution = (
                     } else if (!functionDescriptors.has(fn)) {
                         // extern
                         if (typeof fn !== 'function') {
-                            if (command === OpCode.Call) {
+                            if (command === OpCode.Call || command === OpCode.CallAsEval) {
                                 throw new TypeError(`(intermediate value).${name} is not a function`)
                             } else /* if (command === OpCode.CallValue) */ {
                                 throw new TypeError(`(intermediate value) is not a function`)
                             }
                         } else {
-                            pushCurrentFrameStack(Reflect.apply(fn, self, parameters))
+                            const fnToCall = redirectedFunctions.has(fn) ? redirectedFunctions.get(fn) : fn
+                            if (fnToCall === EVAL_FUNCTION) {
+                                if (command === OpCode.CallAsEval) {
+                                    pushCurrentFrameStack(emulateEval(String(parameters[0]), true))
+                                } else {
+                                    pushCurrentFrameStack(emulateEval(String(parameters[0]), false))
+                                }
+                            } else {
+                                pushCurrentFrameStack(Reflect.apply(fnToCall, self, parameters))
+                            }
                         }
                         
                     } else {
@@ -1591,9 +1640,10 @@ const run_ = (
     invokeData: InvokeParam,
     args: any[],
     getDebugFunction: () => null | (() => void),
-    evalResultInstead = false
+    evalResultInstead = false,
+    compileFunction: typeof import('./compiler').compile | undefined = undefined
 ) => {
-    const execution = getExecution(program, textData, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction)
+    const execution = getExecution(program, textData, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction)
 
     let res
 
@@ -1615,7 +1665,8 @@ const run = (
     globalThis: object,
     scopes: Scope[] = [],
     self: undefined = undefined,
-    args: any[] = []
+    args: any[] = [],
+    compileFunction: typeof import('./compiler').compile | undefined = undefined
 ) => {
     // The debug function is always null because it did not work in one shot
     return run_(
@@ -1632,7 +1683,8 @@ const run = (
         },
         args,
         () => null,
-        true
+        true,
+        compileFunction
     )
 }
 

@@ -126,6 +126,8 @@ function makeGlobalThis() {
         'unescape',
     
         'Intl',
+
+        'eval'
     ]
 
     const obj: any = {}
@@ -161,6 +163,8 @@ let a = 0
 const fn = (b) => {
   print(b)
 }
+
+print(eval('a'))
 
 for (let i = 0; i < 5; i++) {
   a = a + 1
@@ -368,7 +372,8 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 [{ print, clear, __proto__: null }],
                 undefined,
                 [],
-                () => () => this.pause()
+                () => () => this.pause(),
+                compile
             )
 
             this.runExecution()
@@ -394,7 +399,8 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 [{ print, clear, __proto__: null }],
                 undefined,
                 [],
-                () => () => this.pause()
+                () => () => this.pause(),
+                compile
             )
 
             this.pause()

@@ -357,6 +357,17 @@ export const enum OpCode {
      * ```
      */
     Call,
+    /**
+     * ```txt
+     * Same as call except allow to read local scope
+     * Stack:
+     *   env or object
+     *   name
+     *   argument * M
+     *   argument count - M
+     * ```
+     */
+    CallAsEval,
 
     /**
      * ```txt
@@ -1271,11 +1282,13 @@ function generateSegment(
             if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
                 const leftOps = generateLeft(self, flag)
 
+                const isEval = ts.isIdentifier(self) && self.text === 'eval'
+
                 return [
                     ...leftOps,
                     ...args,
                     op(OpCode.Literal, 2, [node.arguments.length]),
-                    op(OpCode.Call)
+                    isEval ? op(OpCode.CallAsEval) : op(OpCode.Call)
                 ]
             } else {
                 const leftValue = generate(self, flag)
