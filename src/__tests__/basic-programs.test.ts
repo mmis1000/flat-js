@@ -172,11 +172,11 @@ function testRuntimeThrows(
 ) {
 
     test('Runtime: ' + testName, () => {
-        const [program, text] = compiler.compile(code)
-        const results: any[] = []
-        const context = ctxProvider(results)
-
         expect(() => {
+            const [program, text] = compiler.compile(code)
+            const results: any[] = []
+            const context = ctxProvider(results)
+
             runtime.run(program, text, 0, fakeGlobalThis, [context], undefined, [], compiler.compile)
         }).toThrowError(error)
     })
@@ -270,6 +270,7 @@ testRuntime('i-- before', 'let i = { a: 1 }; print(i.a--); print(i.a)', [1, 0], 
 testRuntimeThrows('undefined i++', 'i++;', ReferenceError, printProvider)
 testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
 testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', ReferenceError, printProvider)
+testRuntimeThrows('syntax error for invalid syntax', '{', SyntaxError, printProvider)
 
 testRuntime('this', 'print(this === globalThis)', [true], printProvider)
 
@@ -414,7 +415,7 @@ testRuntime('arrow function', 'const a = () => 0; print(a());', [0], printProvid
 testRuntime('object method', 'const a = { b () { return 0 } }; print(a.b());', [0], printProvider)
 testRuntime('object method covered by ParenthesizedExpression', 'const a = { b () { return 0 } }; print((a.b)());', [0], printProvider)
 testRuntime('this reference get', 'const a = { a: 0, b () { return this.a } }; print(a.b());', [0], printProvider)
-testRuntime('this reference set', 'const a = { a: 0, b () { this.a = 1 } }; a.b() print(a.a);', [1], printProvider)
+testRuntime('this reference set', 'const a = { a: 0, b () { this.a = 1 } }; a.b(); print(a.a);', [1], printProvider)
 
 testRuntime(
     'scope shadowing',

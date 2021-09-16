@@ -2392,7 +2392,48 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
     const functions: Functions = new Set()
     const scopeChild: ScopeChild = new Map()
 
-    let sourceNode = ts.createSourceFile('aaa.ts', src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+    const sourceNode = ts.createSourceFile('output.ts', src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+
+
+    const locationMap = new Map<number, [number, number]>()
+
+    {
+        let row = 0
+        let col = 0
+        for (let i = 0; i < src.length + 1; i++) {
+            locationMap.set(i, [row, col])
+            if (src[i] === '\n') {
+                row += 1
+                col = 0
+            } else {
+                col++
+            }
+        }
+    }
+
+    // diagnostics
+    {
+        const servicesHost: ts.CompilerHost = (<Partial<ts.CompilerHost>>{
+            getScriptFileNames: () => ['output.ts'],
+            getScriptKind: () => ts.ScriptKind.TS,
+            getScriptVersion: () => '0',
+            useCaseSensitiveFileNames: () => true,
+            getDefaultLibFileName: () => 'lib.d.ts',
+            getCurrentDirectory: () => '/fake',
+            getCanonicalFileName: (str: string) => str,
+            getSourceFile: () => sourceNode
+        }) as ts.CompilerHost
+
+        const program = ts.createProgram(['output.ts'], {}, servicesHost);
+        const diagnostics = program.getSyntacticDiagnostics(sourceNode)
+
+        if (diagnostics.length > 0) {
+            const errorMessages = diagnostics.map(it => `at ${locationMap.get(it.start)?.map(i => i + 1)?.join(', ') ?? 'unknown'} TS${it.code} ${it.messageText}`).join('\r\n')
+            throw new SyntaxError(errorMessages)
+        }
+    }
+
+    
 
     markParent(sourceNode, parentMap)
     searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
@@ -2415,31 +2456,6 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
     const flattened = program.flat()
 
     genOffset(flattened)
-
-    const locationMap = new Map<number, [number, number]>()
-
-    if (range) {
-        let row = 0
-        let col = 0
-        for (let i = 0; i < src.length + 1; i++) {
-            locationMap.set(i, [row, col])
-            if (src[i] === '\n') {
-                row += 1
-                col = 0
-            } else {
-                col++
-            }
-        }
-
-        // const lines = src.split(/\r?\n/g)
-        // let current = 0
-        // for (let [row, line] of lines.entries()) {
-        //     for (let col = 0; col < line.length + 1; col++) {
-        //         locationMap.set(current++, [row, col])
-        //     }
-        // }
-        // current += 2
-    }
 
     // @ts-expect-error
     if (debug && typeof OpCode !== 'undefined') {

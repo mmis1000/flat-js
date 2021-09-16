@@ -360,7 +360,17 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
             }
 
-            const [programData, textData, debugInfo] = compile(this.text, { range: true })
+            let programData: number[], textData: any[], debugInfo: DebugInfo
+            try {
+                [programData, textData, debugInfo] = compile(this.text, { range: true })
+            } catch (err) {
+                this.result += String(err) + '\n'
+                if ('stack' in err) {
+                    this.result += err.stack + '\n'
+                }
+                return
+            }
+
 
             this.debugInfo = debugInfo
             this.program = programData
@@ -387,7 +397,16 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
             }
 
-            const [programData, textData, debugInfo] = compile(this.text, { range: true })
+            let programData: number[], textData: any[], debugInfo: DebugInfo
+            try {
+                [programData, textData, debugInfo] = compile(this.text, { range: true })
+            } catch (err) {
+                this.result += String(err) + '\n'
+                if ('stack' in err) {
+                    this.result += err.stack + '\n'
+                }
+                return
+            }
 
             this.debugInfo = debugInfo
             this.program = programData
