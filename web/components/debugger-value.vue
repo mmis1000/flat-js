@@ -77,6 +77,7 @@ export default Vue.extend({
             if (this.value === null) return 'null'
             if (typeof this.value === 'object') return 'Object {}'
             if (typeof this.value === 'function') return 'function'
+            if (typeof this.value === 'number') return String(this.value)
             return JSON.stringify(this.value)
         },
         childEntries (): [EntryType, string | symbol, unknown | PropertyDescriptor][] {
