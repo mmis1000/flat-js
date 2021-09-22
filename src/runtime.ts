@@ -353,6 +353,10 @@ const getExecution = (
             }
         }
 
+        if (name in ctx[Fields.globalThis]) {
+            return ctx[Fields.globalThis]
+        }
+
         return null
     }
 
@@ -388,12 +392,7 @@ const getExecution = (
             if (scope) {
                 return (scope[name] = value)
             } else {
-                const currentGlobal = env[Fields.globalThis]
-                if (name in currentGlobal) {
-                    return ((currentGlobal as any)[name] = value)
-                } else {
-                    throw new ReferenceError(name + is_not_defined)
-                }
+                throw new ReferenceError(name + is_not_defined)
             }
         }
     }
@@ -981,8 +980,14 @@ const getExecution = (
                         const fn = popCurrentFrameStack()
                         const self = popCurrentFrameStack()
 
-                        const scope: Scope = getEmptyObject()
-                        currentFrame[Fields.scopes].push(scope)
+                        let scope: Scope
+
+                        if (functionType === FunctionTypes.SourceFileInPlace) {
+                            scope = peak(currentFrame[Fields.scopes]) || currentFrame[Fields.globalThis]
+                        } else {
+                            scope = getEmptyObject()
+                            currentFrame[Fields.scopes].push(scope)
+                        }
 
                         switch (functionType) {
                             case FunctionTypes.FunctionDeclaration:
@@ -994,6 +999,7 @@ const getExecution = (
                                 scope[SpecialVariable.This] = self
                                 scope['arguments'] = getArgumentObject(scope, fn)
                         }
+
                         switch (functionType) {
                             case FunctionTypes.FunctionExpression:
                             case FunctionTypes.MethodDeclaration:

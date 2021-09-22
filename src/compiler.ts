@@ -589,6 +589,7 @@ export const enum ResolveType {
 
 export const enum FunctionTypes {
     SourceFile,
+    SourceFileInPlace,
     FunctionDeclaration,
     FunctionExpression,
     ArrowFunction,
@@ -948,7 +949,8 @@ const continueOps = new Map<ts.Node, Op>()
 
 type SegmentOptions = {
     withPos?: boolean,
-    withEval?: boolean
+    withEval?: boolean,
+    withStrict?: boolean
 }
 
 const markInternals = (ops: Op<OpCode>[]): Op<OpCode>[] => {
@@ -969,7 +971,7 @@ function generateSegment(
     scopes: Scopes,
     parentMap: ParentMap,
     functions: Functions,
-    { withPos = false, withEval = false }: SegmentOptions = {}
+    { withPos = false, withEval = false, withStrict = false }: SegmentOptions = {}
 ): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
 
@@ -2283,7 +2285,11 @@ function generateSegment(
     }
 
     entry.push(...generateVariableList(node, scopes))
-    entry.push(op(OpCode.NodeFunctionType, 2, [node]))
+    if (ts.isSourceFile(node) && !withStrict) {
+        entry.push(op(OpCode.Literal, 2, [FunctionTypes.SourceFileInPlace]))
+    } else {
+        entry.push(op(OpCode.NodeFunctionType, 2, [node]))
+    }
     entry.push(op(OpCode.EnterFunction))
 
     markInternals(entry)
