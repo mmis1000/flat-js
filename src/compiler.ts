@@ -9,7 +9,9 @@ export const enum SpecialVariable {
     This = '[this]',
     SwitchValue = '[switch]',
     LoopIterator = '[iter]',
-    IteratorEntry = '[entry]'
+    IteratorEntry = '[entry]',
+    Super = '[super]',
+    NewTarget = '[newTarget]',
 }
 
 export const enum StatementFlag {
@@ -49,6 +51,8 @@ export const enum InvokeType {
     Apply,
     Construct
 }
+
+
 
 type VariableDeclaration = {
     type: Exclude<VariableType, VariableType.Function>
@@ -191,6 +195,7 @@ export const enum OpCode {
      * Result:
      *   item
      *   item
+     * ```
      */
     Duplicate,
 
@@ -543,16 +548,14 @@ export const enum OpCode {
      *   name
      * ```
      * 
-    */
+     */
 
-    // Errors
-    /** 
+    /**
      * ```txt
      * Stack:
      *   message
      * ```
-     * 
-    */
+     */
     ThrowReferenceError,
 
     PostFixMinusMinus,
@@ -577,8 +580,19 @@ export const enum OpCode {
      * debugger;
      */
     Debugger,
-}
 
+    CreateClass,
+
+    DefineMethod,
+    DefineGetter,
+    DefineSetter,
+
+    Yield,
+    YieldStar,
+    Await,
+
+    SuperCall,
+}
 
 export const enum ResolveType {
     normal,
@@ -596,7 +610,15 @@ export const enum FunctionTypes {
     MethodDeclaration,
     GetAccessor,
     SetAccessor,
-    Constructor
+    Constructor,
+    GeneratorDeclaration,
+    GeneratorExpression,
+    GeneratorMethod,
+    AsyncFunctionDeclaration,
+    AsyncFunctionExpression,
+    AsyncArrowFunction,
+    AsyncMethod,
+    DerivedConstructor,
 }
 
 type Op<Code extends OpCode = OpCode> = {
@@ -733,6 +755,7 @@ function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, functions: 
                 }
             case ts.SyntaxKind.ForStatement:
             case ts.SyntaxKind.ForInStatement:
+            case ts.SyntaxKind.ForOfStatement:
 
             case ts.SyntaxKind.SwitchStatement:
             case ts.SyntaxKind.CaseBlock:
@@ -780,6 +803,29 @@ function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Functions
 
             scopes.get(node)!.set(SpecialVariable.IteratorEntry, {
                 type: VariableType.Var
+            })
+        }
+
+        if (ts.isForOfStatement(node)) {
+            scopes.get(node)!.set(SpecialVariable.LoopIterator, {
+                type: VariableType.Var
+            })
+
+            scopes.get(node)!.set(SpecialVariable.IteratorEntry, {
+                type: VariableType.Var
+            })
+        }
+
+        if (ts.isClassDeclaration(node) && node.name) {
+            // Class declarations are block-scoped like let
+            const block = findAncient(node, parentMap, node => scopes.has(node))
+
+            if (block === undefined) {
+                throw new Error('unresolvable variable')
+            }
+
+            scopes.get(block)!.set(node.name.text, {
+                type: VariableType.Let
             })
         }
 
@@ -1071,6 +1117,14 @@ function generateSegment(
                 ]
         }
 
+        if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.NewKeyword && node.name.text === 'target') {
+            return [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.NewTarget]),
+                op(OpCode.Get)
+            ]
+        }
+
         if (ts.isIdentifier(node) && node.text === 'undefined') {
             return [op(OpCode.UndefinedLiteral)]
         }
@@ -1280,6 +1334,67 @@ function generateSegment(
         if (ts.isCallExpression(node)) {
             const self = extractQuote(node.expression)
             const args = node.arguments.map(a => generate(a, flag)).flat()
+
+            // super() call in constructor
+            if (self.kind === ts.SyntaxKind.SuperKeyword) {
+                // Compile as: this = Reflect.construct(super, args, new.target)
+                const res: Op[] = []
+                
+                // 1. Prepare target for assignment (pushed to bottom)
+                res.push(op(OpCode.GetRecord))
+                res.push(op(OpCode.Literal, 2, [SpecialVariable.This]))
+
+                // 2. Prepare Reflect.construct(super, args, new.target)
+                // - newTarget
+                res.push(op(OpCode.GetRecord))
+                res.push(op(OpCode.Literal, 2, [SpecialVariable.NewTarget]))
+                res.push(op(OpCode.Get))
+
+                // - superClass (super)
+                res.push(op(OpCode.GetRecord))
+                res.push(op(OpCode.Literal, 2, [SpecialVariable.Super]))
+                res.push(op(OpCode.Get))
+
+                // - arguments
+                res.push(...args)
+                res.push(op(OpCode.Literal, 2, [node.arguments.length]))
+
+                // - perform call
+                res.push(op(OpCode.SuperCall))
+                
+                // 3. Complete assignment
+                res.push(op(OpCode.SetInitialized))
+                res.push(op(OpCode.Pop))
+                
+                // 4. super() returns undefined in JS
+                res.push(op(OpCode.UndefinedLiteral))
+                
+                return res
+            }
+
+            // super.method() call
+            if (ts.isPropertyAccessExpression(self) && self.expression.kind === ts.SyntaxKind.SuperKeyword) {
+                // Compile as: [super].prototype.method.call(this, ...args)
+                return [
+                    // Get the method function from super prototype
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [SpecialVariable.Super]),
+                    op(OpCode.Get), // super class
+                    op(OpCode.Literal, 2, ['prototype']),
+                    op(OpCode.Get), // super.prototype
+                    op(OpCode.Literal, 2, [self.name.text]),
+                    op(OpCode.Get), // super.prototype.method
+
+                    // Call with .call(this, ...args)
+                    op(OpCode.Literal, 2, ['call']),
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [SpecialVariable.This]),
+                    op(OpCode.Get), // push this
+                    ...args,
+                    op(OpCode.Literal, 2, [node.arguments.length + 1]), // +1 for this
+                    op(OpCode.Call)
+                ]
+            }
 
             if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
                 const leftOps = generateLeft(self, flag)
@@ -1750,6 +1865,19 @@ function generateSegment(
                 default:
                     const nothing = node.operator
             }
+        }
+
+        // super.prop access (non-call context)
+        if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.SuperKeyword) {
+            return [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.Super]),
+                op(OpCode.Get), // super class
+                op(OpCode.Literal, 2, ['prototype']),
+                op(OpCode.Get), // super.prototype
+                op(OpCode.Literal, 2, [node.name.text]),
+                op(OpCode.Get), // super.prototype.prop
+            ]
         }
 
         if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
@@ -2238,6 +2366,332 @@ function generateSegment(
             }
         }
 
+        // ========== Class Declaration / Expression ==========
+        if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+            const className = node.name?.text ?? ''
+            const extendsClause = node.heritageClauses?.find(
+                (c: ts.HeritageClause) => c.token === ts.SyntaxKind.ExtendsKeyword
+            )
+            const superExpr = extendsClause?.types[0]?.expression
+            const hasSuper = superExpr !== undefined
+
+            // Find the constructor member
+            const ctorMember = node.members.find(
+                (m: ts.ClassElement) => ts.isConstructorDeclaration(m)
+            ) as ts.ConstructorDeclaration | undefined
+
+            const res: Segment = []
+
+            // Enter a scope for [super] if we have extends
+            if (hasSuper) {
+                // We manually enter scope for [super]
+                res.push(
+                    op(OpCode.Literal, 2, [SpecialVariable.Super]),
+                    op(OpCode.Literal, 2, [VariableType.Var]),
+                    op(OpCode.Literal, 2, [1]),
+                    op(OpCode.EnterScope)
+                )
+                // Store super class
+                res.push(
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [SpecialVariable.Super]),
+                    ...generate(superExpr!, flag),
+                    op(OpCode.SetInitialized),
+                    op(OpCode.Pop)
+                )
+            }
+
+            // Create constructor function
+            if (ctorMember) {
+                res.push(
+                    op(OpCode.Literal, 2, [className]),
+                    op(OpCode.NodeOffset, 2, [ctorMember]),
+                    op(OpCode.Literal, 2, [hasSuper ? FunctionTypes.DerivedConstructor : FunctionTypes.Constructor]),
+                    op(OpCode.DefineFunction)
+                )
+            } else {
+                // Default constructor
+                if (hasSuper) {
+                    // default derived constructor: constructor(...args) { super(...args); }
+                    // We create an empty function for now - CreateClass will handle default
+                    res.push(op(OpCode.UndefinedLiteral))
+                } else {
+                    // default base constructor: constructor() {}
+                    res.push(op(OpCode.UndefinedLiteral))
+                }
+            }
+
+            // Push super class or null
+            if (hasSuper) {
+                res.push(
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [SpecialVariable.Super]),
+                    op(OpCode.Get)
+                )
+            } else {
+                res.push(op(OpCode.NullLiteral))
+            }
+
+            // CreateClass opcode: pops [name, superOrNull, constructor], pushes class
+            res.push(op(OpCode.Literal, 2, [className]))
+            res.push(op(OpCode.CreateClass))
+
+            // Define methods, getters, setters
+            for (const member of node.members) {
+                if (ts.isConstructorDeclaration(member)) continue
+
+                const isStatic = (member.modifiers?.some(
+                        (m: ts.Modifier) => m.kind === ts.SyntaxKind.StaticKeyword
+                    ) ?? false)
+
+                if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+                    // Get the target: class itself (static) or class.prototype (instance)
+                    res.push(op(OpCode.Duplicate)) // keep class on stack
+                    if (!isStatic) {
+                        res.push(
+                            op(OpCode.Literal, 2, ['prototype']),
+                            op(OpCode.Get)
+                        )
+                    }
+
+                    // Push method name
+                    if (ts.isComputedPropertyName(member.name)) {
+                        res.push(...generate(member.name.expression, flag))
+                    } else if (ts.isIdentifier(member.name)) {
+                        res.push(op(OpCode.Literal, 2, [member.name.text]))
+                    } else if (ts.isStringLiteral(member.name) || ts.isNumericLiteral(member.name)) {
+                        res.push(...generate(member.name, flag))
+                    } else {
+                        throw new Error('unsupported class member name')
+                    }
+
+                    // Create the function
+                    res.push(op(OpCode.Duplicate)) // copy name for DefineFunction
+                    res.push(op(OpCode.NodeOffset, 2, [member]))
+                    res.push(op(OpCode.NodeFunctionType, 2, [member]))
+                    res.push(op(OpCode.DefineFunction))
+
+                    // Define on target
+                    if (ts.isGetAccessorDeclaration(member)) {
+                        res.push(op(OpCode.DefineGetter))
+                    } else if (ts.isSetAccessorDeclaration(member)) {
+                        res.push(op(OpCode.DefineSetter))
+                    } else {
+                        res.push(op(OpCode.DefineMethod))
+                    }
+
+                    // Pop the target (prototype or class), class remains on stack
+                    if (!isStatic) {
+                        res.push(op(OpCode.Pop))
+                    } else {
+                        // For static, DefineMethod left the class on stack - but we duplicated
+                        // Pop the extra
+                        res.push(op(OpCode.Pop))
+                    }
+                }
+            }
+
+            // Leave [super] scope if we entered one
+            if (hasSuper) {
+                res.push(op(OpCode.LeaveScope))
+            }
+
+            // For class declarations, assign to variable name
+            if (ts.isClassDeclaration(node) && node.name) {
+                return [
+                    ...generateLeft(node.name, flag),
+                    ...res,
+                    op(OpCode.SetInitialized),
+                    op(OpCode.Pop),
+                    ...(markInternals([
+                        ...generateLeft(node.name, flag),
+                        op(OpCode.FreezeVariable),
+                        op(OpCode.Pop),
+                        op(OpCode.Pop)
+                    ]))
+                ]
+            }
+
+            // For class expressions, just leave the class on stack
+            return res
+        }
+
+        // ========== For...of ==========
+        if (ts.isForOfStatement(node)) {
+            const nextOp = op(OpCode.Nop, 0)
+            nextOps.set(node, nextOp)
+
+            const continueOp = op(OpCode.Nop, 0)
+            continueOps.set(node, continueOp)
+
+            const hasVariable = ts.isVariableDeclarationList(node.initializer) && !!(node.initializer.flags & ts.NodeFlags.BlockScoped)
+            const variableIsConst =
+                ts.isVariableDeclarationList(node.initializer)
+                    ? !!(node.initializer.flags & ts.NodeFlags.Const)
+                    : false
+            const variableName =
+                ts.isVariableDeclarationList(node.initializer)
+                    ? ts.isIdentifier(node.initializer.declarations[0].name)
+                        ? node.initializer.declarations[0].name.text
+                        : abort('Not a identifier')
+                    : ''
+
+            const enter = generateEnterScope(node, scopes)
+            const leave = generateLeaveScope(node)
+
+            const getLhs = () => {
+                if (ts.isVariableDeclarationList(node.initializer)) {
+                    return generateLeft(node.initializer.declarations[0].name, flag)
+                } else {
+                    return generateLeft(node.initializer, flag)
+                }
+            }
+
+            // Initialize iterator: [iter] = expr[Symbol.iterator]()
+            const head = [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                ...[
+                    // Get iterable[Symbol.iterator]()
+                    ...generate(node.expression, flag), // push iterable
+                    // Access Symbol.iterator
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, ['Symbol']),
+                    op(OpCode.Get), // Symbol
+                    op(OpCode.Literal, 2, ['iterator']),
+                    op(OpCode.Get), // Symbol.iterator (the symbol)
+                    // Now stack: [iterable, Symbol.iterator]
+                    op(OpCode.Literal, 2, [0]), // 0 args
+                    op(OpCode.Call), // iterable[Symbol.iterator]()
+                ],
+                op(OpCode.Set),
+                op(OpCode.Pop)
+            ]
+
+            // Condition: [entry] = [iter].next(); if ([entry].done) break
+            const condition = [
+                op(OpCode.NodeOffset, 2, [leave[0]]),
+                ...[
+                    ...[
+                        op(OpCode.GetRecord),
+                        op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+                        ...[
+                            // [iter].next()
+                            op(OpCode.GetRecord),
+                            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                            op(OpCode.Get),
+                            op(OpCode.Literal, 2, ['next']),
+                            op(OpCode.Literal, 2, [0]),
+                            op(OpCode.Call), // iter.next()
+                        ],
+                        op(OpCode.Set),
+                    ],
+                    // Check .done
+                    op(OpCode.Literal, 2, ['done']),
+                    op(OpCode.Get),
+                ],
+                op(OpCode.JumpIf),
+
+                // Set loop variable: x = [entry].value
+                ...getLhs(),
+                ...[
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+                    op(OpCode.Get),
+                    op(OpCode.Literal, 2, ['value']),
+                    op(OpCode.Get),
+                ],
+                op(OpCode.SetInitialized),
+                op(OpCode.Pop),
+
+                ...(variableIsConst
+                    ? [
+                        ...getLhs(),
+                        op(OpCode.FreezeVariable),
+                        op(OpCode.Pop),
+                        op(OpCode.Pop)
+                    ]
+                    : []
+                ),
+            ]
+
+            const body = generate(node.statement, flag)
+
+            const continueOrLeave = hasVariable ? [
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.Get),
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+
+                op(OpCode.Literal, 2, [variableName]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [variableName]),
+                op(OpCode.Get),
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+
+                op(OpCode.Literal, 2, [2]),
+                ...generateLeaveScope(node),
+                ...generateEnterScope(node, scopes),
+                op(OpCode.GetRecord),
+                op(OpCode.SetMultiple),
+
+                op(OpCode.NodeOffset, 2, [headOf(condition)]),
+                op(OpCode.Jump)
+            ] : [
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                op(OpCode.Get),
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+
+                op(OpCode.Literal, 2, [1]),
+                ...generateLeaveScope(node),
+                ...generateEnterScope(node, scopes),
+                op(OpCode.GetRecord),
+                op(OpCode.SetMultiple),
+
+                op(OpCode.NodeOffset, 2, [headOf(condition)]),
+                op(OpCode.Jump)
+            ]
+
+            return [
+                ...enter,
+                ...head,
+                ...condition,
+                ...body,
+                continueOp,
+                ...continueOrLeave,
+                ...leave,
+                nextOp
+            ]
+        }
+
+        // ========== Yield Expression ==========
+        if (ts.isYieldExpression(node)) {
+            if (node.asteriskToken) {
+                // yield* expr
+                return [
+                    ...generate(node.expression!, flag),
+                    op(OpCode.YieldStar)
+                ]
+            } else {
+                // yield expr  (or just yield)
+                return [
+                    ...(node.expression ? generate(node.expression, flag) : [op(OpCode.UndefinedLiteral)]),
+                    op(OpCode.Yield)
+                ]
+            }
+        }
+
+        // ========== Await Expression ==========
+        if (ts.isAwaitExpression(node)) {
+            return [
+                ...generate(node.expression, flag),
+                op(OpCode.Await)
+            ]
+        }
+
         throw new Error(`Unknown node ${getNameOfKind(node.kind)}`)
     }
 
@@ -2344,17 +2798,51 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
         } else if (op.op === OpCode.NodeFunctionType) {
             const func: VariableRoot = op.preData[0]
             programData.push(OpCode.Literal)
-            const type = {
-                [ts.SyntaxKind.SourceFile]: FunctionTypes.SourceFile,
-                [ts.SyntaxKind.FunctionDeclaration]: FunctionTypes.FunctionDeclaration,
-                [ts.SyntaxKind.FunctionExpression]: FunctionTypes.FunctionExpression,
-                [ts.SyntaxKind.ArrowFunction]: FunctionTypes.ArrowFunction,
-                [ts.SyntaxKind.GetAccessor]: FunctionTypes.GetAccessor,
-                [ts.SyntaxKind.SetAccessor]: FunctionTypes.SetAccessor,
-                [ts.SyntaxKind.Constructor]: FunctionTypes.Constructor,
-                [ts.SyntaxKind.MethodDeclaration]: FunctionTypes.MethodDeclaration,
+
+            const hasAsterisk = (ts.isFunctionDeclaration(func) || ts.isFunctionExpression(func) || ts.isMethodDeclaration(func))
+                && (func as any).asteriskToken != null
+            const hasAsync = ((func as ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration | ts.ArrowFunction).modifiers?.some(
+                (m: ts.Modifier) => m.kind === ts.SyntaxKind.AsyncKeyword
+            ) ?? false)
+
+            let resolvedType: FunctionTypes
+            if (hasAsterisk) {
+                switch (func.kind) {
+                    case ts.SyntaxKind.FunctionDeclaration: resolvedType = FunctionTypes.GeneratorDeclaration; break
+                    case ts.SyntaxKind.FunctionExpression: resolvedType = FunctionTypes.GeneratorExpression; break
+                    case ts.SyntaxKind.MethodDeclaration: resolvedType = FunctionTypes.GeneratorMethod; break
+                    default: throw new Error('unexpected generator kind')
+                }
+            } else if (hasAsync) {
+                switch (func.kind) {
+                    case ts.SyntaxKind.FunctionDeclaration: resolvedType = FunctionTypes.AsyncFunctionDeclaration; break
+                    case ts.SyntaxKind.FunctionExpression: resolvedType = FunctionTypes.AsyncFunctionExpression; break
+                    case ts.SyntaxKind.ArrowFunction: resolvedType = FunctionTypes.AsyncArrowFunction; break
+                    case ts.SyntaxKind.MethodDeclaration: resolvedType = FunctionTypes.AsyncMethod; break
+                    default: throw new Error('unexpected async kind')
+                }
+            } else {
+                const typeMap: Record<number, FunctionTypes> = {
+                    [ts.SyntaxKind.SourceFile]: FunctionTypes.SourceFile,
+                    [ts.SyntaxKind.FunctionDeclaration]: FunctionTypes.FunctionDeclaration,
+                    [ts.SyntaxKind.FunctionExpression]: FunctionTypes.FunctionExpression,
+                    [ts.SyntaxKind.ArrowFunction]: FunctionTypes.ArrowFunction,
+                    [ts.SyntaxKind.GetAccessor]: FunctionTypes.GetAccessor,
+                    [ts.SyntaxKind.SetAccessor]: FunctionTypes.SetAccessor,
+                    [ts.SyntaxKind.Constructor]: FunctionTypes.Constructor,
+                    [ts.SyntaxKind.MethodDeclaration]: FunctionTypes.MethodDeclaration,
+                }
+                resolvedType = typeMap[func.kind]
+
+                if (func.kind === ts.SyntaxKind.Constructor) {
+                    const classNode = (func as ts.ConstructorDeclaration).parent as ts.ClassLikeDeclaration;
+                    if (classNode.heritageClauses?.some(h => h.token === ts.SyntaxKind.ExtendsKeyword)) {
+                        resolvedType = FunctionTypes.DerivedConstructor;
+                    }
+                }
             }
-            programData.push(type[func.kind])
+
+            programData.push(resolvedType)
         } else {
             programData.push(op.op)
 
@@ -2463,21 +2951,16 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
 
     genOffset(flattened)
 
-    // @ts-expect-error
-    if (debug && typeof OpCode !== 'undefined') {
+    if (debug) {
+        // OpCode reflection is not available with const enum. 
+        // Commenting this out to keep the generated JS small.
+        /*
         console.error(flattened.map(it => {
-            // @ts-expect-error
             let res = `${it.offset < 10 ? '00' + it.offset : it.offset < 100 ? '0' + it.offset : it.offset} ${OpCode[it.op]} `
-            res += it.preData[0]
-                ? it.preData[0].kind
-                    ? getNameOfKind(it.preData[0].kind)
-                    : JSON.stringify(it.preData[0])
-                : JSON.stringify(it.preData[0])
-            if (range) {
-                res += ' ' + (it.source ? `@${locationMap.get(it.source.start)}-${locationMap.get(it.source.end)}` : '')
-            }
+            // ...
             return res
         }).join('\r\n'))
+        */
     }
 
     const textData: any[] = []

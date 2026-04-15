@@ -123,13 +123,36 @@ const is_not_defined = ' is not defined'
 const is_a_constant = ' is a constant'
 const getEmptyObject = Object.create.bind(Object, null, {})
 
-export type Result = {
+export type ResultStep = {
     done: false,
-} | {
+    yield?: undefined,
+    await?: undefined,
+}
+
+export type ResultDone = {
     done: true,
     value: unknown,
-    evalValue: unknown
+    evalValue: unknown,
+    yield?: undefined,
+    await?: undefined,
 }
+
+export type ResultYield = {
+    done: false,
+    yield: true,
+    await?: undefined,
+    value: unknown,
+    delegate?: Iterator<unknown>,
+}
+
+export type ResultAwait = {
+    done: false,
+    await: true,
+    yield?: undefined,
+    value: unknown,
+}
+
+export type Result = ResultStep | ResultDone | ResultYield | ResultAwait
 
 type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
     has (value: Frame): boolean
@@ -137,6 +160,15 @@ type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
 }
 
 type Context = Record<string, any> | Frame
+
+type Execution = {
+    readonly [Fields.ptr]: number
+    readonly [Fields.stack]: Stack
+    readonly [Fields.scopes]: Scope[]
+    [Fields.step]: (debug?: boolean) => Result
+    pushValue(value: unknown): void
+    setPendingThrow(error: unknown): void
+}
 
 type FunctionDescriptor = {
     [Fields.name]: string,
@@ -147,6 +179,17 @@ type FunctionDescriptor = {
     [Fields.textSection]: any[]
     [Fields.globalThis]: any
 }
+
+const isGeneratorType = (t: FunctionTypes) =>
+    t === FunctionTypes.GeneratorDeclaration ||
+    t === FunctionTypes.GeneratorExpression ||
+    t === FunctionTypes.GeneratorMethod
+
+const isAsyncType = (t: FunctionTypes) =>
+    t === FunctionTypes.AsyncFunctionDeclaration ||
+    t === FunctionTypes.AsyncFunctionExpression ||
+    t === FunctionTypes.AsyncArrowFunction ||
+    t === FunctionTypes.AsyncMethod
 
 const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
 
@@ -279,6 +322,125 @@ const getExecution = (
         Reflect.setPrototypeOf(obj, Object.prototype)
         return obj
     }
+    const runUntilYield = (execution: Execution): ResultDone | ResultYield => {
+        let res: Result
+        do {
+            res = execution[Fields.step]()
+        } while (!res.done && !res.yield)
+        return res as ResultDone | ResultYield
+    }
+
+    const runUntilAwait = (execution: Execution): ResultDone | ResultAwait => {
+        let res: Result
+        do {
+            res = execution[Fields.step]()
+        } while (!res.done && !res.await)
+        return res as ResultDone | ResultAwait
+    }
+
+    const createGeneratorFromExecution = (
+        pr: number[], txt: unknown[], offset: number, gt: object,
+        scopes: Scope[], invokeData: InvokeParam, args: unknown[]
+    ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
+        const execution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction)
+        let completed = false
+        let started = false
+
+        const gen = {
+            next(value?: unknown): IteratorResult<unknown> {
+                if (completed) return { value: undefined, done: true }
+                if (started) {
+                    execution.pushValue(value)
+                }
+                started = true
+
+                const res = runUntilYield(execution)
+
+                if (res.done) {
+                    completed = true
+                    return { value: res.value, done: true }
+                }
+
+                return { value: res.value, done: false }
+            },
+            return(value?: unknown): IteratorResult<unknown> {
+                if (completed) return { value, done: true }
+                completed = true
+                return { value, done: true }
+            },
+            throw(error?: unknown): IteratorResult<unknown> {
+                if (completed) throw error
+                started = true
+                execution.setPendingThrow(error)
+                try {
+                    const res = runUntilYield(execution)
+
+                    if (res.done) {
+                        completed = true
+                        return { value: res.value, done: true }
+                    }
+                    return { value: res.value, done: false }
+                } catch (e) {
+                    completed = true
+                    throw e
+                }
+            },
+            [Symbol.iterator]() { return gen }
+        }
+
+        return gen
+    }
+
+    const createAsyncFromExecution = (
+        pr: number[], txt: unknown[], offset: number, gt: object,
+        scopes: Scope[], invokeData: InvokeParam, args: unknown[]
+    ): Promise<unknown> => {
+        const execution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction)
+
+        return new Promise<unknown>((resolve, reject) => {
+            const continueExecution = (value: unknown, isFirst: boolean) => {
+                try {
+                    if (!isFirst) {
+                        execution.pushValue(value)
+                    }
+
+                    const res = runUntilAwait(execution)
+
+                    if (res.done) {
+                        resolve(res.value)
+                    } else if (res.await) {
+                        Promise.resolve(res.value).then(
+                            (val: unknown) => continueExecution(val, false),
+                            (err: unknown) => continueWithThrow(err)
+                        )
+                    }
+                } catch (e) {
+                    reject(e)
+                }
+            }
+
+            const continueWithThrow = (error: unknown) => {
+                try {
+                    execution.setPendingThrow(error)
+                    const res = runUntilAwait(execution)
+
+                    if (res.done) {
+                        resolve(res.value)
+                    } else if (res.await) {
+                        Promise.resolve(res.value).then(
+                            (val: unknown) => continueExecution(val, false),
+                            (err: unknown) => continueWithThrow(err)
+                        )
+                    }
+                } catch (e) {
+                    reject(e)
+                }
+            }
+
+            continueExecution(undefined, true)
+        })
+    }
+
     const defineFunction = (globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number) => {
         // TODO: types
         const scopeClone = [...scopes]
@@ -296,30 +458,42 @@ const getExecution = (
             [Fields.globalThis]: globalThis
         }
 
-        const fn = function externalFn (this: any, ...args: any[]) {
+        const fn = function (this: any, ...args: any[]) {
+            const invokeData: InvokeParam = new.target
+                ? {
+                    [Fields.type]: InvokeType.Construct,
+                    [Fields.function]: fn,
+                    [Fields.name]: name,
+                    [Fields.newTarget]: new.target
+                }
+                : {
+                    [Fields.type]: InvokeType.Apply,
+                    [Fields.function]: fn,
+                    [Fields.name]: name,
+                    [Fields.self]: this
+                }
+
+            if (isGeneratorType(type)) {
+                return createGeneratorFromExecution(
+                    pr, txt, offset, des[Fields.globalThis],
+                    [...scopeClone], invokeData, args
+                )
+            }
+
+            if (isAsyncType(type)) {
+                return createAsyncFromExecution(
+                    pr, txt, offset, des[Fields.globalThis],
+                    [...scopeClone], invokeData, args
+                )
+            }
+
             return run_(
-                pr,
-                txt,
-                offset,
-                des[Fields.globalThis],
-                [...scopeClone], 
-                new.target
-                    ? {
-                        [Fields.type]: InvokeType.Construct,
-                        [Fields.function]: fn,
-                        [Fields.name]: name,
-                        [Fields.newTarget]: new.target
-                    }
-                    : {
-                        [Fields.type]: InvokeType.Apply,
-                        [Fields.function]: fn,
-                        [Fields.name]: name,
-                        [Fields.self]: this
-                    }, 
-                args, 
-                getDebugFunction
+                pr, txt, offset, des[Fields.globalThis],
+                [...scopeClone], invokeData, args, getDebugFunction
             )
         }
+
+        Object.defineProperty(fn, 'name', { value: name, configurable: true })
 
         ;(fn as any).__pos__ = offset
 
@@ -368,6 +542,10 @@ const getExecution = (
             const scope = findScope(env, name)
 
             if (scope) {
+                const descriptor = variableDescriptors.get(scope)?.get(name)
+                if (descriptor && descriptor[Fields.tdz]) {
+                    throw new ReferenceError(`Cannot access '${name}' before initialization`)
+                }
                 return scope[name]
             } else {
                 const currentGlobal = env[Fields.globalThis]
@@ -390,6 +568,15 @@ const getExecution = (
             const scope = findScope(env, name)
 
             if (scope) {
+                const descriptor = variableDescriptors.get(scope)?.get(name)
+                if (descriptor) {
+                    if (descriptor[Fields.tdz]) {
+                        throw new ReferenceError(`Cannot access '${name}' before initialization`)
+                    }
+                    if (descriptor[Fields.immutable]) {
+                        throw new TypeError(is_a_constant)
+                    }
+                }
                 return (scope[name] = value)
             } else {
                 throw new ReferenceError(name + is_not_defined)
@@ -400,6 +587,8 @@ const getExecution = (
     let evalResult: any = undefined;
 
     let commandPtr = 0
+
+    let pendingAction: { error: any } | null = null
 
     const redirectedFunctions = new WeakMap()
 
@@ -438,19 +627,6 @@ const getExecution = (
     }
 
     const step = (debug: boolean = false): Result => {
-        // console.log(ptr)
-        const currentPtr = commandPtr = ptr
-        const command: OpCode = read()
-        const currentFrame = getCurrentFrame()
-
-        if (currentFrame[Fields.programSection].length !== currentProgram.length) {
-            debugger
-        }
-
-        // if (currentFrame[Fields.scopes].length > 50) {
-        //     debugger
-        // }
-
         let returnsExternal = false
         let returnValue: unknown = null
 
@@ -714,15 +890,31 @@ const getExecution = (
             }
         }
 
-        const popCurrentFrameStack = <T = unknown>(): T => {
-            return currentFrame[Fields.valueStack].pop()
-        }
-
-        const pushCurrentFrameStack = (arg: any): number => {
-            return currentFrame[Fields.valueStack].push(arg)
-        }
-
         try {
+            // Handle pending actions (from generator .throw())
+            if (pendingAction) {
+                const action = pendingAction
+                pendingAction = null
+                throw action.error
+            }
+
+            // console.log(ptr)
+            const currentPtr = commandPtr = ptr
+            const command: OpCode = read()
+            const currentFrame = getCurrentFrame()
+
+            if (currentFrame[Fields.programSection].length !== currentProgram.length) {
+                debugger
+            }
+
+            const popCurrentFrameStack = <T = unknown>(): T => {
+                return currentFrame[Fields.valueStack].pop()
+            }
+
+            const pushCurrentFrameStack = (arg: any): number => {
+                return currentFrame[Fields.valueStack].push(arg)
+            }
+
             command: switch (command) {
                 case OpCode.Literal: {
                     const value = read()
@@ -790,7 +982,9 @@ const getExecution = (
                     
                     const desc = variableDescriptors.get(scope)!.get(name)!
                     desc[Fields.tdz] = false
-                    desc[Fields.value] = value  
+                    desc[Fields.value] = value
+
+                    pushCurrentFrameStack(value)
                 }
                     break
                 // Assign and update
@@ -993,16 +1187,30 @@ const getExecution = (
                             case FunctionTypes.FunctionDeclaration:
                             case FunctionTypes.FunctionExpression:
                             case FunctionTypes.MethodDeclaration:
+                            case FunctionTypes.GeneratorDeclaration:
+                            case FunctionTypes.GeneratorExpression:
+                            case FunctionTypes.GeneratorMethod:
+                            case FunctionTypes.AsyncFunctionDeclaration:
+                            case FunctionTypes.AsyncFunctionExpression:
+                            case FunctionTypes.AsyncMethod:
                             case FunctionTypes.GetAccessor:
                             case FunctionTypes.SetAccessor:
+                            case FunctionTypes.Constructor:
+                            case FunctionTypes.DerivedConstructor:
                                 defineVariable(scope, SpecialVariable.This, VariableType.Var)
                                 scope[SpecialVariable.This] = self
+                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var)
+                                scope[SpecialVariable.NewTarget] = undefined
                                 scope['arguments'] = getArgumentObject(scope, fn)
                         }
 
                         switch (functionType) {
                             case FunctionTypes.FunctionExpression:
                             case FunctionTypes.MethodDeclaration:
+                            case FunctionTypes.GeneratorExpression:
+                            case FunctionTypes.GeneratorMethod:
+                            case FunctionTypes.AsyncFunctionExpression:
+                            case FunctionTypes.AsyncMethod:
                                 if (name !== '') {
                                     scope[name] = fn
                                 }
@@ -1025,14 +1233,26 @@ const getExecution = (
 
                         switch (functionType) {
                             case FunctionTypes.MethodDeclaration:
+                            case FunctionTypes.GeneratorMethod:
+                            case FunctionTypes.AsyncMethod:
                             case FunctionTypes.GetAccessor:
                             case FunctionTypes.SetAccessor:
                                 throw new TypeError('- not a constructor')
                             case FunctionTypes.FunctionDeclaration:
                             case FunctionTypes.FunctionExpression:
+                            case FunctionTypes.Constructor:
                                 defineVariable(scope, SpecialVariable.This, VariableType.Var)
                                 scope[SpecialVariable.This] = Object.create(newTarget.prototype)
+                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var)
+                                scope[SpecialVariable.NewTarget] = newTarget
                                 scope['arguments'] = getArgumentObject(scope, fn)
+                                break
+                            case FunctionTypes.DerivedConstructor:
+                                defineVariable(scope, SpecialVariable.This, VariableType.Let)
+                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var)
+                                scope[SpecialVariable.NewTarget] = newTarget
+                                scope['arguments'] = getArgumentObject(scope, fn)
+                                break
                         }
 
                         switch (functionType) {
@@ -1198,6 +1418,49 @@ const getExecution = (
                     }
                 }
                     break
+                case OpCode.SuperCall: {
+                    const parameterCount: number = popCurrentFrameStack()
+                    let parameters: any[] = []
+
+                    for (let i = 0; i < parameterCount; i++) {
+                        parameters.unshift(popCurrentFrameStack())
+                    }
+
+                    let fn = popCurrentFrameStack<(...args: any[]) => any>()
+                    let newTarget = popCurrentFrameStack<any>()
+
+                    if (!functionDescriptors.has(fn)) {
+                        // extern
+                        const instance = Reflect.construct(fn, parameters, newTarget)
+                        pushCurrentFrameStack(instance)
+                    } else {
+                        const des = functionDescriptors.get(fn)!
+                        const newFrame: Frame = {
+                            [Fields.type]: FrameType.Function,
+                            [Fields.scopes]: [...des[Fields.scopes]],
+                            [Fields.return]: ptr,
+                            [Fields.valueStack]: [
+                                newTarget,
+                                fn,
+                                des[Fields.name],
+                                InvokeType.Construct,
+                                ...parameters,
+                                parameters.length
+                            ],
+                            [Fields.invokeType]: InvokeType.Construct,
+                            [Fields.programSection]: des[Fields.programSection],
+                            [Fields.textSection]: des[Fields.textSection],
+                            [Fields.globalThis]: des[Fields.globalThis]
+                        }
+                        environments.add(newFrame)
+
+                        stack.push(newFrame)
+                        ptr = des[Fields.offset]
+                        currentTextData = des[Fields.textSection]
+                        currentProgram = des[Fields.programSection]
+                    }
+                }
+                    break
                 case OpCode.New: {
                     const parameterCount: number = popCurrentFrameStack()
                     let parameters: any[] = []
@@ -1273,7 +1536,7 @@ const getExecution = (
                             returnValue = result
                             break command
                         } else {
-                            if (typeof result === 'function' || typeof result === 'object') {
+                            if (result !== null && (typeof result === 'function' || typeof result === 'object')) {
                                 returnsExternal = true
                                 returnValue = result
                                 break command
@@ -1292,7 +1555,7 @@ const getExecution = (
                     if (functionFrame[Fields.invokeType] === InvokeType.Apply) {
                         prevFrame[Fields.valueStack].push(result)
                     } else {
-                        if (typeof result === 'function' || typeof result === 'object') {
+                        if (result !== null && (typeof result === 'function' || typeof result === 'object')) {
                             prevFrame[Fields.valueStack].push(result)
                         } else {
                             prevFrame[Fields.valueStack].push(getValue(functionFrame, SpecialVariable.This))
@@ -1597,6 +1860,135 @@ const getExecution = (
                     }
                 }
                     break;
+                case OpCode.CreateClass: {
+                    const name = popCurrentFrameStack<string>()
+                    const superClass = popCurrentFrameStack<any>()
+                    const ctorFn = popCurrentFrameStack<any>()
+
+                    let classFn: any
+                    if (ctorFn === undefined) {
+                        // Default constructor
+                        if (superClass !== null) {
+                            // Default derived: constructor(...args) { super(...args) }
+                            classFn = function (this: any, ...args: any[]) {
+                                return Reflect.construct(superClass, args, new.target)
+                            }
+                        } else {
+                            // Default base: constructor() {}
+                            classFn = function () {}
+                        }
+                        Object.defineProperty(classFn, 'name', { value: name, configurable: true })
+                    } else {
+                        classFn = ctorFn
+                    }
+
+                    if (superClass !== null) {
+                        // Set up prototype chain
+                        classFn.prototype = Object.create(superClass.prototype)
+                        Object.defineProperty(classFn.prototype, 'constructor', {
+                            value: classFn,
+                            writable: true,
+                            configurable: true,
+                            enumerable: false
+                        })
+                        // Static inheritance
+                        Object.setPrototypeOf(classFn, superClass)
+                    }
+
+                    pushCurrentFrameStack(classFn)
+                }
+                    break;
+                case OpCode.DefineMethod: {
+                    const fn = popCurrentFrameStack()
+                    const name = popCurrentFrameStack<string>()
+                    const obj = popCurrentFrameStack<Record<string, any>>()
+
+                    Object.defineProperty(obj, name, {
+                        value: fn,
+                        writable: true,
+                        configurable: true,
+                        enumerable: false
+                    })
+
+                    pushCurrentFrameStack(obj)
+                }
+                    break;
+                case OpCode.DefineGetter: {
+                    const fn = popCurrentFrameStack()
+                    const name = popCurrentFrameStack<string>()
+                    const obj = popCurrentFrameStack<Record<string, any>>()
+
+                    const existing = Object.getOwnPropertyDescriptor(obj, name) || {}
+                    Object.defineProperty(obj, name, {
+                        get: fn as () => any,
+                        set: existing.set,
+                        configurable: true,
+                        enumerable: false
+                    })
+
+                    pushCurrentFrameStack(obj)
+                }
+                    break;
+                case OpCode.DefineSetter: {
+                    const fn = popCurrentFrameStack()
+                    const name = popCurrentFrameStack<string>()
+                    const obj = popCurrentFrameStack<Record<string, any>>()
+
+                    const existing = Object.getOwnPropertyDescriptor(obj, name) || {}
+                    Object.defineProperty(obj, name, {
+                        get: existing.get,
+                        set: fn as (v: any) => void,
+                        configurable: true,
+                        enumerable: false
+                    })
+
+                    pushCurrentFrameStack(obj)
+                }
+                    break;
+                case OpCode.Yield: {
+                    const value = popCurrentFrameStack()
+                    return {
+                        done: false,
+                        yield: true as const,
+                        value
+                    }
+                }
+                case OpCode.YieldStar: {
+                    const iterable = popCurrentFrameStack<any>()
+                    // Get iterator from iterable
+                    const iterator: Iterator<any> = iterable[Symbol.iterator]
+                        ? iterable[Symbol.iterator]()
+                        : iterable
+
+                    // Iterate through all values, yielding each one
+                    // We implement yield* by running the sub-iterator synchronously
+                    // and re-yielding each value. This is a simplification that
+                    // doesn't support .throw()/.return() delegation to sub-iterator.
+                    // We store the iterator state and let the generator wrapper handle it.
+                    let result = iterator.next()
+                    if (result.done) {
+                        pushCurrentFrameStack(result.value)
+                    } else {
+                        // Store iterator for the wrapper to continue
+                        // We use a special marker on the yield result
+                        return {
+                            done: false,
+                            yield: true as const,
+                            value: result.value,
+                            // @ts-ignore - extra field for yield* delegation
+                            delegate: iterator
+                        } as any
+                    }
+                }
+                    break;
+                case OpCode.Await: {
+                    const value = popCurrentFrameStack()
+                    return {
+                        done: false,
+                        await: true as const,
+                        value
+                    }
+                }
                 default:
                     type NonRuntimeCommands = OpCode.NodeFunctionType | OpCode.NodeOffset | OpCode.Nop
                     const nothing: NonRuntimeCommands = command
@@ -1613,9 +2005,17 @@ const getExecution = (
 
         } catch (err: any) {
             if (err != null && typeof err === 'object') {
-                err.pos = currentPtr
+                err.pos = commandPtr
             }
             executeThrow(err)
+        }
+
+        if (returnsExternal) {
+            return {
+                done: true,
+                value: returnValue,
+                evalValue: evalResult
+            }
         }
 
         return {
@@ -1633,7 +2033,13 @@ const getExecution = (
         get [Fields.scopes] () {
             return peak(stack)[Fields.scopes]
         },
-        [Fields.step]: step
+        [Fields.step]: step,
+        pushValue(value: unknown) {
+            getCurrentFrame()[Fields.valueStack].push(value)
+        },
+        setPendingThrow(error: unknown) {
+            pendingAction = { error }
+        }
     }
 }
 

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(ls node_modules/typescript/bin/)",
+      "Bash(which tsc *)",
+      "Bash(node -e \"require\\('typescript'\\)\")",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit --project ./src/tsconfig.json)",
+      "Bash(node -e \"console.log\\(require\\('typescript'\\).version\\)\")"
+    ]
+  }
+}
