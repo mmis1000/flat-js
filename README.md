@@ -114,4 +114,4 @@ The system emulates a JavaScript interpreter that operates on the intermediate o
 
 The interpreter executes the flat opcode stream rather than interpreting the AST directly, so the bundled runtime is very small — no parser is needed at execution time.
 
-Supported features include: closures, `var`/`let`/`const`, arrow functions, `try`/`catch`/`finally`, `for`/`while`/`do…while` loops, `switch`, `new`, prototype chains, `Proxy`, `eval` (compiled in-place), `debugger` statement (triggers the web debugger's pause), and source-map-backed step debugging.
+Supported features include: closures, `var`/`let`/`const`, arrow functions, `async`/`await`, generator functions (`yield`/`yield*`), ES6 `class` (including inheritance and `super`), `try`/`catch`/`finally`, `for`/`while`/`do…while` loops, `switch`, `new`, prototype chains, `Proxy`, `eval` (compiled in-place), `debugger` statement (triggers the web debugger's pause), and source-map-backed step debugging.

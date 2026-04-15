@@ -57,7 +57,14 @@ export const enum Fields {
     break,
     depth,
 
-    globalThis
+    globalThis,
+    done,
+    yield,
+    await,
+    delegate,
+    pushValue,
+    setPendingThrow,
+    error,
 }
 
 interface BaseFrame {
@@ -124,32 +131,32 @@ const is_a_constant = ' is a constant'
 const getEmptyObject = Object.create.bind(Object, null, {})
 
 export type ResultStep = {
-    done: false,
-    yield?: undefined,
-    await?: undefined,
+    [Fields.done]: false,
+    [Fields.yield]?: undefined,
+    [Fields.await]?: undefined,
 }
 
 export type ResultDone = {
-    done: true,
-    value: unknown,
-    evalValue: unknown,
-    yield?: undefined,
-    await?: undefined,
+    [Fields.done]: true,
+    [Fields.value]: unknown,
+    [Fields.evalResult]: unknown,
+    [Fields.yield]?: undefined,
+    [Fields.await]?: undefined,
 }
 
 export type ResultYield = {
-    done: false,
-    yield: true,
-    await?: undefined,
-    value: unknown,
-    delegate?: Iterator<unknown>,
+    [Fields.done]: false,
+    [Fields.yield]: true,
+    [Fields.await]?: undefined,
+    [Fields.value]: unknown,
+    [Fields.delegate]?: Iterator<unknown>,
 }
 
 export type ResultAwait = {
-    done: false,
-    await: true,
-    yield?: undefined,
-    value: unknown,
+    [Fields.done]: false,
+    [Fields.await]: true,
+    [Fields.yield]?: undefined,
+    [Fields.value]: unknown,
 }
 
 export type Result = ResultStep | ResultDone | ResultYield | ResultAwait
@@ -166,8 +173,8 @@ type Execution = {
     readonly [Fields.stack]: Stack
     readonly [Fields.scopes]: Scope[]
     [Fields.step]: (debug?: boolean) => Result
-    pushValue(value: unknown): void
-    setPendingThrow(error: unknown): void
+    [Fields.pushValue](value: unknown): void
+    [Fields.setPendingThrow](error: unknown): void
 }
 
 type FunctionDescriptor = {
@@ -326,7 +333,7 @@ const getExecution = (
         let res: Result
         do {
             res = execution[Fields.step]()
-        } while (!res.done && !res.yield)
+        } while (!res[Fields.done] && !res[Fields.yield])
         return res as ResultDone | ResultYield
     }
 
@@ -334,7 +341,7 @@ const getExecution = (
         let res: Result
         do {
             res = execution[Fields.step]()
-        } while (!res.done && !res.await)
+        } while (!res[Fields.done] && !res[Fields.await])
         return res as ResultDone | ResultAwait
     }
 
@@ -345,23 +352,39 @@ const getExecution = (
         const execution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction)
         let completed = false
         let started = false
+        let currentDelegate: Iterator<any> | null = null
 
         const gen = {
             next(value?: unknown): IteratorResult<unknown> {
                 if (completed) return { value: undefined, done: true }
+                if (currentDelegate) {
+                    const res = currentDelegate.next(value as any)
+                    if (res.done) {
+                        currentDelegate = null
+                        execution[Fields.pushValue](res.value)
+                        // Continue to runUntilYield
+                    } else {
+                        return { value: res.value, done: false }
+                    }
+                }
+
                 if (started) {
-                    execution.pushValue(value)
+                    execution[Fields.pushValue](value)
                 }
                 started = true
 
                 const res = runUntilYield(execution)
 
-                if (res.done) {
+                if (res[Fields.done]) {
                     completed = true
-                    return { value: res.value, done: true }
+                    return { value: res[Fields.value], done: true }
                 }
 
-                return { value: res.value, done: false }
+                if (res[Fields.yield] && (res as any)[Fields.delegate]) {
+                    currentDelegate = (res as any)[Fields.delegate]
+                }
+
+                return { value: res[Fields.value], done: false }
             },
             return(value?: unknown): IteratorResult<unknown> {
                 if (completed) return { value, done: true }
@@ -371,15 +394,35 @@ const getExecution = (
             throw(error?: unknown): IteratorResult<unknown> {
                 if (completed) throw error
                 started = true
-                execution.setPendingThrow(error)
+                execution[Fields.setPendingThrow](error)
+                if (currentDelegate) {
+                    // Ideally call .throw() on delegate if it exists
+                    const delegate = currentDelegate as any
+                    const res = delegate.throw ? delegate.throw(error) : delegate.next(undefined)
+                    if (res.done) {
+                        currentDelegate = null
+                        execution[Fields.pushValue](res.value)
+                        // Continue to runUntilYield
+                    } else {
+                        return { value: res.value, done: false }
+                    }
+                }
+
+                started = true
+                execution[Fields.setPendingThrow](error)
                 try {
                     const res = runUntilYield(execution)
 
-                    if (res.done) {
+                    if (res[Fields.done]) {
                         completed = true
-                        return { value: res.value, done: true }
+                        return { value: res[Fields.value], done: true }
                     }
-                    return { value: res.value, done: false }
+
+                    if (res[Fields.yield] && (res as any)[Fields.delegate]) {
+                        currentDelegate = (res as any)[Fields.delegate]
+                    }
+
+                    return { value: res[Fields.value], done: false }
                 } catch (e) {
                     completed = true
                     throw e
@@ -401,15 +444,15 @@ const getExecution = (
             const continueExecution = (value: unknown, isFirst: boolean) => {
                 try {
                     if (!isFirst) {
-                        execution.pushValue(value)
+                        execution[Fields.pushValue](value)
                     }
 
                     const res = runUntilAwait(execution)
 
-                    if (res.done) {
-                        resolve(res.value)
-                    } else if (res.await) {
-                        Promise.resolve(res.value).then(
+                    if (res[Fields.done]) {
+                        resolve(res[Fields.value])
+                    } else if (res[Fields.await]) {
+                        Promise.resolve(res[Fields.value]).then(
                             (val: unknown) => continueExecution(val, false),
                             (err: unknown) => continueWithThrow(err)
                         )
@@ -421,13 +464,13 @@ const getExecution = (
 
             const continueWithThrow = (error: unknown) => {
                 try {
-                    execution.setPendingThrow(error)
+                    execution[Fields.setPendingThrow](error)
                     const res = runUntilAwait(execution)
 
-                    if (res.done) {
-                        resolve(res.value)
-                    } else if (res.await) {
-                        Promise.resolve(res.value).then(
+                    if (res[Fields.done]) {
+                        resolve(res[Fields.value])
+                    } else if (res[Fields.await]) {
+                        Promise.resolve(res[Fields.value]).then(
                             (val: unknown) => continueExecution(val, false),
                             (err: unknown) => continueWithThrow(err)
                         )
@@ -521,14 +564,19 @@ const getExecution = (
     }
 
     const findScope = (ctx: Frame, name: string): Scope | null => {
+        if (!ctx) {
+            return null;
+        }
         for (let i = ctx[Fields.scopes].length - 1; i >= 0; i--) {
-            if (name in ctx[Fields.scopes][i]) {
-                return ctx[Fields.scopes][i]
+            const scope = ctx[Fields.scopes][i]
+            if (variableDescriptors.get(scope)?.has(name) || name in scope) {
+                return scope
             }
         }
 
-        if (name in ctx[Fields.globalThis]) {
-            return ctx[Fields.globalThis]
+        const globalScope = ctx[Fields.globalThis]
+        if (variableDescriptors.get(globalScope)?.has(name) || name in globalScope) {
+            return globalScope
         }
 
         return null
@@ -588,7 +636,7 @@ const getExecution = (
 
     let commandPtr = 0
 
-    let pendingAction: { error: any } | null = null
+    let pendingAction: { [Fields.error]: any } | null = null
 
     const redirectedFunctions = new WeakMap()
 
@@ -627,6 +675,8 @@ const getExecution = (
     }
 
     const step = (debug: boolean = false): Result => {
+        const currentPtr = ptr;
+        const opCode = currentProgram[ptr];
         let returnsExternal = false
         let returnValue: unknown = null
 
@@ -895,7 +945,7 @@ const getExecution = (
             if (pendingAction) {
                 const action = pendingAction
                 pendingAction = null
-                throw action.error
+                throw action[Fields.error]
             }
 
             // console.log(ptr)
@@ -908,11 +958,13 @@ const getExecution = (
             }
 
             const popCurrentFrameStack = <T = unknown>(): T => {
-                return currentFrame[Fields.valueStack].pop()
+                const val = currentFrame[Fields.valueStack].pop()
+                return val
             }
 
             const pushCurrentFrameStack = (arg: any): number => {
-                return currentFrame[Fields.valueStack].push(arg)
+                const res = currentFrame[Fields.valueStack].push(arg)
+                return res
             }
 
             command: switch (command) {
@@ -1045,15 +1097,13 @@ const getExecution = (
                         const name = popCurrentFrameStack<string>()
                         let hit = false
 
-                        for (let i = ctx[Fields.scopes].length - 1; i >= 0; i--) {
-                            if (Reflect.has(ctx[Fields.scopes][i], name)) {
-                                hit = true
-                                const desc = getVariableDescriptor(ctx[Fields.scopes][i], name)
-                                if (desc && (flag & SetFlag.DeTDZ)) desc[Fields.tdz] = false
-                                currentFrame[Fields.scopes][i][name] = value
-                                if (desc && (flag & SetFlag.Freeze)) desc[Fields.immutable] = true
-                                break
-                            }
+                        const scope = findScope(ctx, name)
+                        if (scope) {
+                            hit = true
+                            const desc = getVariableDescriptor(scope, name)
+                            if (desc && (flag & SetFlag.DeTDZ)) desc[Fields.tdz] = false
+                            scope[name] = value
+                            if (desc && (flag & SetFlag.Freeze)) desc[Fields.immutable] = true
                         }
 
                         if (!hit) {
@@ -1295,13 +1345,21 @@ const getExecution = (
                 case OpCode.DeTDZ: {
                     const env: Frame = peak(currentFrame[Fields.valueStack], 2)
                     const name = peak(currentFrame[Fields.valueStack])
-                    getVariableDescriptor(peak(env[Fields.scopes]), name)![Fields.tdz] = false
+                    const scope = findScope(env, name)
+                    if (scope) {
+                        const desc = getVariableDescriptor(scope, name)
+                        if (desc) desc[Fields.tdz] = false
+                    }
                 }
                     break
                 case OpCode.FreezeVariable: {
                     const env: Frame = peak(currentFrame[Fields.valueStack], 2)
                     const name = peak(currentFrame[Fields.valueStack])
-                    getVariableDescriptor(peak(env[Fields.scopes]), name)![Fields.immutable] = true
+                    const scope = findScope(env, name)
+                    if (scope) {
+                        const desc = getVariableDescriptor(scope, name)
+                        if (desc) desc[Fields.immutable] = true
+                    }
                 }
                     break
                 case OpCode.DefineFunction: {
@@ -1369,8 +1427,11 @@ const getExecution = (
                     if (fn === BIND) {
                         const bound = bindInternal(self, parameters[0], parameters.slice(1))
                         pushCurrentFrameStack(bound)
-                    } else if (!functionDescriptors.has(fn)) {
-                        // extern
+                    } else if (
+                        !functionDescriptors.has(fn) || 
+                        isAsyncType(functionDescriptors.get(fn)![Fields.type])
+                    ) {
+                        // extern or async wrapper
                         if (typeof fn !== 'function') {
                             if (command === OpCode.Call || command === OpCode.CallAsEval) {
                                 throw new TypeError(`(intermediate value).${name} is not a function`)
@@ -1389,7 +1450,23 @@ const getExecution = (
                                 pushCurrentFrameStack(Reflect.apply(fnToCall, self, parameters))
                             }
                         }
-                        
+                    } else if (isGeneratorType(functionDescriptors.get(fn)![Fields.type])) {
+                        const des = functionDescriptors.get(fn)!
+                        const iterator = createGeneratorFromExecution(
+                            des[Fields.programSection],
+                            des[Fields.textSection],
+                            des[Fields.offset],
+                            des[Fields.globalThis],
+                            [...des[Fields.scopes]],
+                            {
+                                [Fields.type]: InvokeType.Apply,
+                                [Fields.function]: fn,
+                                [Fields.name]: des[Fields.name],
+                                [Fields.self]: self
+                            },
+                            parameters
+                        )
+                        pushCurrentFrameStack(iterator)
                     } else {
                         const des = functionDescriptors.get(fn)!
                         const newFrame: Frame = {
@@ -1948,9 +2025,9 @@ const getExecution = (
                 case OpCode.Yield: {
                     const value = popCurrentFrameStack()
                     return {
-                        done: false,
-                        yield: true as const,
-                        value
+                        [Fields.done]: false,
+                        [Fields.yield]: true as const,
+                        [Fields.value]: value
                     }
                 }
                 case OpCode.YieldStar: {
@@ -1972,11 +2049,11 @@ const getExecution = (
                         // Store iterator for the wrapper to continue
                         // We use a special marker on the yield result
                         return {
-                            done: false,
-                            yield: true as const,
-                            value: result.value,
+                            [Fields.done]: false,
+                            [Fields.yield]: true as const,
+                            [Fields.value]: result.value,
                             // @ts-ignore - extra field for yield* delegation
-                            delegate: iterator
+                            [Fields.delegate]: iterator
                         } as any
                     }
                 }
@@ -1984,9 +2061,9 @@ const getExecution = (
                 case OpCode.Await: {
                     const value = popCurrentFrameStack()
                     return {
-                        done: false,
-                        await: true as const,
-                        value
+                        [Fields.done]: false,
+                        [Fields.await]: true as const,
+                        [Fields.value]: value
                     }
                 }
                 default:
@@ -1997,9 +2074,9 @@ const getExecution = (
 
             if (returnsExternal) {
                 return {
-                    done: true,
-                    value: returnValue,
-                    evalValue: evalResult
+                    [Fields.done]: true,
+                    [Fields.value]: returnValue,
+                    [Fields.evalResult]: evalResult
                 }
             }
 
@@ -2012,14 +2089,14 @@ const getExecution = (
 
         if (returnsExternal) {
             return {
-                done: true,
-                value: returnValue,
-                evalValue: evalResult
+                [Fields.done]: true,
+                [Fields.value]: returnValue,
+                [Fields.evalResult]: evalResult
             }
         }
 
         return {
-            done: false
+            [Fields.done]: false
         }
     }
 
@@ -2034,11 +2111,12 @@ const getExecution = (
             return peak(stack)[Fields.scopes]
         },
         [Fields.step]: step,
-        pushValue(value: unknown) {
-            getCurrentFrame()[Fields.valueStack].push(value)
+        [Fields.pushValue](value: unknown) {
+            const vs = getCurrentFrame()[Fields.valueStack];
+            vs.push(value);
         },
-        setPendingThrow(error: unknown) {
-            pendingAction = { error }
+        [Fields.setPendingThrow](error: unknown) {
+            pendingAction = { [Fields.error]: error }
         }
     }
 }
@@ -2061,12 +2139,15 @@ const run_ = (
 
     do {
         res = execution[Fields.step]()
-    } while (!res.done)
+        if (!res[Fields.done] && (res[Fields.await] || res[Fields.yield])) {
+            throw new Error('Unhandled suspension in sync execution')
+        }
+    } while (!res[Fields.done])
 
     if (!evalResultInstead) {
-        return res.value
+        return (res as any)[Fields.value]
     } else {
-        return res.evalValue
+        return (res as any)[Fields.evalResult]
     }
 }
 
