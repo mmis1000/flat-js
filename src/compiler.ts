@@ -49,7 +49,8 @@ export const enum SetFlag {
 
 export const enum InvokeType {
     Apply,
-    Construct
+    Construct,
+    Generator
 }
 
 
@@ -588,6 +589,7 @@ export const enum OpCode {
     DefineSetter,
 
     Yield,
+    YieldResume,
     YieldStar,
     Await,
 
@@ -2673,13 +2675,15 @@ function generateSegment(
                 // yield* expr
                 return [
                     ...generate(node.expression!, flag),
-                    op(OpCode.YieldStar)
+                    op(OpCode.YieldStar),
+                    op(OpCode.YieldResume)
                 ]
             } else {
                 // yield expr  (or just yield)
                 return [
                     ...(node.expression ? generate(node.expression, flag) : [op(OpCode.UndefinedLiteral)]),
-                    op(OpCode.Yield)
+                    op(OpCode.Yield),
+                    op(OpCode.YieldResume)
                 ]
             }
         }

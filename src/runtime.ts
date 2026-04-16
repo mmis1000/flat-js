@@ -65,6 +65,7 @@ export const enum Fields {
     pushValue,
     setPendingThrow,
     error,
+    generator,
 }
 
 interface BaseFrame {
@@ -74,6 +75,7 @@ interface BaseFrame {
     [Fields.scopes]: Scope[],
     [Fields.globalThis]: any
     [Fields.valueStack]: any[]
+    [Fields.generator]?: any
 }
 
 interface FunctionFrame extends BaseFrame {
@@ -169,7 +171,7 @@ type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
 type Context = Record<string, any> | Frame
 
 type Execution = {
-    readonly [Fields.ptr]: number
+    [Fields.ptr]: number
     readonly [Fields.stack]: Stack
     readonly [Fields.scopes]: Scope[]
     [Fields.step]: (debug?: boolean) => Result
@@ -205,6 +207,18 @@ const environments = new WeakSet() as unknown as RefinedEnvSet
 const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
 
 const variableDescriptors = new WeakMap<Scope, Map<string, VariableDescriptor>>()
+
+type GeneratorState = {
+    stack: Stack,
+    ptr: number,
+    completed: boolean,
+    started: boolean,
+    pendingAction: null | { type: 'throw' | 'return', value: any },
+    baseFrame: Frame | null,
+    gen: any
+}
+const generatorStates = new WeakMap<any, GeneratorState>()
+
 
 type InvokeParamApply = {
     [Fields.type]: InvokeType.Apply,
@@ -329,14 +343,6 @@ const getExecution = (
         Reflect.setPrototypeOf(obj, Object.prototype)
         return obj
     }
-    const runUntilYield = (execution: Execution): ResultDone | ResultYield => {
-        let res: Result
-        do {
-            res = execution[Fields.step]()
-        } while (!res[Fields.done] && !res[Fields.yield])
-        return res as ResultDone | ResultYield
-    }
-
     const runUntilAwait = (execution: Execution): ResultDone | ResultAwait => {
         let res: Result
         do {
@@ -349,87 +355,48 @@ const getExecution = (
         pr: number[], txt: unknown[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
-        const execution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction)
-        let completed = false
-        let started = false
-        let currentDelegate: Iterator<any> | null = null
+        // Build an initial frame via a throwaway execution; do NOT run it. The generator
+        // always executes inside the caller's VM via handover (OpCode.Call & OpCode.Yield).
+        const scratchExecution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction)
+        const baseFrames: Stack = scratchExecution[Fields.stack].slice()
 
-        const gen = {
-            next(value?: unknown): IteratorResult<unknown> {
-                if (completed) return { value: undefined, done: true }
-                if (currentDelegate) {
-                    const res = currentDelegate.next(value as any)
-                    if (res.done) {
-                        currentDelegate = null
-                        execution[Fields.pushValue](res.value)
-                        // Continue to runUntilYield
-                    } else {
-                        return { value: res.value, done: false }
-                    }
-                }
+        const state: GeneratorState = {
+            stack: baseFrames,
+            ptr: offset,
+            completed: false,
+            started: false,
+            pendingAction: null,
+            baseFrame: baseFrames[0],
+            gen: null
+        }
 
-                if (started) {
-                    execution[Fields.pushValue](value)
-                }
-                started = true
+        for (const f of baseFrames) {
+            f[Fields.generator] = state
+        }
 
-                const res = runUntilYield(execution)
-
-                if (res[Fields.done]) {
-                    completed = true
-                    return { value: res[Fields.value], done: true }
-                }
-
-                if (res[Fields.yield] && (res as any)[Fields.delegate]) {
-                    currentDelegate = (res as any)[Fields.delegate]
-                }
-
-                return { value: res[Fields.value], done: false }
-            },
-            return(value?: unknown): IteratorResult<unknown> {
-                if (completed) return { value, done: true }
-                completed = true
-                return { value, done: true }
+        const gen: any = {
+            next(_value?: unknown): IteratorResult<unknown> {
+                if (state.completed) return { value: undefined, done: true }
+                throw new Error('Host-side generator iteration is not supported; call from within the VM')
             },
             throw(error?: unknown): IteratorResult<unknown> {
-                if (completed) throw error
-                started = true
-                execution[Fields.setPendingThrow](error)
-                if (currentDelegate) {
-                    // Ideally call .throw() on delegate if it exists
-                    const delegate = currentDelegate as any
-                    const res = delegate.throw ? delegate.throw(error) : delegate.next(undefined)
-                    if (res.done) {
-                        currentDelegate = null
-                        execution[Fields.pushValue](res.value)
-                        // Continue to runUntilYield
-                    } else {
-                        return { value: res.value, done: false }
-                    }
-                }
-
-                started = true
-                execution[Fields.setPendingThrow](error)
-                try {
-                    const res = runUntilYield(execution)
-
-                    if (res[Fields.done]) {
-                        completed = true
-                        return { value: res[Fields.value], done: true }
-                    }
-
-                    if (res[Fields.yield] && (res as any)[Fields.delegate]) {
-                        currentDelegate = (res as any)[Fields.delegate]
-                    }
-
-                    return { value: res[Fields.value], done: false }
-                } catch (e) {
-                    completed = true
-                    throw e
-                }
+                if (state.completed) throw error
+                throw new Error('Host-side generator iteration is not supported; call from within the VM')
+            },
+            return(value?: unknown): IteratorResult<unknown> {
+                if (state.completed) return { value, done: true }
+                state.completed = true
+                state.stack = []
+                return { value, done: true }
             },
             [Symbol.iterator]() { return gen }
         }
+
+        state.gen = gen
+
+        generatorStates.set(gen.next, state)
+        generatorStates.set(gen.throw, state)
+        generatorStates.set(gen.return, state)
 
         return gen
     }
@@ -674,8 +641,18 @@ const getExecution = (
         return result
     }
 
+    let stepCount = 0
     const step = (debug: boolean = false): Result => {
+        if (ptr >= currentProgram.length) {
+             return { [Fields.done]: true, [Fields.value]: undefined, [Fields.evalResult]: undefined }
+        }
+        if (++stepCount > 100000) throw new Error('Infinite loop detected or step limit exceeded')
+        
         const currentPtr = ptr;
+        if (debug) {
+            const op = currentProgram[ptr];
+            console.log(`[VM] STEP ${stepCount} | PTR ${currentPtr} | OP ${op} | STACK ${stack.length}`);
+        }
         const opCode = currentProgram[ptr];
         let returnsExternal = false
         let returnValue: unknown = null
@@ -694,8 +671,27 @@ const getExecution = (
                 case FrameType.Function: {
                     const frame = currentFrame as FunctionFrame
 
+                    const genState = frame[Fields.generator] as GeneratorState | undefined
+                    const isGenBase = !!(genState && genState.baseFrame === frame)
+
                     // exit
                     const returnAddr = frame[Fields.return]
+
+                    if (isGenBase) {
+                        genState!.completed = true
+                        genState!.stack = []
+                        stack.pop()
+                        if (returnAddr < 0) {
+                            returnsExternal = true
+                            returnValue = { value, done: true }
+                            return value
+                        }
+                        ptr = returnAddr
+                        currentProgram = peak(stack)[Fields.programSection]
+                        currentTextData = peak(stack)[Fields.textSection]
+                        peak(stack)[Fields.valueStack].push({ value, done: true })
+                        return value
+                    }
 
                     if (returnAddr < 0) {
                         // leave the whole function
@@ -775,6 +771,14 @@ const getExecution = (
                 const currentFrame = peak(stack)
                 switch (currentFrame[Fields.type]) {
                     case FrameType.Function: {
+                        const fframe = currentFrame as FunctionFrame
+                        const gs = fframe[Fields.generator] as GeneratorState | undefined
+                        if (gs && gs.baseFrame === fframe) {
+                            // Error escapes the generator — mark completed and continue
+                            // unwinding so it surfaces in the VM caller.
+                            gs.completed = true
+                            gs.stack = []
+                        }
                         stack.pop()
                     }
                         break
@@ -1447,7 +1451,65 @@ const getExecution = (
                                     pushCurrentFrameStack(emulateEval(String(parameters[0]), false))
                                 }
                             } else {
-                                pushCurrentFrameStack(Reflect.apply(fnToCall, self, parameters))
+                                const state: GeneratorState | undefined = generatorStates.get(fnToCall)
+                                if (state) {
+                                    const val = parameters[0]
+
+                                    if (state.completed) {
+                                        if (fnToCall === state.gen.throw) {
+                                            throw val
+                                        }
+                                        pushCurrentFrameStack({ value: undefined, done: true })
+                                        break command
+                                    }
+
+                                    // Initial-state: .throw completes immediately with the error,
+                                    // .return completes immediately with { value, done: true }.
+                                    if (!state.started) {
+                                        if (fnToCall === state.gen.throw) {
+                                            state.completed = true
+                                            state.stack = []
+                                            throw val
+                                        }
+                                        if (fnToCall === state.gen.return) {
+                                            state.completed = true
+                                            state.stack = []
+                                            pushCurrentFrameStack({ value: val, done: true })
+                                            break command
+                                        }
+                                    }
+
+                                    // Determine which method was called and set pending action accordingly.
+                                    if (fnToCall === state.gen.throw) {
+                                        state.pendingAction = { type: 'throw', value: val }
+                                    } else if (fnToCall === state.gen.return) {
+                                        state.pendingAction = { type: 'return', value: val }
+                                    } else {
+                                        state.pendingAction = null
+                                    }
+
+                                    const wasStarted = state.started
+                                    state.started = true
+
+                                    // Resuming handover: set base frame's return address to caller's ptr.
+                                    ;(state.stack[0] as any)[Fields.return] = ptr
+
+                                    stack.push(...state.stack)
+                                    state.stack = []
+
+                                    // On resume after a prior yield, the input value seeds the yield expression.
+                                    // On the very first .next(), there is no pending yield so we push nothing.
+                                    if (wasStarted) {
+                                        peak(stack)[Fields.valueStack].push(val)
+                                    }
+
+                                    ptr = state.ptr
+                                    currentProgram = peak(stack)[Fields.programSection]
+                                    currentTextData = peak(stack)[Fields.textSection]
+                                    return { [Fields.done]: false }
+                                } else {
+                                    pushCurrentFrameStack(Reflect.apply(fnToCall, self, parameters))
+                                }
                             }
                         }
                     } else if (isGeneratorType(functionDescriptors.get(fn)![Fields.type])) {
@@ -1484,7 +1546,8 @@ const getExecution = (
                             [Fields.invokeType]: InvokeType.Apply,
                             [Fields.programSection]: des[Fields.programSection],
                             [Fields.textSection]: des[Fields.textSection],
-                            [Fields.globalThis]: des[Fields.globalThis]
+                            [Fields.globalThis]: des[Fields.globalThis],
+                            [Fields.generator]: currentFrame[Fields.generator]
                         }
                         environments.add(newFrame)
 
@@ -1527,7 +1590,8 @@ const getExecution = (
                             [Fields.invokeType]: InvokeType.Construct,
                             [Fields.programSection]: des[Fields.programSection],
                             [Fields.textSection]: des[Fields.textSection],
-                            [Fields.globalThis]: des[Fields.globalThis]
+                            [Fields.globalThis]: des[Fields.globalThis],
+                            [Fields.generator]: currentFrame[Fields.generator]
                         }
                         environments.add(newFrame)
 
@@ -1580,7 +1644,8 @@ const getExecution = (
                             [Fields.invokeType]: InvokeType.Construct,
                             [Fields.programSection]: des[Fields.programSection],
                             [Fields.textSection]: des[Fields.textSection],
-                            [Fields.globalThis]: des[Fields.globalThis]
+                            [Fields.globalThis]: des[Fields.globalThis],
+                            [Fields.generator]: currentFrame[Fields.generator]
                         }
                         environments.add(newFrame)
 
@@ -1602,9 +1667,31 @@ const getExecution = (
                         stack.pop()
                     }
 
-                    const returnAddr = (peak(stack) as FunctionFrame)[Fields.return]
-
                     const functionFrame = peak(stack) as FunctionFrame
+                    const returnAddr = functionFrame[Fields.return]
+                    const genState = functionFrame[Fields.generator] as GeneratorState | undefined
+                    const isGenBase = !!(genState && genState.baseFrame === functionFrame)
+
+                    if (isGenBase) {
+                        // Generator completing. Produce IteratorResult for the caller.
+                        genState!.completed = true
+                        genState!.stack = []
+                        stack.pop()
+
+                        if (returnAddr < 0) {
+                            // No VM caller — host-side completion.
+                            returnsExternal = true
+                            returnValue = { value: result, done: true }
+                            break command
+                        }
+
+                        const prevFrame = peak(stack)
+                        prevFrame[Fields.valueStack].push({ value: result, done: true })
+                        ptr = returnAddr
+                        currentProgram = prevFrame[Fields.programSection]
+                        currentTextData = prevFrame[Fields.textSection]
+                        break command
+                    }
 
                     if (returnAddr < 0) {
                         // leave the whole function
@@ -1680,7 +1767,8 @@ const getExecution = (
                         [Fields.exit]: exitAddr,
                         [Fields.textSection]: currentTextData,
                         [Fields.programSection]: currentProgram,
-                        [Fields.globalThis]: currentFrame[Fields.globalThis]
+                        [Fields.globalThis]: currentFrame[Fields.globalThis],
+                        [Fields.generator]: currentFrame[Fields.generator]
                     }
 
                     environments.add(frame)
@@ -2024,37 +2112,182 @@ const getExecution = (
                     break;
                 case OpCode.Yield: {
                     const value = popCurrentFrameStack()
+                    const state = currentFrame[Fields.generator] as GeneratorState | undefined
+                    if (!state) {
+                        throw new Error('yield outside of generator')
+                    }
+
+                    // Save the resume point (the next instruction — YieldResume).
+                    state.ptr = ptr
+
+                    // Scan from top: find nearest frame whose owner is NOT this gen — that's the split.
+                    let genStart = stack.length
+                    while (genStart > 0 && stack[genStart - 1][Fields.generator] === state) {
+                        genStart--
+                    }
+                    const genFrames = stack.splice(genStart)
+                    state.stack = genFrames
+
+                    if (stack.length > 0) {
+                        // Hand control back to the VM caller (it.next()/throw/return via Call opcode).
+                        ptr = (genFrames[0] as any)[Fields.return]
+                        const callerFrame = peak(stack)
+                        currentProgram = callerFrame[Fields.programSection]
+                        currentTextData = callerFrame[Fields.textSection]
+                        callerFrame[Fields.valueStack].push({ value, done: false })
+                        return { [Fields.done]: false }
+                    }
+
+                    // No VM caller — host-side suspension.
                     return {
                         [Fields.done]: false,
                         [Fields.yield]: true as const,
                         [Fields.value]: value
                     }
                 }
+                case OpCode.YieldResume: {
+                    const state = currentFrame[Fields.generator] as GeneratorState | undefined
+                    if (state && state.pendingAction) {
+                        const action = state.pendingAction
+                        state.pendingAction = null
+                        // Discard the value pushed by the resuming Call opcode; the action supersedes it.
+                        popCurrentFrameStack()
+                        if (action.type === 'throw') {
+                            throw action.value
+                        }
+                        // action.type === 'return' — unwind through try/finally.
+                        executeReturn(action.value)
+                        break command
+                    }
+                    // Normal resume: input value already on stack becomes the yield expression's result.
+                    break
+                }
                 case OpCode.YieldStar: {
-                    const iterable = popCurrentFrameStack<any>()
-                    // Get iterator from iterable
-                    const iterator: Iterator<any> = iterable[Symbol.iterator]
-                        ? iterable[Symbol.iterator]()
-                        : iterable
+                    const frame = currentFrame as any
+                    let iterator = frame[Fields.delegate]
+                    let value: any = undefined
+                    
+                    if (!iterator) {
+                        const iterable = popCurrentFrameStack<any>()
+                        iterator = frame[Fields.delegate] = (iterable as any)[Symbol.iterator]
+                            ? (iterable as any)[Symbol.iterator]()
+                            : iterable
+                    } else {
+                        // Resumed from Yield (via YieldStar loop)
+                        const resumedVal = popCurrentFrameStack() as any
+                        // If we resumed because the sub-generator yielded, 
+                        // the value on the stack is { value, done: false }.
+                        // If it returned, it's { value, done: true }.
+                        // But wait! If we resumed from HOST, the value on the stack is the INPUT value.
+                        
+                        if (resumedVal && typeof resumedVal === 'object' && ('done' in resumedVal)) {
+                            // This was a result from the sub-generator (Return or Yield)
+                            if (resumedVal.done) {
+                                frame[Fields.delegate] = null
+                                pushCurrentFrameStack(resumedVal.value)
+                                break command
+                            } else {
+                                // It yielded. We should also yield this value to the host.
+                                // But we must stay at YieldStar for when we are resumed.
+                                ptr--
+                                return {
+                                    [Fields.done]: false,
+                                    [Fields.yield]: true,
+                                    [Fields.value]: resumedVal.value,
+                                    [Fields.delegate]: iterator
+                                }
+                            }
+                        }
+                        
+                        // Otherwise, it's the input value from the host (.next(val))
+                        value = resumedVal
+                    }
 
-                    // Iterate through all values, yielding each one
-                    // We implement yield* by running the sub-iterator synchronously
-                    // and re-yielding each value. This is a simplification that
-                    // doesn't support .throw()/.return() delegation to sub-iterator.
-                    // We store the iterator state and let the generator wrapper handle it.
-                    let result = iterator.next()
+                    // Instruction Handover for flat-js sub-generators
+                    const state = generatorStates.get(iterator.next)
+                    if (state) {
+                        if (state.completed) {
+                           frame[Fields.delegate] = null
+                           pushCurrentFrameStack(undefined)
+                           break command
+                        }
+
+                        // Propagate pending actions (throw/return) to sub-generator
+                        if (pendingAction) {
+                            // Transfer pendingAction to the sub-generator's execution context
+                            // Actually, they share the same 'pendingAction' because it's in the same 'getExecution' call!
+                            // (Wait! Is it? Yes, we are in the same VM loop.)
+                        }
+
+                        // Splice frames
+                        const genFrames = state.stack
+                        state.stack = []
+                        
+                        // Set bottom-most frame's return address to US (YieldStar)
+                        ;(genFrames[0] as any)[Fields.return] = commandPtr
+                        
+                        stack.push(...genFrames)
+                        
+                        // Push the input value to the sub-gen's stack (consumed by YieldResume)
+                        if (stack.length > genFrames.length) { // ensure there's a sub-gen frame
+                             peak(stack)[Fields.valueStack].push(value)
+                        }
+
+                        break command // Enter sub-generator
+                    }
+
+                    // External iterator (Host JS)
+                    if (pendingAction) {
+                        if (pendingAction[Fields.error] && iterator.throw) {
+                            const err = pendingAction[Fields.error]
+                            pendingAction = null
+                            const result = iterator.throw(err)
+                            if (result.done) {
+                                frame[Fields.delegate] = null
+                                pushCurrentFrameStack(result.value)
+                                break command
+                            } else {
+                                ptr-- // Stay on YieldStar
+                                return {
+                                    [Fields.done]: false,
+                                    [Fields.yield]: true,
+                                    [Fields.value]: result.value,
+                                    [Fields.delegate]: iterator
+                                }
+                            }
+                        }
+                        if (pendingAction[Fields.return] && iterator.return) {
+                            const val = pendingAction[Fields.return]
+                            pendingAction = null
+                            const result = iterator.return(val)
+                            if (result.done) {
+                                frame[Fields.delegate] = null
+                                pushCurrentFrameStack(result.value)
+                                break command
+                            } else {
+                                ptr-- // Stay on YieldStar
+                                return {
+                                    [Fields.done]: false,
+                                    [Fields.yield]: true,
+                                    [Fields.value]: result.value,
+                                    [Fields.delegate]: iterator
+                                }
+                            }
+                        }
+                    }
+
+                    const result = iterator.next(value)
                     if (result.done) {
+                        frame[Fields.delegate] = null
                         pushCurrentFrameStack(result.value)
                     } else {
-                        // Store iterator for the wrapper to continue
-                        // We use a special marker on the yield result
+                        ptr-- // Stay on YieldStar to repeat after YieldResume
                         return {
                             [Fields.done]: false,
-                            [Fields.yield]: true as const,
+                            [Fields.yield]: true,
                             [Fields.value]: result.value,
-                            // @ts-ignore - extra field for yield* delegation
                             [Fields.delegate]: iterator
-                        } as any
+                        }
                     }
                 }
                     break;
@@ -2100,9 +2333,15 @@ const getExecution = (
         }
     }
 
+
+
     return {
         get [Fields.ptr] () {
             return commandPtr
+        },
+        set [Fields.ptr] (v: number) {
+            commandPtr = v
+            ptr = v
         },
         get [Fields.stack] () {
             return stack
