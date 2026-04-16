@@ -272,7 +272,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
                         this.debugInfo.internals[execution[Fields.ptr]] ||
                         skipping
                     )
-                    && !result.done
+                    && !result[Fields.done]
                 )
 
                 this.refreshKey = Math.random()
@@ -280,7 +280,7 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 const [r1, c1, r2, c2] = getPos()
                 this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
                 
-                if (result.done) {
+                if (result[Fields.done]) {
                     this.state = 'idle'
                 }
                 if (this.state === 'idle') {
@@ -333,14 +333,14 @@ print('total time: ' + (Date.now() - start) + 'ms')
                     }
 
                     prevPos = getPos().join('')
-                } while (this.state === 'play' && !result.done)
+                } while (this.state === 'play' && !result[Fields.done])
 
                 if (<State>this.state === 'paused') {
                     const [r1, c1, r2, c2] = getPos()
                     this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
                 }
 
-                if (result.done) {
+                if (result[Fields.done]) {
                     this.state = 'idle'
                 }
                 if (this.state === 'idle') {
