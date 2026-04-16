@@ -2442,9 +2442,9 @@ function generateSegment(
             for (const member of node.members) {
                 if (ts.isConstructorDeclaration(member)) continue
 
-                const isStatic = (member.modifiers?.some(
-                        (m: ts.Modifier) => m.kind === ts.SyntaxKind.StaticKeyword
-                    ) ?? false)
+                const isStatic = ts.canHaveModifiers(member) ? (member.modifiers?.some(
+                        (m: ts.Modifier | ts.ModifierLike) => m.kind === ts.SyntaxKind.StaticKeyword
+                    ) ?? false) : false
 
                 if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
                     // Get the target: class itself (static) or class.prototype (instance)
@@ -2806,7 +2806,7 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
             const hasAsterisk = (ts.isFunctionDeclaration(func) || ts.isFunctionExpression(func) || ts.isMethodDeclaration(func))
                 && (func as any).asteriskToken != null
             const hasAsync = ((func as ts.FunctionDeclaration | ts.FunctionExpression | ts.MethodDeclaration | ts.ArrowFunction).modifiers?.some(
-                (m: ts.Modifier) => m.kind === ts.SyntaxKind.AsyncKeyword
+                (m: ts.Modifier | ts.ModifierLike) => m.kind === ts.SyntaxKind.AsyncKeyword
             ) ?? false)
 
             let resolvedType: FunctionTypes
@@ -2919,7 +2919,16 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
             getDefaultLibFileName: () => 'lib.d.ts',
             getCurrentDirectory: () => '/fake',
             getCanonicalFileName: (str: string) => str,
-            getSourceFile: () => sourceNode
+            getSourceFile: () => sourceNode,
+            readFile(fileName) {
+                if (fileName === 'lib.d.ts') {
+                    return ''
+                }
+                return undefined
+            },
+            fileExists(fileName) {
+                return fileName === 'lib.d.ts'
+            },
         }) as ts.CompilerHost
 
         const program = ts.createProgram(['output.ts'], {}, servicesHost);
