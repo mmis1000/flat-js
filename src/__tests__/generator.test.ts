@@ -92,4 +92,179 @@ describe('Generators', () => {
         `)
         expect(result).toEqual([1, 2, 3])
     })
+
+    test('try/finally runs on .return()', () => {
+        const result = compileAndRun(`
+            const log = [];
+            function* g() {
+                try {
+                    log.push('T1');
+                    yield 1;
+                    log.push('T2');
+                } finally {
+                    log.push('F');
+                }
+            }
+            const it = g();
+            log.push('v=' + it.next().value);
+            const r = it.return('R');
+            log.push('ret=' + r.value + ',done=' + r.done);
+            log;
+        `)
+        expect(result).toEqual(['T1', 'v=1', 'F', 'ret=R,done=true'])
+    })
+
+    test('.return() forwards through yield* and unwinds both finallies', () => {
+        const result = compileAndRun(`
+            const log = [];
+            function* A() {
+                try { log.push('A:' + (yield 1)); }
+                finally { log.push('AE'); }
+            }
+            function* B() {
+                log.push('B0');
+                try {
+                    log.push('B1:' + (yield* A()));
+                    log.push('B2:' + (yield 2));
+                } finally { log.push('BE'); }
+            }
+            const t = B();
+            log.push('v=' + t.next().value);
+            const r = t.return();
+            log.push('done=' + r.done);
+            log;
+        `)
+        expect(result).toEqual(['B0', 'v=1', 'AE', 'BE', 'done=true'])
+    })
+
+    test('yield* forwards .throw() into delegated generator', () => {
+        const result = compileAndRun(`
+            const log = [];
+            function* A() {
+                try { log.push('A:' + (yield 1)); }
+                catch (e) { log.push('caughtInA:' + e); yield 'caught'; }
+                finally { log.push('AE'); }
+            }
+            function* B() {
+                log.push('B0');
+                const r = yield* A();
+                log.push('after=' + r);
+            }
+            const t = B();
+            log.push('v1=' + t.next().value);
+            log.push('v2=' + t.throw('boom').value);
+            log.push('v3=' + t.next().value);
+            log.push('done=' + t.next().done);
+            log;
+        `)
+        expect(result).toEqual([
+            'B0',
+            'v1=1',
+            'caughtInA:boom',
+            'v2=caught',
+            'AE',
+            'after=undefined',
+            'v3=undefined',
+            'done=true'
+        ])
+    })
+
+    test('uncaught throw in delegated gen unwinds to outer catch', () => {
+        const result = compileAndRun(`
+            const log = [];
+            function* A() {
+                try { log.push('A:' + (yield 1)); }
+                finally { log.push('AE'); }
+            }
+            function* B() {
+                try {
+                    log.push('B0');
+                    yield* A();
+                    log.push('Bafter');
+                } catch (e) {
+                    log.push('caughtInB:' + e);
+                } finally {
+                    log.push('BE');
+                }
+            }
+            const t = B();
+            log.push('v1=' + t.next().value);
+            const r = t.throw('boom');
+            log.push('done=' + r.done);
+            log;
+        `)
+        expect(result).toEqual([
+            'B0',
+            'v1=1',
+            'AE',
+            'caughtInB:boom',
+            'BE',
+            'done=true'
+        ])
+    })
+
+    test('initial-state .return() skips body and completes', () => {
+        const result = compileAndRun(`
+            const log = [];
+            function* g() {
+                log.push('ran');
+                yield 1;
+            }
+            const it = g();
+            const r = it.return('R');
+            [log.length, r.value, r.done];
+        `)
+        expect(result).toEqual([0, 'R', true])
+    })
+
+    test('initial-state .throw() skips body and propagates', () => {
+        const result = compileAndRun(`
+            const log = [];
+            function* g() {
+                log.push('ran');
+                yield 1;
+            }
+            const it = g();
+            let caught;
+            try { it.throw('boom'); } catch (e) { caught = e; }
+            [log.length, caught];
+        `)
+        expect(result).toEqual([0, 'boom'])
+    })
+
+    test('nested gen with try/finally: .return() runs both finallies in order', () => {
+        const result = compileAndRun(`
+            const log = [];
+            function* A() {
+                try {
+                    log.push('A: start');
+                    yield 1;
+                    log.push('A: end');
+                } finally {
+                    log.push('A: finally');
+                }
+            }
+            function* B() {
+                try {
+                    log.push('B: start');
+                    yield* A();
+                    log.push('B: end');
+                } finally {
+                    log.push('B: finally');
+                }
+            }
+            const it = B();
+            log.push('v=' + it.next().value);
+            log.push('ret=' + it.return('R').value);
+            log;
+        `)
+        expect(result).toEqual([
+            'B: start',
+            'A: start',
+            'v=1',
+            'A: finally',
+            'B: finally',
+            'ret=R'
+        ])
+    })
 })

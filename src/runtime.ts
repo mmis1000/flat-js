@@ -1658,9 +1658,11 @@ const getExecution = (
                     break
                 case OpCode.Return: {
                     const result = popCurrentFrameStack()
-                    if (currentFrame[Fields.valueStack].length > 0) {
-                        throw new Error('bad return')
-                    }
+                    // valueStack is per-frame, so the invariant is about the frame we actually
+                    // just popped from. Capture it now; check it below once we know the frame's
+                    // function-ness and gen-ness.
+                    const topResidue = currentFrame[Fields.valueStack].length
+                    const topWasFunction = currentFrame[Fields.type] === FrameType.Function
 
                     // remove all try frames
                     while (peak(stack)[Fields.type] !== FrameType.Function) {
@@ -1671,6 +1673,19 @@ const getExecution = (
                     const returnAddr = functionFrame[Fields.return]
                     const genState = functionFrame[Fields.generator] as GeneratorState | undefined
                     const isGenBase = !!(genState && genState.baseFrame === functionFrame)
+
+                    // Sanity check: normal functions must return with an empty valueStack — any
+                    // residue indicates compiler/opcode bookkeeping corruption. Only meaningful
+                    // when Return ran directly on the function frame (a try-frame residue is
+                    // legal transient state that gets discarded with the frame). Generators are
+                    // exempt: yield/yield*/handover can legitimately leave values behind.
+                    if (
+                        topWasFunction
+                        && !functionFrame[Fields.generator]
+                        && topResidue > 0
+                    ) {
+                        throw new Error('bad return')
+                    }
 
                     if (isGenBase) {
                         // Generator completing. Produce IteratorResult for the caller.
@@ -2164,133 +2179,176 @@ const getExecution = (
                 }
                 case OpCode.YieldStar: {
                     const frame = currentFrame as any
-                    let iterator = frame[Fields.delegate]
-                    let value: any = undefined
-                    
-                    if (!iterator) {
+                    const outerState = frame[Fields.generator] as GeneratorState | undefined
+                    let delegate = frame[Fields.delegate] as { iter: any, phase: number } | undefined
+
+                    // Helper: outer yields `value` to its caller; on resume we re-enter YieldStar.
+                    const relayYield = (value: any): Result => {
+                        if (!outerState) {
+                            ptr = commandPtr // stay at YieldStar for host-side re-entry
+                            return {
+                                [Fields.done]: false,
+                                [Fields.yield]: true as const,
+                                [Fields.value]: value
+                            }
+                        }
+                        outerState.ptr = commandPtr
+                        let genStart = stack.length
+                        while (genStart > 0 && stack[genStart - 1][Fields.generator] === outerState) {
+                            genStart--
+                        }
+                        const genFrames = stack.splice(genStart)
+                        outerState.stack = genFrames
+                        if (stack.length > 0) {
+                            ptr = (genFrames[0] as any)[Fields.return]
+                            const cFrame = peak(stack)
+                            currentProgram = cFrame[Fields.programSection]
+                            currentTextData = cFrame[Fields.textSection]
+                            cFrame[Fields.valueStack].push({ value, done: false })
+                            return { [Fields.done]: false }
+                        }
+                        return {
+                            [Fields.done]: false,
+                            [Fields.yield]: true as const,
+                            [Fields.value]: value
+                        }
+                    }
+
+                    // Phase 1: sub-iterator just produced a result (yield or return) and handed control back.
+                    if (delegate && delegate.phase === 1) {
+                        const subResult = popCurrentFrameStack<any>()
+                        if (subResult && subResult.done) {
+                            const lastMode = (delegate as any).pendingMode
+                            frame[Fields.delegate] = null
+                            if (lastMode === 'return') {
+                                // yield* forwarded a .return to sub; when sub completes, outer returns too.
+                                executeReturn(subResult.value)
+                                break command
+                            }
+                            pushCurrentFrameStack(subResult.value)
+                            break command
+                        }
+                        delegate.phase = 2
+                        return relayYield(subResult.value)
+                    }
+
+                    // Phase 0 (initial) / Phase 2 (resumed by outer caller): need to invoke iter's method.
+                    let iter: any
+                    let sentVal: any
+                    let mode: 'next' | 'throw' | 'return' = 'next'
+
+                    if (!delegate) {
                         const iterable = popCurrentFrameStack<any>()
-                        iterator = frame[Fields.delegate] = (iterable as any)[Symbol.iterator]
+                        iter = (iterable as any)[Symbol.iterator]
                             ? (iterable as any)[Symbol.iterator]()
                             : iterable
+                        delegate = { iter, phase: 0 }
+                        frame[Fields.delegate] = delegate
+                        sentVal = undefined
+                        // First iter.next is always plain 'next' with undefined seed.
                     } else {
-                        // Resumed from Yield (via YieldStar loop)
-                        const resumedVal = popCurrentFrameStack() as any
-                        // If we resumed because the sub-generator yielded, 
-                        // the value on the stack is { value, done: false }.
-                        // If it returned, it's { value, done: true }.
-                        // But wait! If we resumed from HOST, the value on the stack is the INPUT value.
-                        
-                        if (resumedVal && typeof resumedVal === 'object' && ('done' in resumedVal)) {
-                            // This was a result from the sub-generator (Return or Yield)
-                            if (resumedVal.done) {
-                                frame[Fields.delegate] = null
-                                pushCurrentFrameStack(resumedVal.value)
-                                break command
-                            } else {
-                                // It yielded. We should also yield this value to the host.
-                                // But we must stay at YieldStar for when we are resumed.
-                                ptr--
-                                return {
-                                    [Fields.done]: false,
-                                    [Fields.yield]: true,
-                                    [Fields.value]: resumedVal.value,
-                                    [Fields.delegate]: iterator
-                                }
-                            }
-                        }
-                        
-                        // Otherwise, it's the input value from the host (.next(val))
-                        value = resumedVal
-                    }
-
-                    // Instruction Handover for flat-js sub-generators
-                    const state = generatorStates.get(iterator.next)
-                    if (state) {
-                        if (state.completed) {
-                           frame[Fields.delegate] = null
-                           pushCurrentFrameStack(undefined)
-                           break command
-                        }
-
-                        // Propagate pending actions (throw/return) to sub-generator
-                        if (pendingAction) {
-                            // Transfer pendingAction to the sub-generator's execution context
-                            // Actually, they share the same 'pendingAction' because it's in the same 'getExecution' call!
-                            // (Wait! Is it? Yes, we are in the same VM loop.)
-                        }
-
-                        // Splice frames
-                        const genFrames = state.stack
-                        state.stack = []
-                        
-                        // Set bottom-most frame's return address to US (YieldStar)
-                        ;(genFrames[0] as any)[Fields.return] = commandPtr
-                        
-                        stack.push(...genFrames)
-                        
-                        // Push the input value to the sub-gen's stack (consumed by YieldResume)
-                        if (stack.length > genFrames.length) { // ensure there's a sub-gen frame
-                             peak(stack)[Fields.valueStack].push(value)
-                        }
-
-                        break command // Enter sub-generator
-                    }
-
-                    // External iterator (Host JS)
-                    if (pendingAction) {
-                        if (pendingAction[Fields.error] && iterator.throw) {
-                            const err = pendingAction[Fields.error]
-                            pendingAction = null
-                            const result = iterator.throw(err)
-                            if (result.done) {
-                                frame[Fields.delegate] = null
-                                pushCurrentFrameStack(result.value)
-                                break command
-                            } else {
-                                ptr-- // Stay on YieldStar
-                                return {
-                                    [Fields.done]: false,
-                                    [Fields.yield]: true,
-                                    [Fields.value]: result.value,
-                                    [Fields.delegate]: iterator
-                                }
-                            }
-                        }
-                        if (pendingAction[Fields.return] && iterator.return) {
-                            const val = pendingAction[Fields.return]
-                            pendingAction = null
-                            const result = iterator.return(val)
-                            if (result.done) {
-                                frame[Fields.delegate] = null
-                                pushCurrentFrameStack(result.value)
-                                break command
-                            } else {
-                                ptr-- // Stay on YieldStar
-                                return {
-                                    [Fields.done]: false,
-                                    [Fields.yield]: true,
-                                    [Fields.value]: result.value,
-                                    [Fields.delegate]: iterator
-                                }
-                            }
+                        iter = delegate.iter
+                        // Resuming from outer yield. Outer's pendingAction governs the method to dispatch.
+                        sentVal = popCurrentFrameStack()
+                        if (outerState && outerState.pendingAction) {
+                            mode = outerState.pendingAction.type
+                            sentVal = outerState.pendingAction.value
+                            outerState.pendingAction = null
                         }
                     }
 
-                    const result = iterator.next(value)
+                    // Dispatch. For VM gens, reuse state-based handover. For host iterators, call directly.
+                    const methodFn = mode === 'next' ? iter.next
+                        : mode === 'throw' ? iter.throw
+                        : iter.return
+                    const subState = methodFn ? generatorStates.get(methodFn) : undefined
+
+                    if (subState) {
+                        // VM generator
+                        if (subState.completed) {
+                            frame[Fields.delegate] = null
+                            if (mode === 'throw') throw sentVal
+                            if (mode === 'return') {
+                                executeReturn(sentVal)
+                                break command
+                            }
+                            pushCurrentFrameStack(undefined)
+                            break command
+                        }
+
+                        if (!subState.started) {
+                            if (mode === 'throw') {
+                                subState.completed = true
+                                subState.stack = []
+                                frame[Fields.delegate] = null
+                                throw sentVal
+                            }
+                            if (mode === 'return') {
+                                subState.completed = true
+                                subState.stack = []
+                                frame[Fields.delegate] = null
+                                executeReturn(sentVal)
+                                break command
+                            }
+                        }
+
+                        if (mode === 'throw') subState.pendingAction = { type: 'throw', value: sentVal }
+                        else if (mode === 'return') subState.pendingAction = { type: 'return', value: sentVal }
+                        else subState.pendingAction = null
+
+                        const wasStarted = subState.started
+                        subState.started = true
+
+                        ;(subState.stack[0] as any)[Fields.return] = commandPtr
+                        stack.push(...subState.stack)
+                        subState.stack = []
+
+                        if (wasStarted) {
+                            peak(stack)[Fields.valueStack].push(sentVal)
+                        }
+
+                        delegate.phase = 1
+                        ;(delegate as any).pendingMode = mode
+                        ptr = subState.ptr
+                        currentProgram = peak(stack)[Fields.programSection]
+                        currentTextData = peak(stack)[Fields.textSection]
+                        return { [Fields.done]: false }
+                    }
+
+                    // Host iterator
+                    let result: any
+                    if (mode === 'throw') {
+                        if (!iter.throw) {
+                            if (iter.return) { try { iter.return() } catch (_) {} }
+                            frame[Fields.delegate] = null
+                            throw sentVal
+                        }
+                        result = iter.throw(sentVal)
+                    } else if (mode === 'return') {
+                        if (!iter.return) {
+                            frame[Fields.delegate] = null
+                            executeReturn(sentVal)
+                            break command
+                        }
+                        result = iter.return(sentVal)
+                        if (result.done) {
+                            frame[Fields.delegate] = null
+                            executeReturn(result.value)
+                            break command
+                        }
+                    } else {
+                        result = iter.next(sentVal)
+                    }
+
                     if (result.done) {
                         frame[Fields.delegate] = null
                         pushCurrentFrameStack(result.value)
-                    } else {
-                        ptr-- // Stay on YieldStar to repeat after YieldResume
-                        return {
-                            [Fields.done]: false,
-                            [Fields.yield]: true,
-                            [Fields.value]: result.value,
-                            [Fields.delegate]: iterator
-                        }
+                        break command
                     }
+
+                    delegate.phase = 2
+                    return relayYield(result.value)
                 }
-                    break;
                 case OpCode.Await: {
                     const value = popCurrentFrameStack()
                     return {
