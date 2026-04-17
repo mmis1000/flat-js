@@ -5,6 +5,13 @@ export const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
 }
 
+/** Literal pool tail entries: `[label, length, ...payload]` (`length` = payload word count). MUST SYNC with runtime `decodeLiteralFromProgram`. */
+export const enum LiteralPoolKind {
+    Boolean = 1,
+    Number = 2,
+    String = 3,
+}
+
 export const enum SpecialVariable {
     This = '[this]',
     SwitchValue = '[switch]',
@@ -2783,7 +2790,55 @@ function genOffset(nodes: Segment) {
     }
 }
 
-function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, programData: number[], textData: any[]) {
+function encodeLiteralPoolWords(value: any): number[] {
+    if (typeof value === 'boolean') {
+        return [LiteralPoolKind.Boolean, 1, value ? 1 : 0]
+    }
+    if (typeof value === 'number') {
+        const buf = new ArrayBuffer(8)
+        new Float64Array(buf)[0] = value
+        const u = new Uint32Array(buf)
+        return [LiteralPoolKind.Number, 2, u[0] | 0, u[1] | 0]
+    }
+    if (typeof value === 'string') {
+        const words: number[] = [LiteralPoolKind.String, value.length]
+        for (let i = 0; i < value.length; i++) {
+            words.push(value.charCodeAt(i))
+        }
+        return words
+    }
+    throw new Error('unsupported literal pool value')
+}
+
+/** Append encoded literals to the tail of `programData` and map temp slot indices to absolute positions. Only scans the code prefix `codeLen`. */
+function finalizeLiteralPool(programData: number[], literalValues: any[]) {
+    const codeLen = programData.length
+    let cursor = codeLen
+    const slotPositions: number[] = []
+    const poolWords: number[] = []
+    for (let s = 0; s < literalValues.length; s++) {
+        slotPositions[s] = cursor
+        const enc = encodeLiteralPoolWords(literalValues[s])
+        poolWords.push(...enc)
+        cursor += enc.length
+    }
+    for (let i = 0; i < codeLen - 1; i++) {
+        if (programData[i] === OpCode.Literal) {
+            const op = programData[i + 1]
+            if (isSmallNumber(op)) {
+                continue
+            }
+            if ((op & TEXT_DADA_MASK) === 0) {
+                continue
+            }
+            const slot = op ^ TEXT_DADA_MASK
+            programData[i + 1] = TEXT_DADA_MASK | slotPositions[slot]
+        }
+    }
+    programData.push(...poolWords)
+}
+
+function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, programData: number[], literalValues: any[]) {
     for (const op of seg) {
         if (op.length === 0) {
             // not generate anything
@@ -2855,12 +2910,12 @@ function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, prog
                     if (isSmallNumber(op.preData[0])) {
                         programData.push(op.preData[0])
                     } else {
-                        const oldIndex = textData.indexOf(op.preData[0])
-                        if (oldIndex >= 0) {
-                            programData.push(TEXT_DADA_MASK | oldIndex)
-                        } else {
-                            programData.push(TEXT_DADA_MASK | (textData.push(op.preData[0]) - 1))
+                        let slot = literalValues.indexOf(op.preData[0])
+                        if (slot < 0) {
+                            slot = literalValues.length
+                            literalValues.push(op.preData[0])
                         }
+                        programData.push(TEXT_DADA_MASK | slot)
                     }
                     break;
                 default:
@@ -2884,7 +2939,7 @@ export type DebugInfo = {
     internals: boolean[]
 }
 
-export function compile(src: string,  { debug = false, range = false, evalMode = false }: CompileOptions = {}): [number[], any[], DebugInfo] {
+export function compile(src: string,  { debug = false, range = false, evalMode = false }: CompileOptions = {}): [number[], DebugInfo] {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
@@ -2976,7 +3031,7 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
         */
     }
 
-    const textData: any[] = []
+    const literalValues: any[] = []
     const programData: number[] = []
     const sourceMap: [number, number, number, number][] = []
     const internals: boolean[] = []
@@ -3003,7 +3058,9 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
         }
     }
 
-    generateData(flattened, functionToSegment, programData, textData)
+    generateData(flattened, functionToSegment, programData, literalValues)
 
-    return [programData, textData, { sourceMap, internals }]
+    finalizeLiteralPool(programData, literalValues)
+
+    return [programData, { sourceMap, internals }]
 }

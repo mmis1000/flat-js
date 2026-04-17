@@ -41,8 +41,8 @@ test('ES6 Classes Semantic', () => {
         result;
     `;
 
-    const [program, text] = compiler.compile(code, { evalMode: true })
-    const result = runtime.run(program, text, 0, globalThis, [{}]) as any;
+    const [program] = compiler.compile(code, { evalMode: true })
+    const result = runtime.run(program, 0, globalThis, [{}]) as any;
 
     expect(result.constructCheck).toBe(true);
     expect(result.newTargetCheck).toBe(true);
@@ -72,8 +72,8 @@ test('Extending Built-in Array', () => {
         result;
     `;
 
-    const [program, text] = compiler.compile(code, { evalMode: true })
-    const result = runtime.run(program, text, 0, globalThis, [{}]) as any;
+    const [program] = compiler.compile(code, { evalMode: true })
+    const result = runtime.run(program, 0, globalThis, [{}]) as any;
 
     expect(result.isArray).toBe(true);
     expect(result.length).toBe(2);
@@ -95,8 +95,8 @@ test('Extending Built-in Array with Default Constructor', () => {
         result;
     `;
 
-    const [program, text] = compiler.compile(code, { evalMode: true })
-    const result = runtime.run(program, text, 0, globalThis, [{}]) as any;
+    const [program] = compiler.compile(code, { evalMode: true })
+    const result = runtime.run(program, 0, globalThis, [{}]) as any;
 
     expect(result.isArray).toBe(true);
     expect(result.isInstance).toBe(true);
@@ -127,8 +127,8 @@ test('Constructor Return Override', () => {
         result;
     `;
 
-    const [program, text] = compiler.compile(code, { evalMode: true })
-    const result = runtime.run(program, text, 0, globalThis, [{}]) as any;
+    const [program] = compiler.compile(code, { evalMode: true })
+    const result = runtime.run(program, 0, globalThis, [{}]) as any;
 
     expect(result.cOverride).toBe(true);
     expect(result.cInstanceOf).toBe(false); // Should be the plain object, not instance of C

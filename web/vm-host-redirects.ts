@@ -219,7 +219,7 @@ vmArrayFlatMap`,
     },
 ]
 
-type CompiledPolyfill = { program: number[]; text: any[]; protoFn: Function }
+type CompiledPolyfill = { program: number[]; protoFn: Function }
 
 let compiledPolyfills: CompiledPolyfill[] | null = null
 
@@ -229,12 +229,12 @@ function compileHostPolyfills(compileFn: typeof compile): CompiledPolyfill[] {
     }
     const out: CompiledPolyfill[] = []
     for (const { src, proto } of POLYFILLS) {
-        const [program, text] = compileFn(src, {
+        const [program] = compileFn(src, {
             range: true,
             evalMode: true,
         })
         hostPolyfillProgramSet.add(program)
-        out.push({ program, text, protoFn: proto() })
+        out.push({ program, protoFn: proto() })
     }
     compiledPolyfills = out
     return out
@@ -258,13 +258,12 @@ export function createVmHostRedirects(
     mathOnly.set(globalThis.Math.random, vmMathRandom)
     const redirects = new WeakMap<Function, Function>()
     redirects.set(globalThis.Math.random, vmMathRandom)
-    for (const { program, text, protoFn } of list) {
+    for (const { program, protoFn } of list) {
         if (typeof protoFn !== 'function') {
             continue
         }
         const fn = run(
             program,
-            text,
             0,
             globalThisForPolyfill,
             [{}],

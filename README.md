@@ -46,14 +46,15 @@ node ./lib/cli.js [flags] <input-file>
 | Flag | Description |
 |------|-------------|
 | *(none)* | Emit a self-contained, minified JS file (runtime + bytecode). |
-| `--json` | Emit bytecode as JSON (`{ p, t }`). |
+| `--json` | Emit bytecode as JSON (`{ "p": "<base64>" }`). |
+| `--bin` | Emit raw bytecode only: little-endian `Int32` words (length × 4 bytes). |
 | `--debug` | Keep output readable; print minified source to stderr. |
 | `--pretty` | Skip minification of the input before compiling. |
 
 ```sh
 node ./lib/cli.js ./src/__tests__/fixures/loader.js > ./example/loader.js
-node ./lib/cli.js --json ./src/__tests__/fixures/bad-code.js > ./example/bad-code.json
-npm run build-example   # regenerate example outputs
+node ./lib/cli.js --bin ./src/__tests__/fixures/bad-code.js > ./example/bad-code.bin
+npm run build-example   # regenerate example outputs (loader.js + *.bin)
 ```
 
 ---

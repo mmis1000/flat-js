@@ -1,22 +1,20 @@
-fetch('./jquery.json')
-.then(it => it.json())
-.then(it => {
+fetch('./jquery.bin')
+.then(it => it.arrayBuffer())
+.then(buf => {
     _$_(
-        new Int32Array(Uint8Array.from(atob(it.p), c => c.charCodeAt(0)).buffer),
-        it.t,
+        new Int32Array(buf),
         0,
         globalThis,
         [{ _$_ }]
     )
 
-    fetch('./bad-code.json')
-    .then(it => it.json())
-    .then(it => _$_(
-            new Int32Array(Uint8Array.from(atob(it.p), c => c.charCodeAt(0)).buffer),
-            it.t,
-            0,
-            globalThis,
-            [{ _$_ }]
-        )
-    )
+    return fetch('./bad-code.bin')
 })
+.then(it => it.arrayBuffer())
+.then(buf => _$_(
+        new Int32Array(buf),
+        0,
+        globalThis,
+        [{ _$_ }]
+    )
+)

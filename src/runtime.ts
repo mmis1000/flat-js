@@ -1,5 +1,5 @@
 "use strict"
-import { FunctionTypes, InvokeType, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "./compiler"
+import { FunctionTypes, InvokeType, LiteralPoolKind, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "./compiler"
 
 
 // [START_HERE]
@@ -8,6 +8,44 @@ const TEXT_DADA_MASK = 0x80000000
 // MUST SYNC WITH COMPILER
 const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
+}
+
+const decodeLiteralFromProgram = (program: number[], pos: number): any => {
+    const label = program[pos]
+    const length = program[pos + 1]
+    if (label === LiteralPoolKind.Boolean) {
+        return program[pos + 2] !== 0
+    }
+    if (label === LiteralPoolKind.Number) {
+        const buf = new ArrayBuffer(8)
+        const u = new Uint32Array(buf)
+        u[0] = program[pos + 2]
+        u[1] = program[pos + 3]
+        return new Float64Array(buf)[0]
+    }
+    if (label === LiteralPoolKind.String) {
+        let s = ''
+        for (let i = 0; i < length; i++) {
+            s += String.fromCharCode(program[pos + 2 + i] & 0xffff)
+        }
+        return s
+    }
+    throw new Error('bad literal pool entry')
+}
+
+/** Pool entry starts at `pos` (`label` word). Same buffer shares one map so literals decode once per program. */
+const literalPoolCache = new WeakMap<number[], Map<number, any>>()
+
+function getLiteralFromPool(program: number[], pos: number): any {
+    let byPos = literalPoolCache.get(program)
+    if (!byPos) {
+        byPos = new Map()
+        literalPoolCache.set(program, byPos)
+    }
+    if (!byPos.has(pos)) {
+        byPos.set(pos, decodeLiteralFromProgram(program, pos))
+    }
+    return byPos.get(pos)
 }
 
 const CALL = Function.prototype.call
@@ -51,7 +89,6 @@ export const enum Fields {
     step,
 
     programSection,
-    textSection,
     evalResult,
     newTarget,
     break,
@@ -71,7 +108,6 @@ export const enum Fields {
 interface BaseFrame {
     [Fields.type]: FrameType
     [Fields.programSection]: number[]
-    [Fields.textSection]: any[]
     [Fields.scopes]: Scope[],
     [Fields.globalThis]: any
     [Fields.valueStack]: any[]
@@ -185,7 +221,6 @@ type FunctionDescriptor = {
     [Fields.offset]: number,
     [Fields.scopes]: Scope[],
     [Fields.programSection]: number[],
-    [Fields.textSection]: any[]
     [Fields.globalThis]: any
 }
 
@@ -237,7 +272,6 @@ export type InvokeParam = InvokeParamApply | InvokeParamConstruct
 
 const getExecution = (
     program: number[],
-    textData: any[],
     entryPoint: number = 0,
     globalThis: object,
     scopes: Scope[] = [],
@@ -253,7 +287,6 @@ const getExecution = (
     functionRedirects: WeakMap<Function, Function> = new WeakMap()
 ) => {
     let currentProgram = program
-    let currentTextData = textData
 
     const initialFrame: Frame = {
         [Fields.type]: FrameType.Function,
@@ -270,7 +303,6 @@ const getExecution = (
         [Fields.invokeType]: invokeData[Fields.type],
         [Fields.return]: -1,
         [Fields.programSection]: currentProgram,
-        [Fields.textSection]: currentTextData,
         [Fields.globalThis]: globalThis
     }
 
@@ -353,12 +385,12 @@ const getExecution = (
     }
 
     const createGeneratorFromExecution = (
-        pr: number[], txt: unknown[], offset: number, gt: object,
+        pr: number[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
         // Build an initial frame via a throwaway execution; do NOT run it. The generator
         // always executes inside the caller's VM via handover (OpCode.Call & OpCode.Yield).
-        const scratchExecution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
         const baseFrames: Stack = scratchExecution[Fields.stack].slice()
 
         const state: GeneratorState = {
@@ -403,10 +435,10 @@ const getExecution = (
     }
 
     const createAsyncFromExecution = (
-        pr: number[], txt: unknown[], offset: number, gt: object,
+        pr: number[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): Promise<unknown> => {
-        const execution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
 
         return new Promise<unknown>((resolve, reject) => {
             const continueExecution = (value: unknown, isFirst: boolean) => {
@@ -457,7 +489,6 @@ const getExecution = (
         const scopeClone = [...scopes]
 
         const pr = currentProgram
-        const txt = currentTextData
 
         const des: FunctionDescriptor = {
             [Fields.name]: name,
@@ -465,7 +496,6 @@ const getExecution = (
             [Fields.offset]: offset,
             [Fields.scopes]: scopeClone,
             [Fields.programSection]: pr,
-            [Fields.textSection]: txt,
             [Fields.globalThis]: globalThis
         }
 
@@ -486,20 +516,20 @@ const getExecution = (
 
             if (isGeneratorType(type)) {
                 return createGeneratorFromExecution(
-                    pr, txt, offset, des[Fields.globalThis],
+                    pr, offset, des[Fields.globalThis],
                     [...scopeClone], invokeData, args
                 )
             }
 
             if (isAsyncType(type)) {
                 return createAsyncFromExecution(
-                    pr, txt, offset, des[Fields.globalThis],
+                    pr, offset, des[Fields.globalThis],
                     [...scopeClone], invokeData, args
                 )
             }
 
             return run_(
-                pr, txt, offset, des[Fields.globalThis],
+                pr, offset, des[Fields.globalThis],
                 [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects
             )
         }
@@ -627,11 +657,10 @@ const getExecution = (
     const emulateEval = (str: string, includesLocalScope: boolean) => {
         str = String(str)
 
-        const [programData, textData] = compileFunction(str, { evalMode: true })
+        const [programData] = compileFunction(str, { evalMode: true })
 
         const result = run(
             programData,
-            textData,
             0,
             getCurrentFrame()[Fields.globalThis],
             includesLocalScope ? [...getCurrentFrame()[Fields.scopes]] : [],
@@ -684,7 +713,6 @@ const getExecution = (
                         }
                         ptr = returnAddr
                         currentProgram = peak(stack)[Fields.programSection]
-                        currentTextData = peak(stack)[Fields.textSection]
                         peak(stack)[Fields.valueStack].push({ value, done: true })
                         return value
                     }
@@ -698,7 +726,6 @@ const getExecution = (
                         stack.pop()
                         ptr = returnAddr
                         currentProgram = peak(stack)[Fields.programSection]
-                        currentTextData = peak(stack)[Fields.textSection]
 
                         if (
                             frame[Fields.invokeType] === InvokeType.Apply
@@ -822,16 +849,13 @@ const getExecution = (
 
                         ptr = catchAddr
                         currentProgram = frame[Fields.programSection]
-                        currentTextData = frame[Fields.textSection]
                     } else if (finallyAddr >= 0) {
                         frame[Fields.state] = TryCatchFinallyState.Finally
                         ptr = finallyAddr
                         currentProgram = frame[Fields.programSection]
-                        currentTextData = frame[Fields.textSection]
                     } else {
                         ptr = exitAddr
                         currentProgram = frame[Fields.programSection]
-                        currentTextData = frame[Fields.textSection]
                     }
                 }
                     break;
@@ -843,7 +867,6 @@ const getExecution = (
                     if (finallyAddr >= 0) {
                         ptr = finallyAddr
                         currentProgram = frame[Fields.programSection]
-                        currentTextData = frame[Fields.textSection]
                     } else {
                         stack.pop()
                         executeThrow(value)
@@ -922,7 +945,6 @@ const getExecution = (
                         // frame[Fields.value] = value
                         ptr = finallyAddr
                         currentProgram = frame[Fields.programSection]
-                        currentTextData = frame[Fields.textSection]
                     } else {
                         // stack.pop()
                         executeBreak()
@@ -973,7 +995,8 @@ const getExecution = (
                     if (isSmallNumber(value)) {
                         pushCurrentFrameStack(value)
                     } else {
-                        pushCurrentFrameStack(currentTextData[value ^ TEXT_DADA_MASK])
+                        const pos = value ^ TEXT_DADA_MASK
+                        pushCurrentFrameStack(getLiteralFromPool(currentProgram, pos))
                     }
                 }
                     break;
@@ -1502,7 +1525,6 @@ const getExecution = (
 
                                     ptr = state.ptr
                                     currentProgram = peak(stack)[Fields.programSection]
-                                    currentTextData = peak(stack)[Fields.textSection]
                                     return { [Fields.done]: false }
                                 } else {
                                     pushCurrentFrameStack(Reflect.apply(fnTarget, self, parameters))
@@ -1513,7 +1535,6 @@ const getExecution = (
                         const des = functionDescriptors.get(fnTarget)!
                         const iterator = createGeneratorFromExecution(
                             des[Fields.programSection],
-                            des[Fields.textSection],
                             des[Fields.offset],
                             des[Fields.globalThis],
                             [...des[Fields.scopes]],
@@ -1542,7 +1563,6 @@ const getExecution = (
                             ],
                             [Fields.invokeType]: InvokeType.Apply,
                             [Fields.programSection]: des[Fields.programSection],
-                            [Fields.textSection]: des[Fields.textSection],
                             [Fields.globalThis]: des[Fields.globalThis],
                             [Fields.generator]: currentFrame[Fields.generator]
                         }
@@ -1550,7 +1570,6 @@ const getExecution = (
 
                         stack.push(newFrame)
                         ptr = des[Fields.offset]
-                        currentTextData = des[Fields.textSection]
                         currentProgram = des[Fields.programSection]
                     }
                 }
@@ -1586,7 +1605,6 @@ const getExecution = (
                             ],
                             [Fields.invokeType]: InvokeType.Construct,
                             [Fields.programSection]: des[Fields.programSection],
-                            [Fields.textSection]: des[Fields.textSection],
                             [Fields.globalThis]: des[Fields.globalThis],
                             [Fields.generator]: currentFrame[Fields.generator]
                         }
@@ -1594,7 +1612,6 @@ const getExecution = (
 
                         stack.push(newFrame)
                         ptr = des[Fields.offset]
-                        currentTextData = des[Fields.textSection]
                         currentProgram = des[Fields.programSection]
                     }
                 }
@@ -1640,7 +1657,6 @@ const getExecution = (
                             ],
                             [Fields.invokeType]: InvokeType.Construct,
                             [Fields.programSection]: des[Fields.programSection],
-                            [Fields.textSection]: des[Fields.textSection],
                             [Fields.globalThis]: des[Fields.globalThis],
                             [Fields.generator]: currentFrame[Fields.generator]
                         }
@@ -1648,7 +1664,6 @@ const getExecution = (
 
                         stack.push(newFrame)
                         ptr = des[Fields.offset]
-                        currentTextData = des[Fields.textSection]
                         currentProgram = des[Fields.programSection]
                     }
                 }
@@ -1701,7 +1716,6 @@ const getExecution = (
                         prevFrame[Fields.valueStack].push({ value: result, done: true })
                         ptr = returnAddr
                         currentProgram = prevFrame[Fields.programSection]
-                        currentTextData = prevFrame[Fields.textSection]
                         break command
                     }
 
@@ -1740,7 +1754,6 @@ const getExecution = (
 
                     ptr = returnAddr
                     currentProgram = prevFrame[Fields.programSection]
-                    currentTextData = prevFrame[Fields.textSection]
                 }
                     break
                 case OpCode.Throw: {
@@ -1777,7 +1790,6 @@ const getExecution = (
                         [Fields.depth]: 0,
                         [Fields.variable]: catchName,
                         [Fields.exit]: exitAddr,
-                        [Fields.textSection]: currentTextData,
                         [Fields.programSection]: currentProgram,
                         [Fields.globalThis]: currentFrame[Fields.globalThis],
                         [Fields.generator]: currentFrame[Fields.generator]
@@ -2141,7 +2153,6 @@ const getExecution = (
                         ptr = (genFrames[0] as any)[Fields.return]
                         const callerFrame = peak(stack)
                         currentProgram = callerFrame[Fields.programSection]
-                        currentTextData = callerFrame[Fields.textSection]
                         callerFrame[Fields.valueStack].push({ value, done: false })
                         return { [Fields.done]: false }
                     }
@@ -2196,7 +2207,6 @@ const getExecution = (
                             ptr = (genFrames[0] as any)[Fields.return]
                             const cFrame = peak(stack)
                             currentProgram = cFrame[Fields.programSection]
-                            currentTextData = cFrame[Fields.textSection]
                             cFrame[Fields.valueStack].push({ value, done: false })
                             return { [Fields.done]: false }
                         }
@@ -2304,7 +2314,6 @@ const getExecution = (
                         ;(delegate as any).pendingMode = mode
                         ptr = subState.ptr
                         currentProgram = peak(stack)[Fields.programSection]
-                        currentTextData = peak(stack)[Fields.textSection]
                         return { [Fields.done]: false }
                     }
 
@@ -2413,7 +2422,6 @@ const getExecution = (
 
 const run_ = (
     program: number[],
-    textData: any[],
     entryPoint: number,
     globalThis: object,
     scopes: Scope[],
@@ -2424,7 +2432,7 @@ const run_ = (
     compileFunction: typeof import('./compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap()
 ) => {
-    const execution = getExecution(program, textData, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+    const execution = getExecution(program, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
 
     let res
 
@@ -2444,7 +2452,6 @@ const run_ = (
 
 const run = (
     program: number[],
-    textData: any[],
     entryPoint: number = 0,
     globalThis: object,
     scopes: Scope[] = [],
@@ -2456,7 +2463,6 @@ const run = (
 ) => {
     return run_(
         program,
-        textData,
         entryPoint,
         globalThis,
         scopes,

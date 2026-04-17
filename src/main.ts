@@ -3,11 +3,10 @@ import { run } from "./runtime"
 
 
 function compileAndRun(src: string) {
-    const [programData, textData] = compile(src, { debug: true, evalMode: true })
-    console.log(JSON.stringify(textData))
+    const [programData] = compile(src, { debug: true, evalMode: true })
     console.log(programData.length, Buffer.from(new Uint32Array(programData).buffer).toString('base64'))
     console.time()
-    const res = run(programData, textData, 0, globalThis, [{
+    const res = run(programData, 0, globalThis, [{
         location: {
             href: 'AAAA'
         }

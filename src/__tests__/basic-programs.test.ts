@@ -41,7 +41,7 @@ test('Example: crc location', () => {
     vm.createContext(context); // Contextify the object.
     vm.runInContext(code, context);
 
-    const [program, text] = compiler.compile(code)
+    const [program] = compiler.compile(code)
 
     const context2 = {
         location: {
@@ -54,7 +54,7 @@ test('Example: crc location', () => {
         }
     }
 
-    runtime.run(program, text, 0, globalThis, [context2])
+    runtime.run(program, 0, globalThis, [context2])
 })
 
 
@@ -153,12 +153,12 @@ function testRuntime(
 ) {
 
     test('Runtime: ' + testName, () => {
-        const [program, text] = compiler.compile(code)
+        const [program] = compiler.compile(code)
         const results: any[] = []
         const context = ctxProvider(results)
 
 
-        runtime.run(program, text, 0, fakeGlobalThis, [context], undefined, [], compiler.compile)
+        runtime.run(program, 0, fakeGlobalThis, [context], undefined, [], compiler.compile)
 
         expect(resultTransform(results)).toEqual(expectResults)
     })
@@ -173,11 +173,11 @@ function testRuntimeThrows(
 
     test('Runtime: ' + testName, () => {
         expect(() => {
-            const [program, text] = compiler.compile(code)
+            const [program] = compiler.compile(code)
             const results: any[] = []
             const context = ctxProvider(results)
 
-            runtime.run(program, text, 0, fakeGlobalThis, [context], undefined, [], compiler.compile)
+            runtime.run(program, 0, fakeGlobalThis, [context], undefined, [], compiler.compile)
         }).toThrowError(error)
     })
 }

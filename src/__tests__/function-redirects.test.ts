@@ -10,10 +10,9 @@ test('functionRedirects: Math.random redirects to external function', () => {
     const functionRedirects = new WeakMap<Function, Function>()
     functionRedirects.set(globalThis.Math.random, external)
 
-    const [program, text] = compiler.compile('Math.random()', { evalMode: true })
+    const [program] = compiler.compile('Math.random()', { evalMode: true })
     const result = runtime.run(
         program,
-        text,
         0,
         globalThis,
         [{}],
@@ -28,14 +27,13 @@ test('functionRedirects: Math.random redirects to external function', () => {
 })
 
 test('functionRedirects: Math.random redirects to VM-compiled function', () => {
-    const [defineProg, defineText] = compiler.compile(
+    const [defineProg] = compiler.compile(
         `function vmTarget() { return 999 }
 vmTarget`,
         { evalMode: true }
     )
     const vmTarget = runtime.run(
         defineProg,
-        defineText,
         0,
         globalThis,
         [{}],
@@ -47,10 +45,9 @@ vmTarget`,
     const functionRedirects = new WeakMap<Function, Function>()
     functionRedirects.set(globalThis.Math.random, vmTarget)
 
-    const [program, text] = compiler.compile('Math.random()', { evalMode: true })
+    const [program] = compiler.compile('Math.random()', { evalMode: true })
     const result = runtime.run(
         program,
-        text,
         0,
         globalThis,
         [{}],

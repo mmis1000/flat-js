@@ -18,6 +18,7 @@ while (args[0] && args[0].startsWith('--')) {
 
 const debugMode = flags['--debug'] || false
 const JSONMode = flags['--json'] || false
+const binMode = flags['--bin'] || false
 const noMinimize = flags['--pretty'] || false
 const filename = args[0]
 
@@ -49,17 +50,21 @@ async function main () {
         throw new Error('fail to minimize')
     }
 
-    const [programDataRaw, textDataRaw] = compile(contentMinimized, {
+    const [programDataRaw] = compile(contentMinimized, {
         debug: debugMode,
         range: debugMode
     })
-    const textData = JSON.stringify(textDataRaw)
-    const programData = Buffer.from(new Uint32Array(programDataRaw).buffer).toString('base64')
+    const programBytes = Buffer.from(new Uint32Array(programDataRaw).buffer)
+    const programData = programBytes.toString('base64')
+
+    if (binMode) {
+        process.stdout.write(programBytes)
+        return
+    }
 
     if (!JSONMode) {
-        const postFix = `const textData = ${textData}
-const programData = new Int32Array(Uint8Array.from(atob('${programData}'), c => c.charCodeAt(0)).buffer)
-run(programData, textData, 0, globalThis, [{ _$_: run }])
+        const postFix = `const programData = new Int32Array(Uint8Array.from(atob('${programData}'), c => c.charCodeAt(0)).buffer)
+run(programData, 0, globalThis, [{ _$_: run }])
 `
         const joined = '{\r\n' + runtime + postFix + '}\r\n'
         if (noMinimize) {
@@ -83,7 +88,6 @@ run(programData, textData, 0, globalThis, [{ _$_: run }])
     } else {
         const result = {
             p: programData,
-            t: textDataRaw,
         }
         console.log(JSON.stringify(result))
     }

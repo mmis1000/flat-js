@@ -738,9 +738,9 @@ export default Vue.extend({
             }
             const won = () => sim.won
 
-            let programData: number[], textData: any[], debugInfo: DebugInfo
+            let programData: number[], debugInfo: DebugInfo
             try {
-                [programData, textData, debugInfo] = compile(this.text, { range: true })
+                [programData, debugInfo] = compile(this.text, { range: true })
             } catch (err) {
                 this.printError(err)
                 return false
@@ -752,7 +752,6 @@ export default Vue.extend({
             this.vmHostRedirects = hostRedirects.redirects
             this.execution = getExecution(
                 programData,
-                textData,
                 0,
                 fakeGlobalThis,
                 [{ print, clear, rotate, move, lastMoveDistance, shoot, scan, won, __proto__: null }],
@@ -795,12 +794,12 @@ export default Vue.extend({
             const text = this.replText
             this.replText = ''
 
-            let programData: number[], textData: any[]
+            let programData: number[]
 
             this.result += '> ' + text + '\n'
 
             try {
-                [programData, textData] = compile(text, { evalMode: true })
+                [programData] = compile(text, { evalMode: true })
             } catch (err) {
                 this.printError(err)
                 return
@@ -815,7 +814,6 @@ export default Vue.extend({
                 const redirects = this.vmHostRedirects ?? new WeakMap<Function, Function>()
                 const result = run(
                     programData,
-                    textData,
                     0,
                     fakeGlobalThis,
                     [...ex[Fields.scopes]],
