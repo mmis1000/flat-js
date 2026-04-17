@@ -367,6 +367,21 @@ const getExecution = (
     const getCurrentFrame = () => stack[stack.length - 1]
     const peak = <T>(arr: T[], offset = 1): T => arr[arr.length - offset]
 
+    /** Native property ops run in the host realm; VM bytecode compares errors to vmGlobal's constructors (e.g. test262 eshost). */
+    const rethrowNativeErrorInRealm = (e: unknown, vmGlobal: any): never => {
+        if (e === null || typeof e !== 'object') throw e
+        const ctor = e.constructor
+        if (typeof ctor !== 'function') throw e
+        const ctorName = ctor.name
+        if (!ctorName) throw e
+        const local = vmGlobal[ctorName]
+        if (typeof local === 'function' && ctor !== local) {
+            const msg = Reflect.get(e, 'message')
+            throw new local(typeof msg === 'string' ? msg : '')
+        }
+        throw e
+    }
+
     const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean) => {
         if (!variableDescriptors.has(scope)) {
             variableDescriptors.set(scope, new Map())
@@ -726,7 +741,11 @@ const getExecution = (
 
     const setValue = (ctx: any, name: string, value: any) => {
         if (!environments.has(ctx)) {
-            return (ctx[name] = value)
+            try {
+                return (ctx[name] = value)
+            } catch (e) {
+                rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
+            }
         } else {
             const env: Frame = ctx
             const scope = findScope(env, name)
@@ -1152,7 +1171,11 @@ const getExecution = (
                     const ctx = popCurrentFrameStack<Context>()
 
                     if (!environments.has(ctx)) {
-                        ctx[name] = value
+                        try {
+                            ctx[name] = value
+                        } catch (e) {
+                            rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
+                        }
                     } else {
                         const scope = findScope(ctx, name)
                         if (scope) {
@@ -2112,10 +2135,14 @@ const getExecution = (
                         }
                     } else {
                         const self = ctx
-                        const old = self[name]
-                        const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
-                        self[name] = newVal
-                        pushCurrentFrameStack(old)
+                        try {
+                            const old = self[name]
+                            const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
+                            self[name] = newVal
+                            pushCurrentFrameStack(old)
+                        } catch (e) {
+                            rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
+                        }
                     }
                 }
                     break;
@@ -2160,7 +2187,11 @@ const getExecution = (
                     const name = popCurrentFrameStack<string>()
                     const ctx = popCurrentFrameStack<Record<string, any>>()
                     if (!environments.has(ctx)) {
-                        pushCurrentFrameStack(delete ctx[name])
+                        try {
+                            pushCurrentFrameStack(delete ctx[name])
+                        } catch (e) {
+                            rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
+                        }
                     } else {
                         const env: Frame = ctx
                         const scope = findScope(env, name)

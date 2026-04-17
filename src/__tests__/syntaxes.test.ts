@@ -45,6 +45,16 @@ const syntaxes = [
     {
         let a = 0;
     }
+    `],
+    // Hoisted function in switch default emits no ops; compiler must still emit a jump target (see NodeOffset).
+    ['SwitchStatement default only hoisted function', `
+    switch (1) {
+      default:
+        function f() {}
+    }
+    `],
+    ['DoStatement body hoisted function only', `
+    do function f() {} while (0)
     `]
 ]
 

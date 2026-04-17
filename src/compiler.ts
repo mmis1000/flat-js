@@ -2053,7 +2053,12 @@ function generateSegment(
                         body
                     })
                 } else {
-                    const body = c.statements.map(it => generate(it, flag)).flat()
+                    // Match CaseClause: always start with Nop so body[0] exists for NodeOffset (hoisted
+                    // function declarations in default produce no ops).
+                    const body = [
+                        op(OpCode.Nop, 0),
+                        ...c.statements.map(it => generate(it, flag)).flat()
+                    ]
                     bodies.push({
                         entry: op(OpCode.Nop, 0),
                         body
@@ -2231,7 +2236,8 @@ function generateSegment(
             const continueOp = op(OpCode.Nop, 0)
             continueOps.set(node, continueOp)
 
-            const body = generate(node.statement, flag)
+            const bodyOps = generate(node.statement, flag)
+            const body = bodyOps.length === 0 ? [op(OpCode.Nop, 0)] : bodyOps
             const tail = [
                 op(OpCode.NodeOffset, 2, [body[0]]),
                 ...generate(node.expression, flag),

@@ -9,7 +9,7 @@
     "serve-coverage": "npx serve ./coverage/lcov-report",
     "test": "jest --runInBand",
     "test:coverage": "jest --runInBand --coverage",
-    "test262": "npm run build && test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 \"./node_modules/test262/test/**/*.js\"",
+    "test262": "npm run build && test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 \"./node_modules/test262/test/harness/**/*.js\" \"./node_modules/test262/test/intl402/**/*.js\" \"./node_modules/test262/test/language/**/*.js\" \"./node_modules/test262/test/staging/**/*.js\"",
     "test262:smoke": "npm run build && test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 \"./node_modules/test262/test/language/literals/numeric/S7.8.3_A1.1_T1.js\"",
     "dev-web": "webpack serve --config webpack.config-dev.js",
     "build-web": "webpack --config webpack.config.js",
