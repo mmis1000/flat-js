@@ -1,17 +1,29 @@
 # Flat JS
 
-JavaScript bytecode compiler and interpreter — compiles JS source to a flat opcode stream and executes it with a tiny bundled runtime.
+JavaScript bytecode compiler and interpreter: it compiles JS source to a flat opcode stream and runs it with a small bundled runtime (`src/compiler.ts`, `src/runtime.ts`).
 
 ---
 
 ## Motivation
 
-1. Learn how JavaScript internally works, and evaluate whether I learned it correctly.
-2. Bypass the CSP `eval` restriction with minimal size overhead.
-3. Obfuscate code across all functions for obfuscation purposes.
-4. Learn how debuggers work and try to implement one.
+1. Learn how JavaScript is implemented end to end.
+2. Run user code without relying on host `eval` where that matters (e.g. CSP).
+3. Optionally ship bytecode + tiny runtime instead of full source.
+4. Experiment with debuggers: stepping, source maps, and a browser UI.
 
 ![Example debugger](./example.jpg)
+
+---
+
+## Repository layout
+
+| Path | Role |
+|------|------|
+| `src/` | Compiler, opcode runtime, tests (`npm run build` → `lib/`). |
+| `web/` | Vue 2 app: Monaco editor, debugger UI, optional **robot arena** (`web/game/sim.ts`, `web/components/game-canvas.vue`). |
+| `plan/` | Design notes for the canvas game (`plan/README.md`). |
+
+Public API (`src/index.ts`): `compile`, `run`, `getExecution`. `run` accepts an optional trailing `getDebugFunction` so nested evaluation (e.g. REPL or polyfills) uses the same custom `debugger` / pause hook as the main execution.
 
 ---
 
@@ -19,99 +31,82 @@ JavaScript bytecode compiler and interpreter — compiles JS source to a flat op
 
 ```sh
 npm install
-npm run build        # compile TypeScript once
+npm run build        # compile TypeScript once → lib/
 npm run watch        # compile TypeScript in watch mode
 ```
 
 ---
 
-## CLI Usage
+## CLI
 
 ```sh
 node ./lib/cli.js [flags] <input-file>
 ```
 
-### Flags
-
 | Flag | Description |
 |------|-------------|
-| *(none)* | Compile and emit a self-contained, minified JS file (runtime + bytecode) |
-| `--json` | Emit the compiled bytecode as a JSON payload (`{ p, t }`) instead of a runnable file |
-| `--debug` | Keep output readable (beautified); print the minified source to stderr |
-| `--pretty` | Skip minification of the input before compiling |
-
-### Examples
+| *(none)* | Emit a self-contained, minified JS file (runtime + bytecode). |
+| `--json` | Emit bytecode as JSON (`{ p, t }`). |
+| `--debug` | Keep output readable; print minified source to stderr. |
+| `--pretty` | Skip minification of the input before compiling. |
 
 ```sh
-# Self-contained runnable output
 node ./lib/cli.js ./src/__tests__/fixures/loader.js > ./example/loader.js
-
-# JSON payload output
 node ./lib/cli.js --json ./src/__tests__/fixures/bad-code.js > ./example/bad-code.json
-node ./lib/cli.js --json ./src/__tests__/fixures/jquery.js   > ./example/jquery.json
-```
-
-Or regenerate all examples at once:
-
-```sh
-npm run build-example
+npm run build-example   # regenerate example outputs
 ```
 
 ---
 
-## Web Debugger
-
-A browser-based interactive debugger built with Vue 2 and Monaco Editor.
+## Web app (debugger + game)
 
 ```sh
-npm run dev-web      # start webpack-dev-server
-npm run build-web    # production build → dist-web/
-npm run serve-web    # serve the production build
+npm run dev-web      # webpack dev server
+npm run build-web    # production bundle → dist-web/
+npm run serve-web    # static server for dist-web/
 ```
+
+The web shell loads user code with `compile` / `getExecution`, drives `execution[Fields.step]` for run / pause / step, and maps `execution[Fields.ptr]` through `debugInfo.sourceMap` for Monaco highlights.
+
+**Game mode** (when enabled in the UI): builtins talk to a 2D sim (`web/game/sim.ts`): `clear`, `print`, `rotate`, `move`, `lastMoveDistance`, `shoot`, `scan`, `won`, etc. World time advances on a fixed tick cadence; long actions can span multiple ticks. See snippet comments in `web/index.vue` for parameter ranges.
+
+**Host behavior (browser only)**
+
+- **`Math.random`** is redirected to a deterministic PRNG (`web/vm-deterministic-math.ts`); call `resetVmMathRandom()` before each run so runs replay the same sequence.
+- **Common `Array.prototype` methods that take callbacks** are redirected to VM-compiled polyfills (`web/vm-host-redirects.ts`): `forEach`, `map`, `filter`, `find`, `findIndex`, `some`, `every`, `reduce`, `reduceRight`, and `flatMap` when present on the host. Redirects are rebuilt in `setupExecution` so `debugger` and the custom pause path match the main program. Polyfill bytecode runs on the **same VM stack** as user code (native builtins are not used for those calls).
+- **Editor highlights** ignore host polyfill programs: their bytecode buffers are tracked in `hostPolyfillProgramSet` so the UI does not map polyfill `ptr` values into the user’s source (avoids bogus ranges while stepping through `forEach` and similar).
 
 ### Debugger controls
 
-| State | Available buttons |
-|-------|-------------------|
+| State | Actions |
+|-------|---------|
 | Idle | **Run**, **Run and pause** |
 | Running | **Pause**, **Kill** |
 | Paused | **Resume**, **Step**, **Step in**, **Kill** |
 
-While paused, a REPL input bar appears at the bottom of the result pane — type any expression and press Enter to evaluate it in the current scope.
-
-The code pane (Monaco Editor) highlights the line/column currently being executed.
+When paused, a REPL at the bottom of the result pane evaluates expressions in the current VM scope (`compile` with `evalMode: true`).
 
 ---
 
 ## Testing
 
 ```sh
-npm test                  # run all tests
-npm run test:coverage     # run with coverage report
-npm run serve-coverage    # serve the HTML coverage report
+npm test                  # Jest, all suites
+npm run test:coverage     # coverage
+npm run serve-coverage    # open HTML coverage report
 ```
 
 ---
 
-## Design
-
-The system emulates a JavaScript interpreter that operates on the intermediate output of a TypeScript/JavaScript parser.
+## Design (implementation)
 
 ### Compilation pipeline
 
-1. Read source file.
-2. Parse into an AST using the TypeScript compiler API.
-3. Extract all function scopes.
-4. Resolve every variable reference to its declaring scope.
-5. Generate instructions from the AST (offsets unknown at this stage — only lengths).
-6. Resolve instruction offsets by concatenating all instruction blocks.
-7. Produce the opcode (program) section and the text/data section.
-8. Emit output:
-   - **Standalone JS** — runtime code + base64-encoded program data, ready to run anywhere.
-   - **JSON payload** — `{ p: <base64 opcodes>, t: <text data> }` for external loading.
+1. Parse with the TypeScript compiler API.
+2. Discover functions and scopes; resolve variable references.
+3. Emit opcodes (lengths first; offsets fixed after concatenation).
+4. Output program + text sections; optional range metadata for debugging.
 
 ### Runtime
 
-The interpreter executes the flat opcode stream rather than interpreting the AST directly, so the bundled runtime is very small — no parser is needed at execution time.
-
-Supported features include: closures, `var`/`let`/`const`, arrow functions, `async`/`await`, generator functions (`yield`/`yield*`), ES6 `class` (including inheritance and `super`), `try`/`catch`/`finally`, `for`/`while`/`do…while` loops, `switch`, `new`, prototype chains, `Proxy`, `eval` (compiled in-place), `debugger` statement (triggers the web debugger's pause), and source-map-backed step debugging.
+Execution is a flat opcode interpreter (no parser at run time). Supported features include closures, `var`/`let`/`const`, arrow functions, `async`/`await`, generators (`yield` / `yield*`), ES6 `class` (including `super`), `try`/`catch`/`finally`, loops, `switch`, `new`, prototypes, `Proxy`, compiled `eval`, and `debugger` (honors a host-provided pause callback when installed). **`functionRedirects`**: host may replace native functions (e.g. `Math.random`, `Array.prototype.forEach`) with other functions; when the replacement is itself a VM function, calls use the normal in-VM call path (same stack) rather than always going through `Reflect.apply` into a nested runner.

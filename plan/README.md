@@ -1,6 +1,8 @@
 # Codewar robot game — design plan
 
-This document captures the agreed design for evolving `web/index.vue` into a canvas-based **code war** style game: user code controls a round, vacuum-like robot (field, obstacles, bot, target).
+This document captures the agreed design for a canvas-based **code war** style game: user code controls a round robot (field, obstacles, bot, target).
+
+**Status (repo today):** A canvas arena, simulation (`web/game/sim.ts`), and builtins wired from `web/index.vue` are implemented; pacing, scan cost, and debugger step semantics still follow the product choices below unless changed in code. See the root `README.md` for commands, API surface, and host polyfills.
 
 ---
 
@@ -92,10 +94,11 @@ Exact formulas are tunable; the rule is **monotonic in “how big” the action 
 
 ---
 
-## 8. Files to touch (when implementing)
+## 8. Files (implementation reference)
 
-- `web/index.vue` — layout, run loop integration, builtins.
-- New modules under e.g. `web/game/` or `src/game/` — simulation + types (project-specific preference).
-- Optional: `web/components/game-canvas.vue` or similar.
+- `web/index.vue` — layout, run loop, builtins, debugger, host redirects.
+- `web/game/sim.ts` — world simulation and tick model.
+- `web/components/game-canvas.vue` — canvas rendering.
+- `web/vm-host-redirects.ts` — browser-only array / `Math.random` redirects for the web VM.
 
-This plan is descriptive only; it does not change runtime behavior until implemented.
+Further tuning (scan bounds, step vs tick, concurrency) can still follow §6 as needed.
