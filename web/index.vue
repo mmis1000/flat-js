@@ -9,8 +9,26 @@
             </div>
         </div>
         <div class="area-code pane">
-            <div class="pane-title">
-                Code
+            <div class="pane-title code-pane-title">
+                <span>Code</span>
+                <label class="snippet-label">
+                    Snippet
+                    <select
+                        v-model="selectedSnippetId"
+                        class="snippet-select"
+                        :disabled="state !== 'idle'"
+                        title="Load a starter program (only while idle)"
+                        @change="applySnippet"
+                    >
+                        <option
+                            v-for="s in snippetList"
+                            :key="s.id"
+                            :value="s.id"
+                        >
+                            {{ s.label }}
+                        </option>
+                    </select>
+                </label>
             </div>
             <monaco
                 class="pane-content"
@@ -170,15 +188,13 @@ function makeGlobalThis() {
 
 const fakeGlobalThis = makeGlobalThis()
 
-export default Vue.extend({
-    components: {
-        Monaco,
-        Debugger,
-        GameCanvas,
-    },
-    data() {
-        return withNonReactive({
-            text: `// Robot controls:
+type CodeSnippet = { id: string, label: string, code: string }
+
+const CODE_SNIPPETS: CodeSnippet[] = [
+    {
+        id: 'scan-aim',
+        label: 'Scan & aim',
+        code: `// Robot controls:
 //   rotate(deg)      turn (deg), positive = clockwise
 //   move(distance)   move forward (schedules ticks; use lastMoveDistance() after)
 //   lastMoveDistance()  pixels moved for the last move (less if blocked)
@@ -224,6 +240,59 @@ while (!won()) {
 print('win!')
 
 `,
+    },
+    {
+        id: 'rotate-sweep',
+        label: 'Rotate sweep',
+        code: `// Same API as other snippet. Strategy: small turns each loop, fewer rays,
+// shoot as soon as any ray sees the target first; otherwise creep and turn on block.
+
+clear()
+
+while (!won()) {
+  rotate(10)
+  const rays = 11
+  const sweep = scan(rays)
+
+  let hitIdx = -1
+  for (let i = 0; i < sweep.length; i++) {
+    const h = sweep[i]
+    if (h.length > 0 && h[0].type === 'target') {
+      hitIdx = i
+      break
+    }
+  }
+
+  if (hitIdx >= 0) {
+    const t = hitIdx / (rays - 1)
+    const deg = -45 + t * 90
+    rotate(deg)
+    shoot()
+    print('shot ~' + deg.toFixed(0) + 'deg')
+  } else {
+    const want = 14
+    move(want)
+    if (lastMoveDistance() < want - 0.5) {
+      rotate(55)
+    }
+  }
+}
+print('win!')
+
+`,
+    },
+]
+
+export default Vue.extend({
+    components: {
+        Monaco,
+        Debugger,
+        GameCanvas,
+    },
+    data() {
+        return withNonReactive({
+            text: CODE_SNIPPETS[0].code,
+            selectedSnippetId: CODE_SNIPPETS[0].id,
             result: '',
             replText: '',
             stackContainer: {
@@ -243,6 +312,11 @@ print('win!')
             program: number[],
         }>()
     },
+    computed: {
+        snippetList(): CodeSnippet[] {
+            return CODE_SNIPPETS
+        },
+    },
     watch: {
         async result () {
             const container = this.$refs.result as HTMLDivElement
@@ -253,6 +327,10 @@ print('win!')
         }
     },
     methods: {
+        applySnippet() {
+            const s = CODE_SNIPPETS.find(x => x.id === this.selectedSnippetId)
+            if (s) this.text = s.code
+        },
         printError(err: any) {
             this.result += String(err) + '\n'
             if (err != null && typeof err === 'object') {
@@ -623,6 +701,28 @@ pre {
 }
 .area-code {
     grid-area: code;
+    min-width: 0;
+}
+.code-pane-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75em;
+    min-width: 0;
+}
+.snippet-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: 0.85em;
+    color: #bbb;
+}
+.snippet-select {
+    background: #333;
+    color: #eee;
+    border: 1px solid #555;
+    padding: 0.2em 0.35em;
+    border-radius: 2px;
     min-width: 0;
 }
 .area-code .pane-footer {
