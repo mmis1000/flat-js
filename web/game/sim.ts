@@ -40,8 +40,8 @@ export const SCAN_TICKS_PER_RAY = Math.max(1, Math.round(SCAN_SEC_PER_RAY * TICK
 
 /** Inset from arena edges for obstacles / targets (room for bot + disc near walls). */
 export const LAYOUT_WALL_MARGIN = 26
-/** Minimum gap between any two axis-aligned rects (targets / obstacles). */
-export const LAYOUT_MIN_GAP = 14
+/** Minimum gap between rect edges — at least bot diameter so gaps between blocks are passable. */
+export const LAYOUT_MIN_GAP = 2 * BOT_R + 4
 /** Extra padding so the bot circle stays clear of rects. */
 export const LAYOUT_BOT_CLEARANCE = 10
 
@@ -64,7 +64,7 @@ export const DEFAULT_TARGETS: Target[] = [
 export const DEFAULT_BOT: Bot = { x: 40, y: ARENA_H - 40, r: BOT_R, heading: -Math.PI / 2 }
 
 export type SimOptions = {
-    /** Randomize obstacles, targets, and bot (wall + gap + bot clearance only; no LOS guarantee). */
+    /** Randomize obstacles, targets, and bot (min gap ≥ bot diameter between rects; no LOS guarantee). */
     randomizedStage?: boolean
     /** Seed for reproducible random layouts (mulberry32). */
     seed?: number
