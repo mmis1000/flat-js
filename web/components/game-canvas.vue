@@ -122,6 +122,9 @@ export default Vue.extend({
     display: block;
     background: #111;
     max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
     image-rendering: pixelated;
 }
 </style>

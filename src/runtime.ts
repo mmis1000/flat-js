@@ -249,7 +249,8 @@ const getExecution = (
     },
     args: any[] = [],
     getDebugFunction: () => null | (() => void) = () => null,
-    compileFunction: typeof import('./compiler').compile = (...args: any[]) => { throw new Error('not supported') }
+    compileFunction: typeof import('./compiler').compile = (...args: any[]) => { throw new Error('not supported') },
+    functionRedirects: WeakMap<Function, Function> = new WeakMap()
 ) => {
     let currentProgram = program
     let currentTextData = textData
@@ -357,7 +358,7 @@ const getExecution = (
     ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
         // Build an initial frame via a throwaway execution; do NOT run it. The generator
         // always executes inside the caller's VM via handover (OpCode.Call & OpCode.Yield).
-        const scratchExecution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction)
+        const scratchExecution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
         const baseFrames: Stack = scratchExecution[Fields.stack].slice()
 
         const state: GeneratorState = {
@@ -405,7 +406,7 @@ const getExecution = (
         pr: number[], txt: unknown[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): Promise<unknown> => {
-        const execution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction)
+        const execution: Execution = getExecution(pr, txt, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
 
         return new Promise<unknown>((resolve, reject) => {
             const continueExecution = (value: unknown, isFirst: boolean) => {
@@ -499,7 +500,7 @@ const getExecution = (
 
             return run_(
                 pr, txt, offset, des[Fields.globalThis],
-                [...scopeClone], invokeData, args, getDebugFunction
+                [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects
             )
         }
 
@@ -604,8 +605,6 @@ const getExecution = (
     let commandPtr = 0
 
     let pendingAction: { [Fields.error]: any } | null = null
-
-    const redirectedFunctions = new WeakMap()
 
     // redirectedFunctions.set(eval, (str: string) => {
     //     str = String(str)
@@ -1435,7 +1434,7 @@ const getExecution = (
                                 throw new TypeError(`(intermediate value) is not a function`)
                             }
                         } else {
-                            const fnToCall = redirectedFunctions.has(fn) ? redirectedFunctions.get(fn) : fn
+                            const fnToCall = functionRedirects.has(fn) ? functionRedirects.get(fn) : fn
                             if (fnToCall === EVAL_FUNCTION) {
                                 if (command === OpCode.CallAsEval) {
                                     pushCurrentFrameStack(emulateEval(String(parameters[0]), true))
@@ -2420,9 +2419,10 @@ const run_ = (
     args: any[],
     getDebugFunction: () => null | (() => void),
     evalResultInstead = false,
-    compileFunction: typeof import('./compiler').compile | undefined = undefined
+    compileFunction: typeof import('./compiler').compile | undefined = undefined,
+    functionRedirects: WeakMap<Function, Function> = new WeakMap()
 ) => {
-    const execution = getExecution(program, textData, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction)
+    const execution = getExecution(program, textData, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
 
     let res
 
@@ -2448,7 +2448,8 @@ const run = (
     scopes: Scope[] = [],
     self: undefined = undefined,
     args: any[] = [],
-    compileFunction: typeof import('./compiler').compile | undefined = undefined
+    compileFunction: typeof import('./compiler').compile | undefined = undefined,
+    functionRedirects: WeakMap<Function, Function> = new WeakMap()
 ) => {
     // The debug function is always null because it did not work in one shot
     return run_(
@@ -2466,7 +2467,8 @@ const run = (
         args,
         () => null,
         true,
-        compileFunction
+        compileFunction,
+        functionRedirects
     )
 }
 

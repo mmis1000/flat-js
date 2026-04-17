@@ -47,7 +47,7 @@
                 <button v-if="state === 'play'" class="run-button" @click="stop">Kill</button>
             </div>
         </div>
-        <div class="area-result pane">
+        <div class="area-result">
             <div class="pane-title game-pane-title">
                 <span>Game</span>
                 <div class="game-pane-controls">
@@ -102,17 +102,20 @@
             <div class="game-pane">
                 <game-canvas :sim="sim" />
             </div>
-            <div ref="result" class="result-pane pane-content">
-                <pre class="result">{{ result }}</pre>
+            <div class="output-stack">
+                <div ref="result" class="result-pane">
+                    <div class="output-header">Output</div>
+                    <pre class="result">{{ result }}</pre>
+                </div>
+                <input
+                    v-if="state === 'paused'"
+                    class="pane-footer repl"
+                    v-model="replText"
+                    @keydown.enter="runRepl"
+                    type="text"
+                    placeholder="Code here..."
+                >
             </div>
-            <input
-                v-if="state === 'paused'"
-                class="pane-footer repl"
-                v-model="replText"
-                @keydown.enter="runRepl"
-                type="text"
-                placeholder="Code here..."
-            >
         </div>
     </div>
 </template>
@@ -127,6 +130,7 @@ import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
 import { Sim, TICKS_PER_SECOND, BOT_MOVE_PER_TICK, BOT_ROTATE_DEG_PER_TICK, SHOOT_COOLDOWN_TICKS, SCAN_TICKS_PER_RAY } from './game/sim'
+import { resetVmMathRandom, vmMathRedirects } from './vm-deterministic-math'
 
 type State = 'play' | 'paused' | 'idle'
 
@@ -263,10 +267,17 @@ while (!won()) {
     rotate(deg)
     shoot()
     print('shot at ' + deg.toFixed(1) + 'deg, dist ' + bestDist.toFixed(0))
-    move(6)
-    rotate(90)
-    move(8)
-    rotate(-90)
+    if (Math.random() > 0.5) {
+      move(5)
+      rotate(90)
+      move(8)
+      rotate(-90)
+    } else {
+      move(5)
+      rotate(-90)
+      move(8)
+      rotate(90)
+    }
   } else {
     const want = 20
     if (unstuck !== 0) {
@@ -322,10 +333,17 @@ while (!won()) {
     rotate(deg)
     shoot()
     print('shot ~' + deg.toFixed(0) + 'deg')
-    move(5)
-    rotate(90)
-    move(8)
-    rotate(-90)
+    if (Math.random() > 0.5) {
+      move(5)
+      rotate(90)
+      move(8)
+      rotate(-90)
+    } else {
+      move(5)
+      rotate(-90)
+      move(8)
+      rotate(90)
+    }
   } else {
     const want = 14
     if (unstuck !== 0) {
@@ -642,6 +660,7 @@ export default Vue.extend({
             }
         },
         setupExecution(): boolean {
+            resetVmMathRandom()
             const clear = () => { this.result = '' }
             const print = (val: any) => {
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
@@ -695,7 +714,8 @@ export default Vue.extend({
                 undefined,
                 [],
                 () => () => this.pause(),
-                compile
+                compile,
+                vmMathRedirects
             )
             return true
         },
@@ -747,7 +767,7 @@ export default Vue.extend({
                     this.result += '(no VM)\n'
                     return
                 }
-                const result = run(programData, textData, 0, fakeGlobalThis, [...ex[Fields.scopes]])
+                const result = run(programData, textData, 0, fakeGlobalThis, [...ex[Fields.scopes]], undefined, [], compile, vmMathRedirects)
                 this.result += result + '\n'
             } catch (err) {
                 this.printError(err)
@@ -785,16 +805,15 @@ pre {
     max-width: 100%;
     min-width: 0;
     display: grid;
-    grid-template-areas: "code"
-                   "result";
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    /* Code left (wide), game + output right column (tall, fixed max width) */
+    grid-template-areas: "code result";
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
+    grid-template-rows: minmax(0, 1fr);
 }
 .app.running {
-    grid-template-areas: "debug code"
-                   "debug result";
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+    grid-template-areas: "debug code result";
+    grid-template-columns: minmax(0, 400px) minmax(0, 1fr) minmax(280px, 400px);
+    grid-template-rows: minmax(0, 1fr);
 }
 .area-debug {
     grid-area: debug;
@@ -851,8 +870,16 @@ pre {
 .area-result {
     grid-area: result;
     min-width: 0;
+    min-height: 0;
+    display: grid;
+    /* Game gets a bit more vertical space than output */
+    grid-template-rows: auto minmax(0, 1.15fr) minmax(0, 1fr);
+}
+.output-stack {
     display: flex;
     flex-direction: column;
+    min-width: 0;
+    min-height: 0;
 }
 
 .pane {
@@ -868,9 +895,10 @@ pre {
 }
 .game-pane-title {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 0.75em;
+    flex-wrap: wrap;
+    gap: 0.5em 0.75em;
     min-width: 0;
 }
 .game-pane-controls {
@@ -956,31 +984,46 @@ pre {
     padding: 1em;
     color: white;
 }
+.output-header {
+    flex-shrink: 0;
+    padding: 0.4em 1em 0.35em;
+    font-size: 0.85em;
+    color: #888;
+    border-bottom: 1px solid rgba(127, 127, 127, 0.35);
+}
 .result-pane {
-    overflow-x: auto;
-    overflow-y: auto;
-    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
 }
 .game-pane {
-    flex-grow: 0;
-    flex-shrink: 0;
+    min-height: 0;
+    min-width: 0;
     padding: 8px;
+    box-sizing: border-box;
     display: flex;
     justify-content: center;
-    align-items: flex-start;
+    align-items: center;
     background: #000;
     border-bottom: 1px solid rgba(127, 127, 127, 0.5);
-    min-width: 0;
     overflow: hidden;
 }
 .result {
-    padding: 1em;
-    line-height: 2em;
+    flex-grow: 1;
+    flex-basis: 0;
     min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0.75em 1em 1em;
+    line-height: 1.5em;
+    overflow: auto;
     overflow-x: auto;
 }
 .repl {
+    flex-shrink: 0;
     min-width: 0;
     border: 0;
     padding: 1em;
