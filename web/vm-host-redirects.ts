@@ -1,9 +1,14 @@
 import { compile, run } from '../src'
-import type { DebugInfo } from '../src/compiler'
 import { vmMathRandom } from './vm-deterministic-math'
 
-/** ES5-style `Array.prototype.forEach` body; compiled in a separate `compile`/`run` so each iteration is VM bytecode. */
-const VM_ARRAY_FOR_EACH_SRC = `function vmArrayForEach(callback: any, thisArg: any) {
+/** Program buffers compiled for host polyfills (same reference as frame `programSection`). */
+export const hostPolyfillProgramSet = new Set<number[]>()
+
+type PolyfillSpec = { src: string; proto: () => any }
+
+const POLYFILLS: PolyfillSpec[] = [
+    {
+        src: `function vmArrayForEach(callback: any, thisArg: any) {
   const O = Object(this)
   const len = O.length >>> 0
   let k = 0
@@ -14,53 +19,267 @@ const VM_ARRAY_FOR_EACH_SRC = `function vmArrayForEach(callback: any, thisArg: a
     k++
   }
 }
-vmArrayForEach`
-
-export type VmHostRedirectsBundle = {
-    redirects: WeakMap<Function, Function>
-    forEachProgram: number[]
-    forEachDebugInfo: DebugInfo
+vmArrayForEach`,
+        proto: () => Array.prototype.forEach,
+    },
+    {
+        src: `function vmArrayMap(callback: any, thisArg: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  const A = new Array(len)
+  let k = 0
+  while (k < len) {
+    if (k in O) {
+      A[k] = callback.call(thisArg, O[k], k, O)
+    }
+    k++
+  }
+  return A
 }
+vmArrayMap`,
+        proto: () => Array.prototype.map,
+    },
+    {
+        src: `function vmArrayFilter(callback: any, thisArg: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  const res: any[] = []
+  let k = 0
+  while (k < len) {
+    if (k in O) {
+      const val = O[k]
+      if (callback.call(thisArg, val, k, O)) {
+        res.push(val)
+      }
+    }
+    k++
+  }
+  return res
+}
+vmArrayFilter`,
+        proto: () => Array.prototype.filter,
+    },
+    {
+        src: `function vmArrayFind(callback: any, thisArg: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  let k = 0
+  while (k < len) {
+    if (k in O) {
+      const val = O[k]
+      if (callback.call(thisArg, val, k, O)) {
+        return val
+      }
+    }
+    k++
+  }
+  return undefined
+}
+vmArrayFind`,
+        proto: () => Array.prototype.find,
+    },
+    {
+        src: `function vmArrayFindIndex(callback: any, thisArg: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  let k = 0
+  while (k < len) {
+    if (k in O) {
+      if (callback.call(thisArg, O[k], k, O)) {
+        return k
+      }
+    }
+    k++
+  }
+  return -1
+}
+vmArrayFindIndex`,
+        proto: () => Array.prototype.findIndex,
+    },
+    {
+        src: `function vmArraySome(callback: any, thisArg: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  let k = 0
+  while (k < len) {
+    if (k in O) {
+      if (callback.call(thisArg, O[k], k, O)) {
+        return true
+      }
+    }
+    k++
+  }
+  return false
+}
+vmArraySome`,
+        proto: () => Array.prototype.some,
+    },
+    {
+        src: `function vmArrayEvery(callback: any, thisArg: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  let k = 0
+  while (k < len) {
+    if (k in O) {
+      if (!callback.call(thisArg, O[k], k, O)) {
+        return false
+      }
+    }
+    k++
+  }
+  return true
+}
+vmArrayEvery`,
+        proto: () => Array.prototype.every,
+    },
+    {
+        src: `function vmArrayReduce(callback: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  let k = 0
+  let value: any
+  const initProvided = arguments.length > 1
+  if (initProvided) {
+    value = arguments[1]
+  } else {
+    while (k < len && !(k in O)) {
+      k++
+    }
+    if (k >= len) {
+      throw new TypeError('Reduce of empty array with no initial value')
+    }
+    value = O[k]
+    k++
+  }
+  while (k < len) {
+    if (k in O) {
+      value = callback(value, O[k], k, O)
+    }
+    k++
+  }
+  return value
+}
+vmArrayReduce`,
+        proto: () => Array.prototype.reduce,
+    },
+    {
+        src: `function vmArrayReduceRight(callback: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  let k = len - 1
+  let value: any
+  const initProvided = arguments.length > 1
+  if (initProvided) {
+    value = arguments[1]
+  } else {
+    while (k >= 0 && !(k in O)) {
+      k--
+    }
+    if (k < 0) {
+      throw new TypeError('Reduce of empty array with no initial value')
+    }
+    value = O[k]
+    k--
+  }
+  while (k >= 0) {
+    if (k in O) {
+      value = callback(value, O[k], k, O)
+    }
+    k--
+  }
+  return value
+}
+vmArrayReduceRight`,
+        proto: () => Array.prototype.reduceRight,
+    },
+    {
+        src: `function vmArrayFlatMap(callback: any, thisArg: any) {
+  const O = Object(this)
+  const len = O.length >>> 0
+  const A: any[] = []
+  let k = 0
+  while (k < len) {
+    if (k in O) {
+      const el = O[k]
+      const mapped = callback.call(thisArg, el, k, O)
+      if (Array.isArray(mapped)) {
+        for (let j = 0; j < mapped.length; j++) {
+          A.push(mapped[j])
+        }
+      } else {
+        A.push(mapped)
+      }
+    }
+    k++
+  }
+  return A
+}
+vmArrayFlatMap`,
+        proto: () => Array.prototype.flatMap,
+    },
+]
 
-let compiled: { forEachProgram: number[]; forEachText: any[]; forEachDebugInfo: DebugInfo } | null = null
+type CompiledPolyfill = { program: number[]; text: any[]; protoFn: Function }
 
-export function getForEachPolyfillCompiled(compileFn: typeof compile) {
-    if (!compiled) {
-        const [forEachProgram, forEachText, forEachDebugInfo] = compileFn(VM_ARRAY_FOR_EACH_SRC, {
+let compiledPolyfills: CompiledPolyfill[] | null = null
+
+function compileHostPolyfills(compileFn: typeof compile): CompiledPolyfill[] {
+    if (compiledPolyfills) {
+        return compiledPolyfills
+    }
+    const out: CompiledPolyfill[] = []
+    for (const { src, proto } of POLYFILLS) {
+        const [program, text] = compileFn(src, {
             range: true,
             evalMode: true,
         })
-        compiled = { forEachProgram, forEachText, forEachDebugInfo }
+        hostPolyfillProgramSet.add(program)
+        out.push({ program, text, protoFn: proto() })
     }
-    return compiled
+    compiledPolyfills = out
+    return out
+}
+
+export type VmHostRedirectsBundle = {
+    redirects: WeakMap<Function, Function>
 }
 
 /**
- * Build host `functionRedirects` for the web VM. The forEach polyfill must be extracted with the same
- * `getDebugFunction` as `getExecution` so `debugger` in user callbacks (and `OpCode.Debugger`) uses the host pause, not native `debugger`.
+ * Build host `functionRedirects` for the web VM. Polyfills are extracted with the same
+ * `getDebugFunction` as `getExecution` so `debugger` in user callbacks uses the host pause.
  */
 export function createVmHostRedirects(
     compileFn: typeof compile,
     getDebugFunction: () => null | (() => void),
     globalThisForPolyfill: object
 ): VmHostRedirectsBundle {
-    const { forEachProgram, forEachText, forEachDebugInfo } = getForEachPolyfillCompiled(compileFn)
+    const list = compileHostPolyfills(compileFn)
     const mathOnly = new WeakMap<Function, Function>()
     mathOnly.set(globalThis.Math.random, vmMathRandom)
-    const forEachFn = run(
-        forEachProgram,
-        forEachText,
-        0,
-        globalThisForPolyfill,
-        [{}],
-        undefined,
-        [],
-        compileFn,
-        mathOnly,
-        getDebugFunction
-    )
     const redirects = new WeakMap<Function, Function>()
     redirects.set(globalThis.Math.random, vmMathRandom)
-    redirects.set(Array.prototype.forEach, forEachFn)
-    return { redirects, forEachProgram, forEachDebugInfo }
+    for (const { program, text, protoFn } of list) {
+        if (typeof protoFn !== 'function') {
+            continue
+        }
+        const fn = run(
+            program,
+            text,
+            0,
+            globalThisForPolyfill,
+            [{}],
+            undefined,
+            [],
+            compileFn,
+            mathOnly,
+            getDebugFunction
+        )
+        redirects.set(protoFn, fn)
+    }
+    return { redirects }
+}
+
+/** Compile all host array polyfills once and register their program buffers in `hostPolyfillProgramSet` (for editor / step UI). */
+export function ensureHostPolyfillsCompiled(compileFn: typeof compile) {
+    compileHostPolyfills(compileFn)
 }

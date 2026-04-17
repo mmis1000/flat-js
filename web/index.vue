@@ -131,9 +131,9 @@ import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
 import { Sim, TICKS_PER_SECOND, BOT_MOVE_PER_TICK, BOT_ROTATE_DEG_PER_TICK, SHOOT_COOLDOWN_TICKS, SCAN_TICKS_PER_RAY } from './game/sim'
 import { resetVmMathRandom } from './vm-deterministic-math'
-import { createVmHostRedirects, getForEachPolyfillCompiled } from './vm-host-redirects'
+import { createVmHostRedirects, ensureHostPolyfillsCompiled, hostPolyfillProgramSet } from './vm-host-redirects'
 
-const vmForEachProgram = getForEachPolyfillCompiled(compile).forEachProgram
+ensureHostPolyfillsCompiled(compile)
 
 type State = 'play' | 'paused' | 'idle'
 
@@ -455,7 +455,7 @@ export default Vue.extend({
             if (prog === this.program) {
                 return this.debugInfo.sourceMap[ptr]
             }
-            if (prog === vmForEachProgram) {
+            if (hostPolyfillProgramSet.has(prog)) {
                 return undefined
             }
             return undefined
@@ -474,7 +474,7 @@ export default Vue.extend({
             if (prog === this.program) {
                 return !!this.debugInfo.internals[ptr]
             }
-            if (prog === vmForEachProgram) {
+            if (hostPolyfillProgramSet.has(prog)) {
                 return true
             }
             return false
