@@ -218,6 +218,8 @@ const CODE_SNIPPETS: CodeSnippet[] = [
 
 clear()
 
+let unstuck = 0
+
 while (!won()) {
   const rays = 17
   const sweep = scan(rays)
@@ -233,6 +235,7 @@ while (!won()) {
   }
 
   if (bestIdx >= 0) {
+    unstuck = 0
     const t = bestIdx / (sweep.length - 1)
     const deg = -45 + t * 90
     rotate(deg)
@@ -243,11 +246,20 @@ while (!won()) {
     move(8)
     rotate(-90)
   } else {
-    // No clear shot. Try moving forward; if blocked, turn.
     const want = 20
-    move(want)
-    if (lastMoveDistance() < want - 0.5) {
-      rotate(45)
+    if (unstuck !== 0) {
+      move(want)
+      if (lastMoveDistance() >= want - 0.5) {
+        unstuck = 0
+      } else {
+        rotate(unstuck)
+      }
+    } else {
+      move(want)
+      if (lastMoveDistance() < want - 0.5) {
+        unstuck = -90 + Math.random() * 180
+        rotate(unstuck)
+      }
     }
   }
 }
@@ -263,8 +275,12 @@ print('win!')
 
 clear()
 
+let unstuck = 0
+
 while (!won()) {
-  rotate(10)
+  if (unstuck === 0) {
+    rotate(10)
+  }
   const rays = 11
   const sweep = scan(rays)
 
@@ -278,6 +294,7 @@ while (!won()) {
   }
 
   if (hitIdx >= 0) {
+    unstuck = 0
     const t = hitIdx / (rays - 1)
     const deg = -45 + t * 90
     rotate(deg)
@@ -289,9 +306,19 @@ while (!won()) {
     rotate(-90)
   } else {
     const want = 14
-    move(want)
-    if (lastMoveDistance() < want - 0.5) {
-      rotate(55)
+    if (unstuck !== 0) {
+      move(want)
+      if (lastMoveDistance() >= want - 0.5) {
+        unstuck = 0
+      } else {
+        rotate(unstuck)
+      }
+    } else {
+      move(want)
+      if (lastMoveDistance() < want - 0.5) {
+        unstuck = -90 + Math.random() * 180
+        rotate(unstuck)
+      }
     }
   }
 }
