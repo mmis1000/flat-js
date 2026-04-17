@@ -121,4 +121,5 @@ lib/
 dist-web/
 example/*.json
 example/*.bin
+example/*.bin.gz
 example/*.js

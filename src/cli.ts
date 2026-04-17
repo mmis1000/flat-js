@@ -1,5 +1,6 @@
 import { promises as fs } from "fs"
 import * as path from "path"
+import { gzipSync } from "zlib"
 import { collectUsedOpcodes, compile } from "./compiler"
 import { stripRuntimeCommandSwitch } from "./strip-runtime-opcodes"
 import * as uglify from 'terser'
@@ -43,6 +44,11 @@ const JSONMode = flags['--json'] || false
 const binMode = flags['--bin'] || false
 const noMinimize = flags['--pretty'] || false
 const stripRuntime = flags['--strip-runtime'] || false
+const gzipBin = flags['--gzip'] || false
+
+if (gzipBin && !binMode) {
+    throw new Error('--gzip is only valid with --bin')
+}
 
 async function minifyInput(source: string): Promise<string> {
     if (noMinimize) {
@@ -89,7 +95,8 @@ async function main () {
     const programData = programBytes.toString('base64')
 
     if (binMode) {
-        process.stdout.write(programBytes)
+        const out = gzipBin ? gzipSync(programBytes) : programBytes
+        process.stdout.write(out)
         return
     }
 

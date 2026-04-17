@@ -48,13 +48,14 @@ node ./lib/cli.js [flags] <input-file>
 | *(none)* | Emit a self-contained, minified JS file (runtime + bytecode). |
 | `--json` | Emit bytecode as JSON (`{ "p": "<base64>" }`). |
 | `--bin` | Emit raw bytecode only: little-endian `Int32` words (length × 4 bytes). |
+| `--gzip` | With `--bin`: gzip-compress that output (browser: `DecompressionStream('gzip')` then `Int32Array`). |
 | `--debug` | Keep output readable; print minified source to stderr. |
 | `--pretty` | Skip minification of the input before compiling. |
 
 ```sh
 node ./lib/cli.js ./src/__tests__/fixures/loader.js > ./example/loader.js
-node ./lib/cli.js --bin ./src/__tests__/fixures/bad-code.js > ./example/bad-code.bin
-npm run build-example   # regenerate example outputs (loader.js + *.bin)
+node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/bad-code.js > ./example/bad-code.bin.gz
+npm run build-example   # regenerate example outputs (loader.js + *.bin.gz)
 ```
 
 ---
