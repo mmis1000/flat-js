@@ -286,4 +286,21 @@ describe('Generators', () => {
         `)
         expect(result).toEqual([1, 2, 3, 4])
     })
+
+    test('external interator works as expected', () => {
+        const result = compileAndRun(`
+            function* A () {
+                yield* [1, 2, 3]
+                return 4
+            }
+
+            const iter = A()
+            const A1 = iter.next()
+            const A2 = iter.next()
+            const A3 = iter.next()
+            const A4 = iter.next();
+            [A1.value, A2.value, A3.value, A4.value]
+        `)
+        expect(result).toEqual([1, 2, 3, 4])
+    })
 })
