@@ -59,6 +59,13 @@
                         >
                         Random stage
                     </label>
+                    <label class="game-continuous-label">
+                        <input
+                            v-model="continuousRun"
+                            type="checkbox"
+                        >
+                        Continuous
+                    </label>
                     <label class="game-speed-label">
                         Speed
                         <select
@@ -75,6 +82,21 @@
                             <option :value="16">16×</option>
                         </select>
                     </label>
+                    <span
+                        class="game-avg-ticks"
+                        title="Mean world ticks over completed runs (win or program finished). Kill does not count."
+                    >
+                        Avg {{ avgTicksLabel }}
+                        <span class="game-run-count">({{ scoreHistory.length }} runs)</span>
+                    </span>
+                    <button
+                        type="button"
+                        class="game-clear-avg"
+                        :disabled="scoreHistory.length === 0"
+                        @click="clearRunAverage"
+                    >
+                        Clear avg
+                    </button>
                 </div>
             </div>
             <div class="game-pane">
@@ -354,6 +376,10 @@ export default Vue.extend({
             gameSpeedMultiplier: 1,
             /** Random obstacles/targets/bot (margins only; not forced winnable from spawn). */
             randomizedStage: false,
+            /** Chain Run → new sim + VM until unchecked or Kill. */
+            continuousRun: false,
+            /** Ticks at end of each completed run (not counted on Kill). */
+            scoreHistory: [] as number[],
             execution: null as ReturnType<typeof getExecution> | null,
             program: [] as number[],
         })()
@@ -361,6 +387,12 @@ export default Vue.extend({
     computed: {
         snippetList(): CodeSnippet[] {
             return CODE_SNIPPETS
+        },
+        avgTicksLabel(): string {
+            const h = this.scoreHistory
+            if (h.length === 0) return '—'
+            const sum = h.reduce((a, b) => a + b, 0)
+            return (sum / h.length).toFixed(1)
         },
     },
     watch: {
@@ -597,6 +629,7 @@ export default Vue.extend({
 
                 if (result[Fields.done] || sim.won) {
                     this.state = 'idle'
+                    this.scoreHistory.push(sim.tick)
                 }
                 if (<State>this.state === 'idle') {
                     this.releaseVmExecution()
@@ -666,9 +699,16 @@ export default Vue.extend({
             )
             return true
         },
-        run() {
+        async run() {
             if (!this.setupExecution()) return
-            this.runExecution()
+            await this.runExecution()
+            while (this.continuousRun && this.state === 'idle') {
+                if (!this.setupExecution()) break
+                await this.runExecution()
+            }
+        },
+        clearRunAverage() {
+            this.scoreHistory = []
         },
         runAndPause() {
             if (!this.setupExecution()) return
@@ -682,6 +722,7 @@ export default Vue.extend({
             this.runExecution()
         },
         stop() {
+            this.continuousRun = false
             this.state = 'idle'
             this.releaseVmExecution()
         },
@@ -865,6 +906,39 @@ pre {
     border: 1px solid #555;
     padding: 0.2em 0.35em;
     border-radius: 2px;
+}
+.game-continuous-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: 0.85em;
+    color: #bbb;
+    cursor: pointer;
+    user-select: none;
+}
+.game-continuous-label input {
+    cursor: pointer;
+}
+.game-avg-ticks {
+    font-size: 0.85em;
+    color: #9cf;
+    white-space: nowrap;
+}
+.game-run-count {
+    color: #888;
+}
+.game-clear-avg {
+    font-size: 0.8em;
+    padding: 0.2em 0.5em;
+    background: #333;
+    color: #ccc;
+    border: 1px solid #555;
+    border-radius: 2px;
+    cursor: pointer;
+}
+.game-clear-avg:disabled {
+    opacity: 0.45;
+    cursor: default;
 }
 .pane-content {
     flex-grow: 1;
