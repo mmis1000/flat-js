@@ -2729,6 +2729,28 @@ function generateSegment(
             ]
         }
 
+        // ========== Template literals (untagged) ==========
+        if (ts.isNoSubstitutionTemplateLiteral(node)) {
+            return [op(OpCode.Literal, 2, [node.text])]
+        }
+
+        if (ts.isTemplateExpression(node)) {
+            const ops: Segment = [
+                op(OpCode.Literal, 2, [node.head.text])
+            ]
+            for (const span of node.templateSpans) {
+                ops.push(...generate(span.expression, flag))
+                ops.push(op(OpCode.BPlus))
+                ops.push(op(OpCode.Literal, 2, [span.literal.text]))
+                ops.push(op(OpCode.BPlus))
+            }
+            return ops
+        }
+
+        if (ts.isTaggedTemplateExpression(node)) {
+            throw new Error('Tagged template expressions are not supported')
+        }
+
         throw new Error(`Unknown node ${getNameOfKind(node.kind)}`)
     }
 

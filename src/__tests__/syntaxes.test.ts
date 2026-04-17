@@ -6,6 +6,8 @@ const syntaxes = [
     ['boolean', 'true'],
     ['boolean', 'false'],
     ['string', '"whatever"'],
+    ['TemplateLiteral no substitution', '`hello`'],
+    ['TemplateLiteral with substitution', '`a${1}b`'],
     ['undefined', 'undefined'],
     ['Identifier ', 'variable'],
     ['PropertyAccessExpression', 'a.b'],
