@@ -31,7 +31,10 @@
         </div>
         <div class="area-result pane">
             <div class="pane-title">
-                Result
+                Game
+            </div>
+            <div class="game-pane">
+                <game-canvas :sim="sim" />
             </div>
             <div ref="result" class="result-pane pane-content">
                 <pre class="result">{{ result }}</pre>
@@ -53,9 +56,11 @@ import { compile, getExecution, run } from '../src'
 import Vue from 'vue'
 import Monaco from './components/monaco.vue'
 import Debugger from './components/debugger.vue'
+import GameCanvas from './components/game-canvas.vue'
 import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
+import { Sim, TICKS_PER_SECOND, BOT_MOVE_PER_TICK, BOT_ROTATE_DEG_PER_TICK, SHOOT_COOLDOWN_TICKS, SCAN_TICKS_PER_RAY } from './game/sim'
 
 type State = 'play' | 'paused' | 'idle'
 
@@ -152,47 +157,55 @@ const fakeGlobalThis = makeGlobalThis()
 export default Vue.extend({
     components: {
         Monaco,
-        Debugger
+        Debugger,
+        GameCanvas,
     },
     data() {
         return withNonReactive({
-            text: `clear()
-const start = Date.now()
-let a = 0
+            text: `// Robot controls:
+//   rotate(deg)      turn (deg), positive = clockwise
+//   move(distance)   move forward (schedules ticks; use lastMoveDistance() after)
+//   lastMoveDistance()  pixels moved for the last move (less if blocked)
+//   shoot()          fire a disc
+//   scan(rays)       1..90 rays across a 90-deg forward arc
+//                    returns array of per-ray hit lists (length === rays)
+//                    each hit: { distance, type }
+//                    type: 'wall' | 'obstacle' | 'target' | 'disc'
+//   won()            true once a disc has hit the green target
+// Win by hitting the green target with a disc.
 
-const fn = (b) => {
-  print(b)
-}
+clear()
 
-print(eval('a'))
+while (!won()) {
+  const rays = 17
+  const sweep = scan(rays)
 
-for (let i = 0; i < 5; i++) {
-  a = a + 1
-  fn(a)
-}
-
-print(a)
-
-do {
-  try {
-    print(1)
-    throw new Error('')
-  } finally {
-    break
+  // Find a ray whose FIRST hit is the target (nothing in the way).
+  let bestIdx = -1, bestDist = Infinity
+  for (let i = 0; i < sweep.length; i++) {
+    const hits = sweep[i]
+    if (hits.length > 0 && hits[0].type === 'target' && hits[0].distance < bestDist) {
+      bestDist = hits[0].distance
+      bestIdx = i
+    }
   }
-} while (false)
 
-Object.defineProperty(Object.prototype, '__magic__', {
-	get: function() {
-		return this;
-	},
-	configurable: true
-});
-print(Object.keys(__magic__));
-delete Object.prototype.__magic__;
-
-debugger
-print('total time: ' + (Date.now() - start) + 'ms')
+  if (bestIdx >= 0) {
+    const t = bestIdx / (sweep.length - 1)
+    const deg = -45 + t * 90
+    rotate(deg)
+    shoot()
+    print('shot at ' + deg.toFixed(1) + 'deg, dist ' + bestDist.toFixed(0))
+  } else {
+    // No clear shot. Try moving forward; if blocked, turn.
+    const want = 20
+    move(want)
+    if (lastMoveDistance() < want - 0.5) {
+      rotate(45)
+    }
+  }
+}
+print('win!')
 
 `,
             result: '',
@@ -203,10 +216,11 @@ print('total time: ' + (Date.now() - start) + 'ms')
             state: 'idle' as State,
             refreshKey: Math.random(),
             debugInfo: <DebugInfo>{ sourceMap: [], internals: [] },
-            highlights: <[number, number, number, number][]>[]
+            highlights: <[number, number, number, number][]>[],
+            sim: null as Sim | null,
         })<{
             execution: ReturnType<typeof getExecution>,
-            program: number[]
+            program: number[],
         }>()
     },
     watch: {
@@ -277,66 +291,9 @@ print('total time: ' + (Date.now() - start) + 'ms')
 
                 this.refreshKey = Math.random()
 
-                const [r1, c1, r2, c2] = getPos()
-                this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
-                
-                if (result[Fields.done]) {
-                    this.state = 'idle'
-                }
-                if (this.state === 'idle') {
-                    this.highlights = []
-                }
-
-            } catch (err) {
-                this.printError(err)
-                this.state = 'idle'
-                this.highlights = []
-            }
-        },
-        async runExecution() {
-            this.state = 'play'
-            const execution = this.execution
-
-            let stack = this.execution[Fields.stack]
-            this.stackContainer = {
-                get stack () {
-                    return stack
-                }
-            }
-
-            let result: Result
-
-            const getPos = () => {
-                const currentPosition = execution[Fields.ptr]
-                return this.debugInfo.sourceMap[currentPosition]
-            }
-
-            let prevPos = getPos().join('')
-
-            try {
-                do {
-                    result = execution[Fields.step](true)
-
-                    if (getPos().join('') !== prevPos && !this.debugInfo.internals[execution[Fields.ptr]]) {
-                        let stack = execution[Fields.stack]
-                        this.stackContainer = {
-                            get stack () {
-                                return stack
-                            }
-                        }
-                        this.refreshKey = Math.random()
-
-                        const [r1, c1, r2, c2] = getPos()
-                        this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
-
-                        await new Promise(r => setTimeout(r, 200))
-                    }
-
-                    prevPos = getPos().join('')
-                } while (this.state === 'play' && !result[Fields.done])
-
-                if (<State>this.state === 'paused') {
-                    const [r1, c1, r2, c2] = getPos()
+                const pos = this.debugInfo.sourceMap[execution[Fields.ptr]]
+                if (pos) {
+                    const [r1, c1, r2, c2] = pos
                     this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
                 }
 
@@ -353,23 +310,136 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 this.highlights = []
             }
         },
-        run() {
-            const clear = (val: any) => {
-                this.result = ''
+        async runExecution() {
+            this.state = 'play'
+            const execution = this.execution
+            const sim = this.sim
+            if (!sim) return
+
+            let stack = this.execution[Fields.stack]
+            this.stackContainer = {
+                get stack () {
+                    return stack
+                }
             }
 
+            let result: Result = { [Fields.done]: false } as any
+
+            const getPos = () => {
+                const currentPosition = execution[Fields.ptr]
+                return this.debugInfo.sourceMap[currentPosition]
+            }
+
+            let prevPos = getPos().join(',')
+            const TICK_MS = 1000 / TICKS_PER_SECOND
+            let nextTickAt = performance.now() + TICK_MS
+
+            // Single clock for display catch-up and highlight pacing (world tick === code tick).
+            const waitTick = async () => {
+                const now = performance.now()
+                if (now < nextTickAt) {
+                    await new Promise(r => setTimeout(r, nextTickAt - now))
+                }
+                nextTickAt = performance.now() + TICK_MS
+            }
+
+            try {
+                while (<State>this.state === 'play') {
+                    if (result[Fields.done]) break
+
+                    await waitTick()
+                    if (result[Fields.done]) break
+
+                    // Exactly one world tick per real clock tick; nothing else advances sim.tick.
+                    sim.advanceOneTick()
+                    if (sim.isBotVmBlocking()) {
+                        continue
+                    }
+
+                    let highlightChanged = false
+                    let guardSteps = 0
+                    while (<State>this.state === 'play' && !result[Fields.done] && !highlightChanged) {
+                        result = execution[Fields.step](true)
+                        if (sim.isBotVmBlocking()) {
+                            break
+                        }
+                        guardSteps++
+                        const posKey = getPos().join(',')
+                        if (posKey !== prevPos && !this.debugInfo.internals[execution[Fields.ptr]]) {
+                            let s = execution[Fields.stack]
+                            this.stackContainer = { get stack () { return s } }
+                            this.refreshKey = Math.random()
+                            const [r1, c1, r2, c2] = getPos()
+                            this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+                            prevPos = posKey
+                            highlightChanged = true
+                        }
+                        if (guardSteps > 200000) break
+                    }
+
+                    if (highlightChanged) await waitTick()
+                }
+
+                if (<State>this.state === 'paused') {
+                    const [r1, c1, r2, c2] = getPos()
+                    this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+                }
+
+                if (result[Fields.done]) {
+                    this.state = 'idle'
+                }
+                if (<State>this.state === 'idle') {
+                    this.highlights = []
+                }
+
+            } catch (err) {
+                this.printError(err)
+                this.state = 'idle'
+                this.highlights = []
+            }
+        },
+        setupExecution(): boolean {
+            const clear = () => { this.result = '' }
             const print = (val: any) => {
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
             }
+
+            const sim = new Sim()
+            this.sim = sim
+
+            const rotate = (deg: number) => {
+                const n = Number(deg) || 0
+                if (n === 0) {
+                    return
+                }
+                sim.beginRotateRadians((n * Math.PI) / 180)
+            }
+            const move = (dist: number) => {
+                const n = Number(dist) || 0
+                if (n === 0) {
+                    return 0
+                }
+                sim.beginMove(n)
+                return 0
+            }
+            const lastMoveDistance = () => sim.lastMoveReturnedDistance
+            const shoot = () => {
+                sim.beginShoot()
+            }
+            const scan = (rays: number) => {
+                const r = Math.max(1, Math.min(90, Math.floor(Number(rays) || 36)))
+                const hits = sim.prepareScan(r)
+                return hits.map(ray => ray.map(h => ({ distance: h.distance, type: h.type })))
+            }
+            const won = () => sim.won
 
             let programData: number[], textData: any[], debugInfo: DebugInfo
             try {
                 [programData, textData, debugInfo] = compile(this.text, { range: true })
             } catch (err) {
                 this.printError(err)
-                return
+                return false
             }
-
 
             this.debugInfo = debugInfo
             this.program = programData
@@ -378,46 +448,20 @@ print('total time: ' + (Date.now() - start) + 'ms')
                 textData,
                 0,
                 fakeGlobalThis,
-                [{ print, clear, __proto__: null }],
+                [{ print, clear, rotate, move, lastMoveDistance, shoot, scan, won, __proto__: null }],
                 undefined,
                 [],
                 () => () => this.pause(),
                 compile
             )
-
+            return true
+        },
+        run() {
+            if (!this.setupExecution()) return
             this.runExecution()
         },
         runAndPause() {
-            const clear = (val: any) => {
-                this.result = ''
-            }
-
-            const print = (val: any) => {
-                this.result += JSON.stringify(val, undefined, 2) + '\n'
-            }
-
-            let programData: number[], textData: any[], debugInfo: DebugInfo
-            try {
-                [programData, textData, debugInfo] = compile(this.text, { range: true })
-            } catch (err) {
-                this.printError(err)
-                return
-            }
-
-            this.debugInfo = debugInfo
-            this.program = programData
-            this.execution = getExecution(
-                programData,
-                textData,
-                0,
-                fakeGlobalThis,
-                [{ print, clear, __proto__: null }],
-                undefined,
-                [],
-                () => () => this.pause(),
-                compile
-            )
-
+            if (!this.setupExecution()) return
             this.pause()
         },
         pause() {
@@ -486,12 +530,12 @@ pre {
     display: grid;
     grid-template-areas: "code"
                    "result";
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
 }
 .app.running {
     grid-template-areas: "debug code"
                    "debug result";
-    grid-template-rows: 1fr 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-columns: 400px 1fr;
 }
 .area-debug {
@@ -554,6 +598,18 @@ pre {
 .result-pane {
     overflow-y: auto;
     position: relative;
+}
+.game-pane {
+    flex-grow: 0;
+    padding: 8px;
+    display: flex;
+    justify-content: center;
+    background: #000;
+    border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+}
+.area-result {
+    display: flex;
+    flex-direction: column;
 }
 .result {
     padding: 1em;
