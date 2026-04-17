@@ -218,6 +218,8 @@ print('win!')
             debugInfo: <DebugInfo>{ sourceMap: [], internals: [] },
             highlights: <[number, number, number, number][]>[],
             sim: null as Sim | null,
+            /** Coalesce Monaco/debug updates to one paint per frame (avoids freezing at high tick rates). */
+            highlightRafId: 0,
         })<{
             execution: ReturnType<typeof getExecution>,
             program: number[],
@@ -240,6 +242,42 @@ print('win!')
                     this.result += err.stack + '\n'
                 }
             }
+        },
+        cancelDebugHighlightRaf() {
+            if (this.highlightRafId) {
+                cancelAnimationFrame(this.highlightRafId)
+                this.highlightRafId = 0
+            }
+        },
+        /** At most one Monaco highlight + debugger refresh per animation frame. */
+        scheduleDebugHighlight() {
+            if (this.highlightRafId) return
+            this.highlightRafId = requestAnimationFrame(() => {
+                this.highlightRafId = 0
+                const execution = this.execution
+                if (!execution || this.state === 'idle') return
+                const pos = this.debugInfo.sourceMap[execution[Fields.ptr]]
+                if (pos) {
+                    const [r1, c1, r2, c2] = pos
+                    this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+                }
+                this.refreshKey = Math.random()
+                const s = execution[Fields.stack]
+                this.stackContainer = { get stack () { return s } }
+            })
+        },
+        flushDebugHighlightSync() {
+            this.cancelDebugHighlightRaf()
+            const execution = this.execution
+            if (!execution) return
+            const pos = this.debugInfo.sourceMap[execution[Fields.ptr]]
+            if (pos) {
+                const [r1, c1, r2, c2] = pos
+                this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+            }
+            this.refreshKey = Math.random()
+            const s = execution[Fields.stack]
+            this.stackContainer = { get stack () { return s } }
         },
         stepExecution(stepIn = false) {
             const execution = this.execution
@@ -289,24 +327,21 @@ print('win!')
                     && !result[Fields.done]
                 )
 
-                this.refreshKey = Math.random()
-
-                const pos = this.debugInfo.sourceMap[execution[Fields.ptr]]
-                if (pos) {
-                    const [r1, c1, r2, c2] = pos
-                    this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+                if (!result[Fields.done]) {
+                    this.scheduleDebugHighlight()
                 }
-
                 if (result[Fields.done]) {
                     this.state = 'idle'
                 }
                 if (this.state === 'idle') {
+                    this.cancelDebugHighlightRaf()
                     this.highlights = []
                 }
 
             } catch (err) {
                 this.printError(err)
                 this.state = 'idle'
+                this.cancelDebugHighlightRaf()
                 this.highlights = []
             }
         },
@@ -384,13 +419,9 @@ print('win!')
                         guardSteps++
                         const posKey = getPos().join(',')
                         if (posKey !== prevPos && !this.debugInfo.internals[execution[Fields.ptr]]) {
-                            let s = execution[Fields.stack]
-                            this.stackContainer = { get stack () { return s } }
-                            this.refreshKey = Math.random()
-                            const [r1, c1, r2, c2] = getPos()
-                            this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
                             prevPos = posKey
                             highlightChanged = true
+                            this.scheduleDebugHighlight()
                         }
                         if (guardSteps > 200000) break
                     }
@@ -399,20 +430,21 @@ print('win!')
                 }
 
                 if (<State>this.state === 'paused') {
-                    const [r1, c1, r2, c2] = getPos()
-                    this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+                    this.flushDebugHighlightSync()
                 }
 
                 if (result[Fields.done] || sim.won) {
                     this.state = 'idle'
                 }
                 if (<State>this.state === 'idle') {
+                    this.cancelDebugHighlightRaf()
                     this.highlights = []
                 }
 
             } catch (err) {
                 this.printError(err)
                 this.state = 'idle'
+                this.cancelDebugHighlightRaf()
                 this.highlights = []
             }
         },
@@ -484,19 +516,13 @@ print('win!')
         },
         pause() {
             this.state = 'paused'
-            // force non reactive
-            let stack = this.execution[Fields.stack]
-            this.stackContainer = {
-                get stack () {
-                    return stack
-                }
-            }
-            this.refreshKey = Math.random()
+            this.flushDebugHighlightSync()
         },
         resume() {
             this.runExecution()
         },
         stop() {
+            this.cancelDebugHighlightRaf()
             this.highlights = []
             this.state = 'idle'
         },
@@ -522,7 +548,10 @@ print('win!')
                 this.printError(err)
             }
         }
-    }
+    },
+    beforeDestroy() {
+        this.cancelDebugHighlightRaf()
+    },
 })
 </script>
 
