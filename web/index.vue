@@ -30,8 +30,24 @@
             </div>
         </div>
         <div class="area-result pane">
-            <div class="pane-title">
-                Game
+            <div class="pane-title game-pane-title">
+                <span>Game</span>
+                <label class="game-speed-label">
+                    Speed
+                    <select
+                        v-model.number="gameSpeedMultiplier"
+                        class="game-speed-select"
+                        title="Wall-clock advance speed (world + VM pacing)"
+                    >
+                        <option :value="0.25">0.25×</option>
+                        <option :value="0.5">0.5×</option>
+                        <option :value="1">1×</option>
+                        <option :value="2">2×</option>
+                        <option :value="4">4×</option>
+                        <option :value="8">8×</option>
+                        <option :value="16">16×</option>
+                    </select>
+                </label>
             </div>
             <div class="game-pane">
                 <game-canvas :sim="sim" />
@@ -220,6 +236,8 @@ print('win!')
             sim: null as Sim | null,
             /** Coalesce Monaco/debug updates to one paint per frame (avoids freezing at high tick rates). */
             highlightRafId: 0,
+            /** >1 shortens wait between sim/VM steps (wall-clock); scales runExecution waitTick delays. */
+            gameSpeedMultiplier: 1,
         })<{
             execution: ReturnType<typeof getExecution>,
             program: number[],
@@ -377,8 +395,12 @@ print('win!')
                 : Math.max(MIN_TIMER_MS, ticksPerTimer * TICK_MS)
 
             let nextWakeAt = performance.now()
+            const scaledWaitMs = () => {
+                const s = Math.max(0.1, Math.min(128, this.gameSpeedMultiplier))
+                return waitDurationMs / s
+            }
             const waitTick = async () => {
-                nextWakeAt += waitDurationMs
+                nextWakeAt += scaledWaitMs()
                 const now = performance.now()
                 if (now < nextWakeAt) {
                     await new Promise(r => setTimeout(r, nextWakeAt - now))
@@ -561,6 +583,8 @@ html {
     background: black;
     margin: 0;
     padding: 0;
+    overflow-x: hidden;
+    max-width: 100%;
 }
 
 body {
@@ -573,27 +597,33 @@ pre {
 <style scoped>
 .app {
     height: 100vh;
-    width: 100vw;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     display: grid;
     grid-template-areas: "code"
                    "result";
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
 }
 .app.running {
     grid-template-areas: "debug code"
                    "debug result";
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-columns: 400px 1fr;
+    grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
 }
 .area-debug {
     grid-area: debug;
     border-right: 1px solid rgba(127, 127, 127, 0.5);
+    min-width: 0;
 }
 .area-debug .pane-content {
     overflow-y: auto;
 }
 .area-code {
     grid-area: code;
+    min-width: 0;
 }
 .area-code .pane-footer {
     display: flex;
@@ -615,6 +645,9 @@ pre {
 }
 .area-result {
     grid-area: result;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .pane {
@@ -628,8 +661,31 @@ pre {
     flex-grow: 0;
     border-bottom: 1px solid rgba(127, 127, 127, 0.5);
 }
+.game-pane-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75em;
+    min-width: 0;
+}
+.game-speed-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: 0.85em;
+    color: #bbb;
+}
+.game-speed-select {
+    background: #333;
+    color: #eee;
+    border: 1px solid #555;
+    padding: 0.2em 0.35em;
+    border-radius: 2px;
+}
 .pane-content {
     flex-grow: 1;
+    flex-basis: 0;
+    min-width: 0;
     overflow: hidden;
     overflow: clip;
 }
@@ -643,33 +699,37 @@ pre {
     color: white;
 }
 .result-pane {
+    overflow-x: auto;
     overflow-y: auto;
     position: relative;
+    min-width: 0;
 }
 .game-pane {
     flex-grow: 0;
+    flex-shrink: 0;
     padding: 8px;
     display: flex;
     justify-content: center;
+    align-items: flex-start;
     background: #000;
     border-bottom: 1px solid rgba(127, 127, 127, 0.5);
-}
-.area-result {
-    display: flex;
-    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
 }
 .result {
     padding: 1em;
     line-height: 2em;
+    min-width: 0;
+    overflow-x: auto;
 }
 .repl {
-    width: 100%;
-    width: available;
+    min-width: 0;
     border: 0;
     padding: 1em;
     outline: 0;
     background: #333;
     color: white;
+    box-sizing: border-box;
 }
 .repl::placeholder {
     color: #777;

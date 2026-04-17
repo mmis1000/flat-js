@@ -1,5 +1,5 @@
 <template>
-    <div ref="editor"></div>
+    <div ref="editor" class="monaco-host"></div>
 </template>
 
 <script lang="ts">
@@ -96,6 +96,11 @@ export default Vue.extend({
 </script>
 
 <style scoped>
+.monaco-host {
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+}
 ::v-deep .inline-highlight {
     position: relative;
     background: rgb(251, 255, 0);
