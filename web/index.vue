@@ -332,15 +332,22 @@ print('win!')
 
             let prevPos = getPos().join(',')
             const TICK_MS = 1000 / TICKS_PER_SECOND
-            let nextTickAt = performance.now() + TICK_MS
+            // Browsers clamp setTimeout to ~4ms; below that, batch multiple sim ticks per wake.
+            const MIN_TIMER_MS = 4
+            const ticksPerTimer = TICK_MS >= MIN_TIMER_MS
+                ? 1
+                : Math.max(1, Math.ceil(MIN_TIMER_MS / TICK_MS))
+            const waitDurationMs = TICK_MS >= MIN_TIMER_MS
+                ? TICK_MS
+                : Math.max(MIN_TIMER_MS, ticksPerTimer * TICK_MS)
 
-            // Single clock for display catch-up and highlight pacing (world tick === code tick).
+            let nextWakeAt = performance.now()
             const waitTick = async () => {
+                nextWakeAt += waitDurationMs
                 const now = performance.now()
-                if (now < nextTickAt) {
-                    await new Promise(r => setTimeout(r, nextTickAt - now))
+                if (now < nextWakeAt) {
+                    await new Promise(r => setTimeout(r, nextWakeAt - now))
                 }
-                nextTickAt = performance.now() + TICK_MS
             }
 
             try {
@@ -350,8 +357,19 @@ print('win!')
                     await waitTick()
                     if (result[Fields.done]) break
 
-                    // Exactly one world tick per real clock tick; nothing else advances sim.tick.
-                    sim.advanceOneTick()
+                    // One timer wake may advance several sim ticks when TICK_MS < MIN_TIMER_MS.
+                    let wonThisBatch = false
+                    for (let t = 0; t < ticksPerTimer; t++) {
+                        sim.advanceOneTick()
+                        if (sim.won) {
+                            wonThisBatch = true
+                            break
+                        }
+                    }
+                    if (wonThisBatch) {
+                        this.state = 'idle'
+                        break
+                    }
                     if (sim.isBotVmBlocking()) {
                         continue
                     }
@@ -385,7 +403,7 @@ print('win!')
                     this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
                 }
 
-                if (result[Fields.done]) {
+                if (result[Fields.done] || sim.won) {
                     this.state = 'idle'
                 }
                 if (<State>this.state === 'idle') {
