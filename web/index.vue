@@ -238,8 +238,6 @@ while (!won()) {
     rotate(deg)
     shoot()
     print('shot at ' + deg.toFixed(1) + 'deg, dist ' + bestDist.toFixed(0))
-    // Thin rays vs thick discs: forward-only can still repeat the same corner clip.
-    // Creep forward, then strafe (90° / move / back) to work around the obstacle.
     move(6)
     rotate(90)
     move(8)
@@ -285,7 +283,6 @@ while (!won()) {
     rotate(deg)
     shoot()
     print('shot ~' + deg.toFixed(0) + 'deg')
-    // Forward + strafe like scan-aim (ray/disc mismatch and corners).
     move(5)
     rotate(90)
     move(8)
@@ -330,10 +327,9 @@ export default Vue.extend({
             gameSpeedMultiplier: 1,
             /** Random obstacles/targets/bot (margins only; not forced winnable from spawn). */
             randomizedStage: false,
-        })<{
-            execution: ReturnType<typeof getExecution>,
-            program: number[],
-        }>()
+            execution: null as ReturnType<typeof getExecution> | null,
+            program: [] as number[],
+        })()
     },
     computed: {
         snippetList(): CodeSnippet[] {
@@ -368,6 +364,18 @@ export default Vue.extend({
                 this.highlightRafId = 0
             }
         },
+        releaseVmExecution() {
+            this.cancelDebugHighlightRaf()
+            this.execution = null
+            this.program = []
+            this.debugInfo = { sourceMap: [], internals: [] }
+            this.stackContainer = { stack: [] as Stack }
+            this.highlights = []
+        },
+        releaseVmResources() {
+            this.releaseVmExecution()
+            this.sim = null
+        },
         /** At most one Monaco highlight + debugger refresh per animation frame. */
         scheduleDebugHighlight() {
             if (this.highlightRafId) return
@@ -400,6 +408,7 @@ export default Vue.extend({
         },
         stepExecution(stepIn = false) {
             const execution = this.execution
+            if (!execution) return
 
             let stack = execution[Fields.stack]
             this.stackContainer = {
@@ -468,9 +477,12 @@ export default Vue.extend({
             this.state = 'play'
             const execution = this.execution
             const sim = this.sim
-            if (!sim) return
+            if (!sim || !execution) {
+                this.state = 'idle'
+                return
+            }
 
-            let stack = this.execution[Fields.stack]
+            let stack = execution[Fields.stack]
             this.stackContainer = {
                 get stack () {
                     return stack
@@ -533,8 +545,6 @@ export default Vue.extend({
                     }
 
                     let highlightChanged = false
-                    // Per timer batch: avoid freezing the tab if the VM runs many steps without a
-                    // source-line change.
                     let guardSteps = 0
                     while (<State>this.state === 'play' && !result[Fields.done] && !highlightChanged) {
                         result = execution[Fields.step](true)
@@ -562,15 +572,13 @@ export default Vue.extend({
                     this.state = 'idle'
                 }
                 if (<State>this.state === 'idle') {
-                    this.cancelDebugHighlightRaf()
-                    this.highlights = []
+                    this.releaseVmExecution()
                 }
 
             } catch (err) {
                 this.printError(err)
                 this.state = 'idle'
-                this.cancelDebugHighlightRaf()
-                this.highlights = []
+                this.releaseVmExecution()
             }
         },
         setupExecution(): boolean {
@@ -647,9 +655,8 @@ export default Vue.extend({
             this.runExecution()
         },
         stop() {
-            this.cancelDebugHighlightRaf()
-            this.highlights = []
             this.state = 'idle'
+            this.releaseVmExecution()
         },
         runRepl() {
             const text = this.replText
@@ -667,7 +674,12 @@ export default Vue.extend({
             }
 
             try {
-                const result = run(programData, textData, 0, fakeGlobalThis, [...this.execution[Fields.scopes]])
+                const ex = this.execution
+                if (!ex) {
+                    this.result += '(no VM)\n'
+                    return
+                }
+                const result = run(programData, textData, 0, fakeGlobalThis, [...ex[Fields.scopes]])
                 this.result += result + '\n'
             } catch (err) {
                 this.printError(err)
@@ -675,7 +687,7 @@ export default Vue.extend({
         }
     },
     beforeDestroy() {
-        this.cancelDebugHighlightRaf()
+        this.releaseVmResources()
     },
 })
 </script>

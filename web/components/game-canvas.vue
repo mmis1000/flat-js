@@ -43,7 +43,7 @@ export default Vue.extend({
             const sim = this.sim
             if (!sim) return
 
-            const snap = sim.snapshots[sim.tick] || sim.snapshots[sim.snapshots.length - 1]
+            const snap = sim.lastSnapshot
             const obstacles: Rect[] = sim.obstacles
 
             // targets

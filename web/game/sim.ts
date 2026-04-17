@@ -119,7 +119,7 @@ export class Sim {
     targets: Target[] = DEFAULT_TARGETS.map(t => ({ ...t }))
     won = false
     shootCooldown = 0
-    snapshots: Snapshot[] = []
+    lastSnapshot: Snapshot | null = null
     currentScanRays?: Snapshot['scanRays']
 
     private pendingMoveRemaining = 0
@@ -162,7 +162,7 @@ export class Sim {
 
     private resetTransientForNewLayout() {
         this.tick = 0
-        this.snapshots = []
+        this.lastSnapshot = null
         this.won = false
         this.discs = []
         this.shootCooldown = 0
@@ -274,14 +274,14 @@ export class Sim {
     }
 
     private pushSnapshot() {
-        this.snapshots.push({
+        this.lastSnapshot = {
             tick: this.tick,
             bot: { ...this.bot },
             discs: this.discs.filter(d => d.alive).map(d => ({ ...d })),
             targets: this.targets.map(t => ({ ...t })),
             won: this.won,
             scanRays: this.currentScanRays,
-        })
+        }
     }
 
     isMovePending() {
