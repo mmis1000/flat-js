@@ -50,22 +50,32 @@
         <div class="area-result pane">
             <div class="pane-title game-pane-title">
                 <span>Game</span>
-                <label class="game-speed-label">
-                    Speed
-                    <select
-                        v-model.number="gameSpeedMultiplier"
-                        class="game-speed-select"
-                        title="Wall-clock advance speed (world + VM pacing)"
-                    >
-                        <option :value="0.25">0.25×</option>
-                        <option :value="0.5">0.5×</option>
-                        <option :value="1">1×</option>
-                        <option :value="2">2×</option>
-                        <option :value="4">4×</option>
-                        <option :value="8">8×</option>
-                        <option :value="16">16×</option>
-                    </select>
-                </label>
+                <div class="game-pane-controls">
+                    <label class="game-random-label">
+                        <input
+                            v-model="randomizedStage"
+                            type="checkbox"
+                            :disabled="state !== 'idle'"
+                        >
+                        Random stage
+                    </label>
+                    <label class="game-speed-label">
+                        Speed
+                        <select
+                            v-model.number="gameSpeedMultiplier"
+                            class="game-speed-select"
+                            title="Wall-clock advance speed (world + VM pacing)"
+                        >
+                            <option :value="0.25">0.25×</option>
+                            <option :value="0.5">0.5×</option>
+                            <option :value="1">1×</option>
+                            <option :value="2">2×</option>
+                            <option :value="4">4×</option>
+                            <option :value="8">8×</option>
+                            <option :value="16">16×</option>
+                        </select>
+                    </label>
+                </div>
             </div>
             <div class="game-pane">
                 <game-canvas :sim="sim" />
@@ -228,6 +238,12 @@ while (!won()) {
     rotate(deg)
     shoot()
     print('shot at ' + deg.toFixed(1) + 'deg, dist ' + bestDist.toFixed(0))
+    // Thin rays vs thick discs: forward-only can still repeat the same corner clip.
+    // Creep forward, then strafe (90° / move / back) to work around the obstacle.
+    move(6)
+    rotate(90)
+    move(8)
+    rotate(-90)
   } else {
     // No clear shot. Try moving forward; if blocked, turn.
     const want = 20
@@ -269,6 +285,11 @@ while (!won()) {
     rotate(deg)
     shoot()
     print('shot ~' + deg.toFixed(0) + 'deg')
+    // Forward + strafe like scan-aim (ray/disc mismatch and corners).
+    move(5)
+    rotate(90)
+    move(8)
+    rotate(-90)
   } else {
     const want = 14
     move(want)
@@ -307,6 +328,8 @@ export default Vue.extend({
             highlightRafId: 0,
             /** >1 shortens wait between sim/VM steps (wall-clock); scales runExecution waitTick delays. */
             gameSpeedMultiplier: 1,
+            /** Random obstacles/targets/bot (margins only; not forced winnable from spawn). */
+            randomizedStage: false,
         })<{
             execution: ReturnType<typeof getExecution>,
             program: number[],
@@ -510,6 +533,8 @@ export default Vue.extend({
                     }
 
                     let highlightChanged = false
+                    // Per timer batch: avoid freezing the tab if the VM runs many steps without a
+                    // source-line change.
                     let guardSteps = 0
                     while (<State>this.state === 'play' && !result[Fields.done] && !highlightChanged) {
                         result = execution[Fields.step](true)
@@ -554,7 +579,7 @@ export default Vue.extend({
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
             }
 
-            const sim = new Sim()
+            const sim = new Sim({ randomizedStage: this.randomizedStage })
             this.sim = sim
 
             const rotate = (deg: number) => {
@@ -767,6 +792,26 @@ pre {
     justify-content: space-between;
     gap: 0.75em;
     min-width: 0;
+}
+.game-pane-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.65em 1em;
+    min-width: 0;
+}
+.game-random-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: 0.85em;
+    color: #bbb;
+    cursor: pointer;
+    user-select: none;
+}
+.game-random-label input {
+    cursor: pointer;
 }
 .game-speed-label {
     display: flex;

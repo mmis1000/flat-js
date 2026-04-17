@@ -641,17 +641,9 @@ const getExecution = (
         return result
     }
 
-    let stepCount = 0
     const step = (debug: boolean = false): Result => {
         if (ptr >= currentProgram.length) {
              return { [Fields.done]: true, [Fields.value]: undefined, [Fields.evalResult]: undefined }
-        }
-        if (++stepCount > 100000) throw new Error('Infinite loop detected or step limit exceeded')
-        
-        const currentPtr = ptr;
-        if (debug) {
-            const op = currentProgram[ptr];
-            console.log(`[VM] STEP ${stepCount} | PTR ${currentPtr} | OP ${op} | STACK ${stack.length}`);
         }
         const opCode = currentProgram[ptr];
         let returnsExternal = false

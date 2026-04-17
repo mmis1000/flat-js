@@ -38,6 +38,74 @@ export const DISC_SPEED = DISC_PX_PER_SEC / TICKS_PER_SECOND
 export const SHOOT_COOLDOWN_TICKS = Math.round(SHOOT_COOLDOWN_SEC * TICKS_PER_SECOND)
 export const SCAN_TICKS_PER_RAY = Math.max(1, Math.round(SCAN_SEC_PER_RAY * TICKS_PER_SECOND))
 
+/** Inset from arena edges for obstacles / targets (room for bot + disc near walls). */
+export const LAYOUT_WALL_MARGIN = 26
+/** Minimum gap between any two axis-aligned rects (targets / obstacles). */
+export const LAYOUT_MIN_GAP = 14
+/** Extra padding so the bot circle stays clear of rects. */
+export const LAYOUT_BOT_CLEARANCE = 10
+
+export const TARGET_W = 40
+export const TARGET_H = 40
+
+export const DEFAULT_OBSTACLES: Rect[] = [
+    { x: 150, y: 150, w: 100, h: 30 },
+    { x: 280, y: 240, w: 90, h: 30 },
+    { x: 420, y: 120, w: 30, h: 140 },
+    { x: 120, y: 310, w: 80, h: 30 },
+]
+
+export const DEFAULT_TARGETS: Target[] = [
+    { x: 530, y: 30, w: TARGET_W, h: TARGET_H, hit: false },
+    { x: 30, y: 30, w: TARGET_W, h: TARGET_H, hit: false },
+    { x: 520, y: 330, w: TARGET_W, h: TARGET_H, hit: false },
+]
+
+export const DEFAULT_BOT: Bot = { x: 40, y: ARENA_H - 40, r: BOT_R, heading: -Math.PI / 2 }
+
+export type SimOptions = {
+    /** Randomize obstacles, targets, and bot (wall + gap + bot clearance only; no LOS guarantee). */
+    randomizedStage?: boolean
+    /** Seed for reproducible random layouts (mulberry32). */
+    seed?: number
+}
+
+function mulberry32(seed: number) {
+    return () => {
+        let t = (seed += 0x6d2b79f5)
+        t = Math.imul(t ^ (t >>> 15), t | 1)
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+}
+
+function rectFitsArenaInset(r: Rect, inset: number) {
+    return r.x >= inset && r.y >= inset && r.x + r.w <= ARENA_W - inset && r.y + r.h <= ARENA_H - inset
+}
+
+/** True if a and b are separated by at least `gap` between closest edges. */
+function rectsSeparatedByGap(a: Rect, b: Rect, gap: number) {
+    return a.x + a.w + gap <= b.x || b.x + b.w + gap <= a.x || a.y + a.h + gap <= b.y || b.y + b.h + gap <= a.y
+}
+
+function rectHitsCircle(r: Rect, cx: number, cy: number, cr: number): boolean {
+    const nx = Math.max(r.x, Math.min(cx, r.x + r.w))
+    const ny = Math.max(r.y, Math.min(cy, r.y + r.h))
+    const dx = cx - nx
+    const dy = cy - ny
+    return dx * dx + dy * dy <= cr * cr
+}
+function circleHitsRect(cx: number, cy: number, cr: number, r: Rect): boolean {
+    return rectHitsCircle(r, cx, cy, cr)
+}
+
+function botCenterClearOfRects(bx: number, by: number, rects: Rect[], clearance: number) {
+    for (const r of rects) {
+        if (circleHitsRect(bx, by, BOT_R + clearance, r)) return false
+    }
+    return true
+}
+
 /**
  * World time advances only via `advanceOneTick()`, which the host must call
  * once per real wall-clock tick (after awaiting the same pacing timer). Nothing
@@ -45,19 +113,10 @@ export const SCAN_TICKS_PER_RAY = Math.max(1, Math.round(SCAN_SEC_PER_RAY * TICK
  */
 export class Sim {
     tick = 0
-    bot: Bot = { x: 40, y: ARENA_H - 40, r: BOT_R, heading: -Math.PI / 2 }
+    bot: Bot = { ...DEFAULT_BOT }
     discs: Disc[] = []
-    obstacles: Rect[] = [
-        { x: 150, y: 150, w: 100, h: 30 },
-        { x: 280, y: 240, w: 90, h: 30 },
-        { x: 420, y: 120, w: 30, h: 140 },
-        { x: 120, y: 310, w: 80, h: 30 },
-    ]
-    targets: Target[] = [
-        { x: 530, y: 30, w: 40, h: 40, hit: false },
-        { x: 30, y: 30, w: 40, h: 40, hit: false },
-        { x: 520, y: 330, w: 40, h: 40, hit: false },
-    ]
+    obstacles: Rect[] = DEFAULT_OBSTACLES.map(o => ({ ...o }))
+    targets: Target[] = DEFAULT_TARGETS.map(t => ({ ...t }))
     won = false
     shootCooldown = 0
     snapshots: Snapshot[] = []
@@ -78,8 +137,140 @@ export class Sim {
 
     lastMoveReturnedDistance = 0
 
-    constructor() {
+    constructor(options?: SimOptions) {
+        if (options?.randomizedStage) {
+            const base = options.seed ?? (Date.now() ^ (Math.floor(Math.random() * 0x7fffffff) << 16))
+            let placed = false
+            for (let k = 0; k < 220; k++) {
+                if (this.tryRandomLayout((base + k * 0x9e3779b9) >>> 0)) {
+                    placed = true
+                    break
+                }
+            }
+            if (!placed) {
+                this.applyDefaultLayout()
+            }
+        }
         this.pushSnapshot()
+    }
+
+    private applyDefaultLayout() {
+        this.obstacles = DEFAULT_OBSTACLES.map(o => ({ ...o }))
+        this.targets = DEFAULT_TARGETS.map(t => ({ ...t, hit: false }))
+        this.bot = { ...DEFAULT_BOT }
+    }
+
+    private resetTransientForNewLayout() {
+        this.tick = 0
+        this.snapshots = []
+        this.won = false
+        this.discs = []
+        this.shootCooldown = 0
+        this.currentScanRays = undefined
+        this.moveActive = false
+        this.pendingMoveRemaining = 0
+        this.pendingMoveMoved = 0
+        this.rotateActive = false
+        this.pendingRotateRemaining = 0
+        this.pendingScanTicks = 0
+        this.pendingScanHits = null
+        this.shootActive = false
+        this.shootPhase = null
+        this.lastMoveReturnedDistance = 0
+    }
+
+    /** Returns true if layout was applied; false to try another seed. */
+    private tryRandomLayout(seed: number): boolean {
+        const rng = mulberry32(seed)
+        const wm = LAYOUT_WALL_MARGIN
+        const g = LAYOUT_MIN_GAP
+        const bc = LAYOUT_BOT_CLEARANCE
+
+        this.resetTransientForNewLayout()
+        this.applyDefaultLayout()
+
+        const targets: Target[] = []
+        for (let ti = 0; ti < 3; ti++) {
+            let added = false
+            for (let attempt = 0; attempt < 70; attempt++) {
+                const r: Rect = {
+                    x: wm + rng() * (ARENA_W - 2 * wm - TARGET_W),
+                    y: wm + rng() * (ARENA_H - 2 * wm - TARGET_H),
+                    w: TARGET_W,
+                    h: TARGET_H,
+                }
+                if (!rectFitsArenaInset(r, wm)) continue
+                let ok = true
+                for (const o of targets) {
+                    if (!rectsSeparatedByGap(r, o, g)) {
+                        ok = false
+                        break
+                    }
+                }
+                if (ok) {
+                    targets.push({ ...r, hit: false })
+                    added = true
+                    break
+                }
+            }
+            if (!added) return false
+        }
+
+        const obstacles: Rect[] = []
+        for (let oi = 0; oi < 4; oi++) {
+            let added = false
+            for (let attempt = 0; attempt < 90; attempt++) {
+                const rw = 48 + Math.floor(rng() * 78)
+                const rh = 22 + Math.floor(rng() * 48)
+                const r: Rect = {
+                    x: wm + rng() * Math.max(0.1, ARENA_W - 2 * wm - rw),
+                    y: wm + rng() * Math.max(0.1, ARENA_H - 2 * wm - rh),
+                    w: rw,
+                    h: rh,
+                }
+                if (!rectFitsArenaInset(r, wm)) continue
+                let ok = true
+                for (const t of targets) {
+                    if (!rectsSeparatedByGap(r, t, g)) {
+                        ok = false
+                        break
+                    }
+                }
+                for (const o of obstacles) {
+                    if (!rectsSeparatedByGap(r, o, g)) {
+                        ok = false
+                        break
+                    }
+                }
+                if (ok) {
+                    obstacles.push(r)
+                    added = true
+                    break
+                }
+            }
+            if (!added) return false
+        }
+
+        const allRects = [...targets, ...obstacles]
+        let botCandidate: Bot | null = null
+        for (let attempt = 0; attempt < 120; attempt++) {
+            const bx = BOT_R + wm + rng() * (ARENA_W - 2 * (BOT_R + wm))
+            const by = BOT_R + wm + rng() * (ARENA_H - 2 * (BOT_R + wm))
+            if (!botCenterClearOfRects(bx, by, allRects, bc)) continue
+            botCandidate = {
+                x: bx,
+                y: by,
+                r: BOT_R,
+                heading: -Math.PI / 2 + (rng() - 0.5) * 0.6,
+            }
+            break
+        }
+        if (!botCandidate) return false
+
+        this.targets = targets
+        this.obstacles = obstacles
+        this.bot = botCandidate
+        return true
     }
 
     private pushSnapshot() {
@@ -331,16 +522,6 @@ export class Sim {
         hits.sort((a, b) => a.distance - b.distance)
         return hits
     }
-}
-
-function rectHitsCircle(r: Rect, cx: number, cy: number, cr: number): boolean {
-    const nx = Math.max(r.x, Math.min(cx, r.x + r.w))
-    const ny = Math.max(r.y, Math.min(cy, r.y + r.h))
-    const dx = cx - nx, dy = cy - ny
-    return dx * dx + dy * dy <= cr * cr
-}
-function circleHitsRect(cx: number, cy: number, cr: number, r: Rect): boolean {
-    return rectHitsCircle(r, cx, cy, cr)
 }
 
 function rayAabb(ox: number, oy: number, dx: number, dy: number, x0: number, y0: number, x1: number, y1: number, interior: boolean): number | null {
