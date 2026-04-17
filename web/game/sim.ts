@@ -137,6 +137,11 @@ export class Sim {
 
     lastMoveReturnedDistance = 0
 
+    /** Bot center positions (sampled) for path visualization. */
+    botPath: { x: number; y: number }[] = []
+
+    private static readonly BOT_PATH_MIN_DIST_SQ = 3 * 3
+
     constructor(options?: SimOptions) {
         if (options?.randomizedStage) {
             const base = options.seed ?? (Date.now() ^ (Math.floor(Math.random() * 0x7fffffff) << 16))
@@ -151,6 +156,7 @@ export class Sim {
                 this.applyDefaultLayout()
             }
         }
+        this.seedBotPath()
         this.pushSnapshot()
     }
 
@@ -177,6 +183,18 @@ export class Sim {
         this.shootActive = false
         this.shootPhase = null
         this.lastMoveReturnedDistance = 0
+        this.botPath = []
+    }
+
+    private seedBotPath() {
+        this.botPath = [{ x: this.bot.x, y: this.bot.y }]
+    }
+
+    private appendBotPathPoint(x: number, y: number) {
+        const last = this.botPath[this.botPath.length - 1]
+        if (!last || (x - last.x) ** 2 + (y - last.y) ** 2 >= Sim.BOT_PATH_MIN_DIST_SQ) {
+            this.botPath.push({ x, y })
+        }
     }
 
     /** Returns true if layout was applied; false to try another seed. */
@@ -397,6 +415,7 @@ export class Sim {
         if (!blocked) {
             this.bot.x = nx
             this.bot.y = ny
+            this.appendBotPathPoint(nx, ny)
         }
         return blocked
     }

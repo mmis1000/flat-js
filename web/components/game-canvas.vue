@@ -59,6 +59,20 @@ export default Vue.extend({
 
             if (!snap) return
 
+            const path = sim.botPath
+            if (path.length >= 2) {
+                ctx.strokeStyle = 'rgba(105, 153, 255, 0.5)'
+                ctx.lineWidth = 2
+                ctx.lineJoin = 'round'
+                ctx.lineCap = 'round'
+                ctx.beginPath()
+                ctx.moveTo(path[0].x, path[0].y)
+                for (let i = 1; i < path.length; i++) {
+                    ctx.lineTo(path[i].x, path[i].y)
+                }
+                ctx.stroke()
+            }
+
             if (snap.scanRays) {
                 ctx.strokeStyle = 'rgba(255,255,0,0.3)'
                 ctx.lineWidth = 1
