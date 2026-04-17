@@ -130,7 +130,10 @@ import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
 import { Sim, TICKS_PER_SECOND, BOT_MOVE_PER_TICK, BOT_ROTATE_DEG_PER_TICK, SHOOT_COOLDOWN_TICKS, SCAN_TICKS_PER_RAY } from './game/sim'
-import { resetVmMathRandom, vmMathRedirects } from './vm-deterministic-math'
+import { resetVmMathRandom } from './vm-deterministic-math'
+import { createVmHostRedirects, getForEachPolyfillCompiled } from './vm-host-redirects'
+
+const vmForEachProgram = getForEachPolyfillCompiled(compile).forEachProgram
 
 type State = 'play' | 'paused' | 'idle'
 
@@ -400,6 +403,8 @@ export default Vue.extend({
             scoreHistory: [] as number[],
             execution: null as ReturnType<typeof getExecution> | null,
             program: [] as number[],
+            /** Last `createVmHostRedirects` map (Math.random + forEach); used by REPL `run`. */
+            vmHostRedirects: null as WeakMap<Function, Function> | null,
         })()
     },
     computed: {
@@ -435,6 +440,45 @@ export default Vue.extend({
                 }
             }
         },
+        /** `Fields.ptr` indexes the active frame's `programSection`; user code and host polyfills use different program buffers and source maps. */
+        getSourceMapAtPtr(execution: ReturnType<typeof getExecution> | null): [number, number, number, number] | undefined {
+            if (!execution) {
+                return undefined
+            }
+            const stack = execution[Fields.stack]
+            if (!stack.length) {
+                return undefined
+            }
+            const top = stack[stack.length - 1]
+            const prog = top[Fields.programSection]
+            const ptr = execution[Fields.ptr]
+            if (prog === this.program) {
+                return this.debugInfo.sourceMap[ptr]
+            }
+            if (prog === vmForEachProgram) {
+                return undefined
+            }
+            return undefined
+        },
+        getInternalsAtPtr(execution: ReturnType<typeof getExecution> | null): boolean {
+            if (!execution) {
+                return false
+            }
+            const stack = execution[Fields.stack]
+            if (!stack.length) {
+                return false
+            }
+            const top = stack[stack.length - 1]
+            const prog = top[Fields.programSection]
+            const ptr = execution[Fields.ptr]
+            if (prog === this.program) {
+                return !!this.debugInfo.internals[ptr]
+            }
+            if (prog === vmForEachProgram) {
+                return true
+            }
+            return false
+        },
         cancelDebugHighlightRaf() {
             if (this.highlightRafId) {
                 cancelAnimationFrame(this.highlightRafId)
@@ -446,6 +490,7 @@ export default Vue.extend({
             this.execution = null
             this.program = []
             this.debugInfo = { sourceMap: [], internals: [] }
+            this.vmHostRedirects = null
             this.stackContainer = { stack: [] as Stack }
             this.highlights = []
         },
@@ -460,7 +505,7 @@ export default Vue.extend({
                 this.highlightRafId = 0
                 const execution = this.execution
                 if (!execution || this.state === 'idle') return
-                const pos = this.debugInfo.sourceMap[execution[Fields.ptr]]
+                const pos = this.getSourceMapAtPtr(execution)
                 if (pos) {
                     const [r1, c1, r2, c2] = pos
                     this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
@@ -474,7 +519,7 @@ export default Vue.extend({
             this.cancelDebugHighlightRaf()
             const execution = this.execution
             if (!execution) return
-            const pos = this.debugInfo.sourceMap[execution[Fields.ptr]]
+            const pos = this.getSourceMapAtPtr(execution)
             if (pos) {
                 const [r1, c1, r2, c2] = pos
                 this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
@@ -498,11 +543,10 @@ export default Vue.extend({
 
             try {
                 const getPos = () => {
-                    const currentPosition = execution[Fields.ptr]
-                    return this.debugInfo.sourceMap[currentPosition]
+                    return this.getSourceMapAtPtr(execution)
                 }
 
-                const originalPos = getPos().join(',')
+                const originalPos = getPos()?.join(',') ?? ''
                 const getCurrentStackLength = () => execution[Fields.stack].filter(it => it[Fields.type] === FrameType.Function).length
                 let maxStack = getCurrentStackLength()
                 let skipping = false
@@ -525,8 +569,8 @@ export default Vue.extend({
                     maxStack = Math.min(maxStack, getCurrentStackLength())
                 } while (
                     (
-                        getPos().join(',') === originalPos ||
-                        this.debugInfo.internals[execution[Fields.ptr]] ||
+                        (getPos()?.join(',') ?? '') === originalPos ||
+                        this.getInternalsAtPtr(execution) ||
                         skipping
                     )
                     && !result[Fields.done]
@@ -569,11 +613,10 @@ export default Vue.extend({
             let result: Result = { [Fields.done]: false } as any
 
             const getPos = () => {
-                const currentPosition = execution[Fields.ptr]
-                return this.debugInfo.sourceMap[currentPosition]
+                return this.getSourceMapAtPtr(execution)
             }
 
-            let prevPos = getPos().join(',')
+            let prevPos = getPos()?.join(',') ?? ''
             const TICK_MS = 1000 / TICKS_PER_SECOND
             // Browsers clamp setTimeout to ~4ms; below that, batch multiple sim ticks per wake.
             const MIN_TIMER_MS = 4
@@ -629,8 +672,8 @@ export default Vue.extend({
                             break
                         }
                         guardSteps++
-                        const posKey = getPos().join(',')
-                        if (posKey !== prevPos && !this.debugInfo.internals[execution[Fields.ptr]]) {
+                        const posKey = getPos()?.join(',') ?? ''
+                        if (posKey !== prevPos && !this.getInternalsAtPtr(execution)) {
                             prevPos = posKey
                             highlightChanged = true
                             this.scheduleDebugHighlight()
@@ -705,6 +748,8 @@ export default Vue.extend({
 
             this.debugInfo = debugInfo
             this.program = programData
+            const hostRedirects = createVmHostRedirects(compile, () => () => this.pause(), fakeGlobalThis)
+            this.vmHostRedirects = hostRedirects.redirects
             this.execution = getExecution(
                 programData,
                 textData,
@@ -715,7 +760,7 @@ export default Vue.extend({
                 [],
                 () => () => this.pause(),
                 compile,
-                vmMathRedirects
+                hostRedirects.redirects
             )
             return true
         },
@@ -767,7 +812,19 @@ export default Vue.extend({
                     this.result += '(no VM)\n'
                     return
                 }
-                const result = run(programData, textData, 0, fakeGlobalThis, [...ex[Fields.scopes]], undefined, [], compile, vmMathRedirects)
+                const redirects = this.vmHostRedirects ?? new WeakMap<Function, Function>()
+                const result = run(
+                    programData,
+                    textData,
+                    0,
+                    fakeGlobalThis,
+                    [...ex[Fields.scopes]],
+                    undefined,
+                    [],
+                    compile,
+                    redirects,
+                    () => () => this.pause()
+                )
                 this.result += result + '\n'
             } catch (err) {
                 this.printError(err)

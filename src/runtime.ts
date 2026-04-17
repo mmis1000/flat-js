@@ -634,7 +634,12 @@ const getExecution = (
             textData,
             0,
             getCurrentFrame()[Fields.globalThis],
-            includesLocalScope ? [...getCurrentFrame()[Fields.scopes]] : []
+            includesLocalScope ? [...getCurrentFrame()[Fields.scopes]] : [],
+            undefined,
+            [],
+            compileFunction,
+            functionRedirects,
+            getDebugFunction
         )
 
         return result
@@ -1419,35 +1424,36 @@ const getExecution = (
                         self = envOrRecord
                     }
 
+                    const fnTarget = functionRedirects.has(fn) ? functionRedirects.get(fn) : fn
+
                     if (fn === BIND) {
                         const bound = bindInternal(self, parameters[0], parameters.slice(1))
                         pushCurrentFrameStack(bound)
                     } else if (
-                        !functionDescriptors.has(fn) || 
-                        isAsyncType(functionDescriptors.get(fn)![Fields.type])
+                        !functionDescriptors.has(fnTarget) ||
+                        isAsyncType(functionDescriptors.get(fnTarget)![Fields.type])
                     ) {
                         // extern or async wrapper
-                        if (typeof fn !== 'function') {
+                        if (typeof fnTarget !== 'function') {
                             if (command === OpCode.Call || command === OpCode.CallAsEval) {
                                 throw new TypeError(`(intermediate value).${name} is not a function`)
                             } else /* if (command === OpCode.CallValue) */ {
                                 throw new TypeError(`(intermediate value) is not a function`)
                             }
                         } else {
-                            const fnToCall = functionRedirects.has(fn) ? functionRedirects.get(fn) : fn
-                            if (fnToCall === EVAL_FUNCTION) {
+                            if (fnTarget === EVAL_FUNCTION) {
                                 if (command === OpCode.CallAsEval) {
                                     pushCurrentFrameStack(emulateEval(String(parameters[0]), true))
                                 } else {
                                     pushCurrentFrameStack(emulateEval(String(parameters[0]), false))
                                 }
                             } else {
-                                const state: GeneratorState | undefined = generatorStates.get(fnToCall)
+                                const state: GeneratorState | undefined = generatorStates.get(fnTarget)
                                 if (state) {
                                     const val = parameters[0]
 
                                     if (state.completed) {
-                                        if (fnToCall === state.gen.throw) {
+                                        if (fnTarget === state.gen.throw) {
                                             throw val
                                         }
                                         pushCurrentFrameStack({ value: undefined, done: true })
@@ -1457,12 +1463,12 @@ const getExecution = (
                                     // Initial-state: .throw completes immediately with the error,
                                     // .return completes immediately with { value, done: true }.
                                     if (!state.started) {
-                                        if (fnToCall === state.gen.throw) {
+                                        if (fnTarget === state.gen.throw) {
                                             state.completed = true
                                             state.stack = []
                                             throw val
                                         }
-                                        if (fnToCall === state.gen.return) {
+                                        if (fnTarget === state.gen.return) {
                                             state.completed = true
                                             state.stack = []
                                             pushCurrentFrameStack({ value: val, done: true })
@@ -1471,9 +1477,9 @@ const getExecution = (
                                     }
 
                                     // Determine which method was called and set pending action accordingly.
-                                    if (fnToCall === state.gen.throw) {
+                                    if (fnTarget === state.gen.throw) {
                                         state.pendingAction = { type: 'throw', value: val }
-                                    } else if (fnToCall === state.gen.return) {
+                                    } else if (fnTarget === state.gen.return) {
                                         state.pendingAction = { type: 'return', value: val }
                                     } else {
                                         state.pendingAction = null
@@ -1499,12 +1505,12 @@ const getExecution = (
                                     currentTextData = peak(stack)[Fields.textSection]
                                     return { [Fields.done]: false }
                                 } else {
-                                    pushCurrentFrameStack(Reflect.apply(fnToCall, self, parameters))
+                                    pushCurrentFrameStack(Reflect.apply(fnTarget, self, parameters))
                                 }
                             }
                         }
-                    } else if (isGeneratorType(functionDescriptors.get(fn)![Fields.type])) {
-                        const des = functionDescriptors.get(fn)!
+                    } else if (isGeneratorType(functionDescriptors.get(fnTarget)![Fields.type])) {
+                        const des = functionDescriptors.get(fnTarget)!
                         const iterator = createGeneratorFromExecution(
                             des[Fields.programSection],
                             des[Fields.textSection],
@@ -1513,7 +1519,7 @@ const getExecution = (
                             [...des[Fields.scopes]],
                             {
                                 [Fields.type]: InvokeType.Apply,
-                                [Fields.function]: fn,
+                                [Fields.function]: fnTarget,
                                 [Fields.name]: des[Fields.name],
                                 [Fields.self]: self
                             },
@@ -1521,14 +1527,14 @@ const getExecution = (
                         )
                         pushCurrentFrameStack(iterator)
                     } else {
-                        const des = functionDescriptors.get(fn)!
+                        const des = functionDescriptors.get(fnTarget)!
                         const newFrame: Frame = {
                             [Fields.type]: FrameType.Function,
                             [Fields.scopes]: [...des[Fields.scopes]],
                             [Fields.return]: ptr,
                             [Fields.valueStack]: [
                                 self,
-                                fn,
+                                fnTarget,
                                 des[Fields.name],
                                 InvokeType.Apply,
                                 ...parameters,
@@ -2021,11 +2027,7 @@ const getExecution = (
                     const debugFn = getDebugFunction()
 
                     if (debugFn) {
-                        if (debug) {
-                            debugFn()
-                        } else {
-                            console.warn('Custom debug function did not work when called from native function')
-                        }
+                        debugFn()
                     } else {
                         debugger
                     }
@@ -2449,9 +2451,9 @@ const run = (
     self: undefined = undefined,
     args: any[] = [],
     compileFunction: typeof import('./compiler').compile | undefined = undefined,
-    functionRedirects: WeakMap<Function, Function> = new WeakMap()
+    functionRedirects: WeakMap<Function, Function> = new WeakMap(),
+    getDebugFunction: () => null | (() => void) = () => null
 ) => {
-    // The debug function is always null because it did not work in one shot
     return run_(
         program,
         textData,
@@ -2465,7 +2467,7 @@ const run = (
             [Fields.self]: self
         },
         args,
-        () => null,
+        getDebugFunction,
         true,
         compileFunction,
         functionRedirects
