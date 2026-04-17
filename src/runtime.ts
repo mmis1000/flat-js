@@ -213,6 +213,43 @@ const isResultDone = (r: Result): r is ResultDone => r[Fields.done] === true
 const isIteratorYieldDone = (x: unknown): x is { value: unknown, done: boolean } =>
     x !== null && typeof x === 'object' && 'value' in x && 'done' in x
 
+/** ECMA-262 GetIterator / IteratorRecord: @@iterator must be present and callable; result must be an object with a callable next. */
+const getIterator = (iterable: unknown) => {
+    if (iterable == null) {
+        throw new TypeError('Cannot convert undefined or null to object')
+    }
+    const method = (iterable as any)[Symbol.iterator]
+    if (typeof method !== 'function') {
+        throw new TypeError('object is not iterable')
+    }
+    const iterator = method.call(iterable)
+    if (iterator == null || typeof iterator !== 'object') {
+        throw new TypeError('iterator must be an object')
+    }
+    return iterator
+}
+
+const iteratorNext = (iterator: { next: unknown }, value?: unknown) => {
+    const next = iterator.next
+    if (typeof next !== 'function') {
+        throw new TypeError('iterator must have next method')
+    }
+    const result = value === undefined ? next.call(iterator) : next.call(iterator, value)
+    if (result == null || typeof result !== 'object') {
+        throw new TypeError('iterator result must be an object')
+    }
+    return result
+}
+
+const iteratorComplete = (result: { done?: unknown }) => Boolean(result.done)
+
+const assertIteratorResult = (result: unknown) => {
+    if (result == null || typeof result !== 'object') {
+        throw new TypeError('iterator result must be an object')
+    }
+    return result
+}
+
 type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
     has (value: Frame): boolean
     has (value: any): value is Frame
@@ -1851,6 +1888,23 @@ const getExecution = (
                 case OpCode.ArrayLiteral:
                     pushCurrentFrameStack([])
                     break
+                case OpCode.ArraySpread: {
+                    const iterable = popCurrentFrameStack()
+                    const arr = popCurrentFrameStack<any[]>()
+                    if (!Array.isArray(arr)) {
+                        throw new TypeError('ArraySpread expects an array')
+                    }
+                    const iterator = getIterator(iterable)
+                    while (true) {
+                        const result = iteratorNext(iterator)
+                        if (iteratorComplete(result)) {
+                            break
+                        }
+                        arr.push(result.value)
+                    }
+                    pushCurrentFrameStack(arr)
+                }
+                    break
                 case OpCode.ObjectLiteral:
                     pushCurrentFrameStack({})
                     break
@@ -2326,9 +2380,7 @@ const getExecution = (
 
                     if (!delegate) {
                         const iterable = popCurrentFrameStack<any>()
-                        iter = (iterable as any)[Symbol.iterator]
-                            ? (iterable as any)[Symbol.iterator]()
-                            : iterable
+                        iter = getIterator(iterable)
                         delegate = { iter, phase: 0 }
                         frame[Fields.delegate] = delegate
                         sentVal = undefined
@@ -2401,32 +2453,32 @@ const getExecution = (
                         return { [Fields.done]: false }
                     }
 
-                    // Host iterator
-                    let result: any
+                    // Host iterator (ES6 Iterator interface: next/throw/return return IteratorResult objects)
+                    let result: { done?: unknown, value?: unknown }
                     if (mode === 'throw') {
                         if (!iter.throw) {
                             if (iter.return) { try { iter.return() } catch (_) {} }
                             frame[Fields.delegate] = null
                             throw sentVal
                         }
-                        result = iter.throw(sentVal)
+                        result = assertIteratorResult(iter.throw(sentVal))
                     } else if (mode === 'return') {
                         if (!iter.return) {
                             frame[Fields.delegate] = null
                             executeReturn(sentVal)
                             break command
                         }
-                        result = iter.return(sentVal)
-                        if (result.done) {
+                        result = assertIteratorResult(iter.return(sentVal))
+                        if (iteratorComplete(result)) {
                             frame[Fields.delegate] = null
                             executeReturn(result.value)
                             break command
                         }
                     } else {
-                        result = iter.next(sentVal)
+                        result = iteratorNext(iter, sentVal)
                     }
 
-                    if (result.done) {
+                    if (iteratorComplete(result)) {
                         frame[Fields.delegate] = null
                         pushCurrentFrameStack(result.value)
                         break command

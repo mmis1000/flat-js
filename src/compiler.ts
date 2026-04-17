@@ -607,6 +607,12 @@ export const enum OpCode {
     Await,
 
     SuperCall,
+
+    /**
+     * Pops iterable then array; appends all values from `[Symbol.iterator]()`; pushes array.
+     * Stack (bottom to top): array, iterable
+     */
+    ArraySpread,
 }
 
 export const enum ResolveType {
@@ -1453,13 +1459,27 @@ function generateSegment(
                 op(OpCode.ArrayLiteral)
             ]
             const list = node.elements
-            for (let [index, el] of list.entries()) {
-                if (ts.isSpreadElement(el)) {
-                    throw new Error('no spread support yet')
+            let nextIndex = 0
+            let postSpread = false
+            for (const el of list) {
+                if (el.kind === ts.SyntaxKind.OmittedExpression) {
+                    nextIndex++
+                    continue
                 }
-
-                if (el.kind !== ts.SyntaxKind.OmittedExpression) {
-                    res.push(op(OpCode.Literal, 2, [index]))
+                if (ts.isSpreadElement(el)) {
+                    res.push(...generate(el.expression, flag))
+                    res.push(op(OpCode.ArraySpread))
+                    postSpread = true
+                    continue
+                }
+                if (postSpread) {
+                    res.push(op(OpCode.Duplicate))
+                    res.push(op(OpCode.Literal, 2, ['length']))
+                    res.push(op(OpCode.Get))
+                    res.push(...generate(el, flag))
+                    res.push(op(OpCode.SetKeepCtx))
+                } else {
+                    res.push(op(OpCode.Literal, 2, [nextIndex++]))
                     res.push(...generate(el, flag))
                     res.push(op(OpCode.SetKeepCtx))
                 }
