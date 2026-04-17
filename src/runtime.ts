@@ -205,6 +205,14 @@ export type ResultAwait = {
 
 export type Result = ResultStep | ResultDone | ResultYield | ResultAwait
 
+const isResultYield = (r: Result): r is ResultYield =>
+    r[Fields.done] === false && r[Fields.yield] === true
+
+const isResultDone = (r: Result): r is ResultDone => r[Fields.done] === true
+
+const isIteratorYieldDone = (x: unknown): x is { value: unknown, done: boolean } =>
+    x !== null && typeof x === 'object' && 'value' in x && 'done' in x
+
 type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
     has (value: Frame): boolean
     has (value: any): value is Frame
@@ -256,7 +264,8 @@ type GeneratorState = {
     started: boolean,
     pendingAction: null | { type: 'throw' | 'return', value: any },
     baseFrame: Frame | null,
-    gen: any
+    gen: any,
+    execution: Execution
 }
 const generatorStates = new WeakMap<any, GeneratorState>()
 
@@ -390,6 +399,17 @@ const getExecution = (
         return res as ResultDone | ResultAwait
     }
 
+    const runUntilYieldOrDone = (execution: Execution): Result => {
+        let res: Result
+        do {
+            res = execution[Fields.step]()
+            if (!res[Fields.done] && res[Fields.await]) {
+                throw new Error('Unhandled async suspension in generator')
+            }
+        } while (!res[Fields.done] && !res[Fields.yield])
+        return res
+    }
+
     const createGeneratorFromExecution = (
         pr: number[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
@@ -406,27 +426,82 @@ const getExecution = (
             started: false,
             pendingAction: null,
             baseFrame: baseFrames[0],
-            gen: null
+            gen: null,
+            execution: scratchExecution
         }
 
         for (const f of baseFrames) {
             f[Fields.generator] = state
         }
 
+        const runHost = (
+            method: 'next' | 'throw' | 'return',
+            val?: unknown
+        ): IteratorResult<unknown> => {
+            const exec = state.execution
+            const stk = exec[Fields.stack]
+
+            if (!state.started) {
+                if (method === 'throw') {
+                    state.completed = true
+                    state.stack = []
+                    throw val
+                }
+                if (method === 'return') {
+                    state.completed = true
+                    state.stack = []
+                    return { value: val, done: true }
+                }
+            }
+
+            if (method === 'throw') {
+                state.pendingAction = { type: 'throw', value: val }
+            } else if (method === 'return') {
+                state.pendingAction = { type: 'return', value: val }
+            } else {
+                state.pendingAction = null
+            }
+
+            stk.length = 0
+            stk.push(...state.stack)
+            exec[Fields.ptr] = state.ptr
+
+            const wasStarted = state.started
+            state.started = true
+
+            if (wasStarted && method === 'next') {
+                exec[Fields.pushValue](val)
+            }
+
+            const res = runUntilYieldOrDone(exec)
+
+            if (isResultYield(res)) {
+                return { value: res[Fields.value], done: false }
+            }
+            if (isResultDone(res)) {
+                state.completed = true
+                state.stack = []
+                const out = res[Fields.value]
+                if (isIteratorYieldDone(out)) {
+                    return { value: out.value, done: out.done }
+                }
+                return { value: out, done: true }
+            }
+            return { value: undefined, done: true }
+        }
+
         const gen: any = {
             next(_value?: unknown): IteratorResult<unknown> {
                 if (state.completed) return { value: undefined, done: true }
-                throw new Error('Host-side generator iteration is not supported; call from within the VM')
+                return runHost('next', _value)
             },
             throw(error?: unknown): IteratorResult<unknown> {
                 if (state.completed) throw error
-                throw new Error('Host-side generator iteration is not supported; call from within the VM')
+                return runHost('throw', error)
             },
             return(value?: unknown): IteratorResult<unknown> {
                 if (state.completed) return { value, done: true }
-                state.completed = true
-                state.stack = []
-                return { value, done: true }
+                return runHost('return', value)
             },
             [Symbol.iterator]() { return gen }
         }
@@ -681,6 +756,9 @@ const getExecution = (
     }
 
     const step = (debug: boolean = false): Result => {
+        if (stack.length > 0) {
+            currentProgram = peak(stack)[Fields.programSection]
+        }
         if (ptr >= currentProgram.length) {
              return { [Fields.done]: true, [Fields.value]: undefined, [Fields.evalResult]: undefined }
         }
