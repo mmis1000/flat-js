@@ -9,24 +9,30 @@ const TEXT_DADA_MASK = 0x80000000
 const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
 }
+// MUST SYNC WITH COMPILER literalPoolWordMask
+const literalPoolWordMask = (i: number): number => {
+    const x = (i * 0x9e3779b9 | 0) ^ (i >>> 1) ^ (i << 3)
+    return (x ^ (x >>> 15) ^ (x << 15)) | 0
+}
 
 const decodeLiteralFromProgram = (program: number[], pos: number): any => {
-    const label = program[pos]
-    const length = program[pos + 1]
+    const label = (program[pos] ^ literalPoolWordMask(pos)) | 0
+    const length = (program[pos + 1] ^ literalPoolWordMask(pos + 1)) | 0
     if (label === LiteralPoolKind.Boolean) {
-        return program[pos + 2] !== 0
+        return ((program[pos + 2] ^ literalPoolWordMask(pos + 2)) | 0) !== 0
     }
     if (label === LiteralPoolKind.Number) {
         const buf = new ArrayBuffer(8)
         const u = new Uint32Array(buf)
-        u[0] = program[pos + 2]
-        u[1] = program[pos + 3]
+        u[0] = (program[pos + 2] ^ literalPoolWordMask(pos + 2)) >>> 0
+        u[1] = (program[pos + 3] ^ literalPoolWordMask(pos + 3)) >>> 0
         return new Float64Array(buf)[0]
     }
     if (label === LiteralPoolKind.String) {
         let s = ''
         for (let i = 0; i < length; i++) {
-            s += String.fromCharCode(program[pos + 2 + i] & 0xffff)
+            const w = (program[pos + 2 + i] ^ literalPoolWordMask(pos + 2 + i)) | 0
+            s += String.fromCharCode(w & 0xffff)
         }
         return s
     }
@@ -36,7 +42,7 @@ const decodeLiteralFromProgram = (program: number[], pos: number): any => {
 /** Pool entry starts at `pos` (`label` word). Same buffer shares one map so literals decode once per program. */
 const literalPoolCache = new WeakMap<number[], Map<number, any>>()
 
-function getLiteralFromPool(program: number[], pos: number): any {
+const getLiteralFromPool = (program: number[], pos: number): any => {
     let byPos = literalPoolCache.get(program)
     if (!byPos) {
         byPos = new Map()

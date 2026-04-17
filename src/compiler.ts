@@ -12,6 +12,12 @@ export const enum LiteralPoolKind {
     String = 3,
 }
 
+/** XOR mask for each pool word at absolute program index `i` (position-dependent). MUST SYNC with runtime `literalPoolWordMask`. */
+function literalPoolWordMask(i: number): number {
+    const x = (i * 0x9e3779b9 | 0) ^ (i >>> 1) ^ (i << 3)
+    return (x ^ (x >>> 15) ^ (x << 15)) | 0
+}
+
 export const enum SpecialVariable {
     This = '[this]',
     SwitchValue = '[switch]',
@@ -2819,7 +2825,9 @@ function finalizeLiteralPool(programData: number[], literalValues: any[]) {
     for (let s = 0; s < literalValues.length; s++) {
         slotPositions[s] = cursor
         const enc = encodeLiteralPoolWords(literalValues[s])
-        poolWords.push(...enc)
+        for (let j = 0; j < enc.length; j++) {
+            poolWords.push((enc[j] ^ literalPoolWordMask(cursor + j)) | 0)
+        }
         cursor += enc.length
     }
     for (let i = 0; i < codeLen - 1; i++) {
