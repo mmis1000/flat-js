@@ -2964,7 +2964,29 @@ export type CompileOptions = {
 
 export type DebugInfo = {
     sourceMap: [number, number, number, number][],
-    internals: boolean[]
+    internals: boolean[],
+    /** Byte length of executable code (words before literal pool tail). */
+    codeLength: number
+}
+
+/**
+ * Walks encoded program words `[0, codeLength)` and returns distinct opcode values present
+ * (including {@link OpCode.Literal} where a literal opcode word appears).
+ */
+export function collectUsedOpcodes(programData: number[], codeLength: number): number[] {
+    const used = new Set<number>()
+    let i = 0
+    while (i < codeLength) {
+        const w = programData[i]
+        if (w === OpCode.Literal) {
+            used.add(OpCode.Literal)
+            i += 2
+        } else {
+            used.add(w)
+            i += 1
+        }
+    }
+    return Array.from(used)
 }
 
 export function compile(src: string,  { debug = false, range = false, evalMode = false }: CompileOptions = {}): [number[], DebugInfo] {
@@ -3088,7 +3110,9 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
 
     generateData(flattened, functionToSegment, programData, literalValues)
 
+    const codeLength = programData.length
+
     finalizeLiteralPool(programData, literalValues)
 
-    return [programData, { sourceMap, internals }]
+    return [programData, { sourceMap, internals, codeLength }]
 }

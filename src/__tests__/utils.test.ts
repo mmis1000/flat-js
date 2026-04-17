@@ -1,4 +1,11 @@
+import { compile, collectUsedOpcodes } from '../compiler'
 import { compileAndRun } from '../index'
+
+test('collectUsedOpcodes: codeLength excludes literal pool tail when present', () => {
+    const [programData, info] = compile('"x".repeat(3)')
+    expect(info.codeLength).toBeLessThanOrEqual(programData.length)
+    expect(collectUsedOpcodes(programData, info.codeLength).length).toBeGreaterThan(0)
+})
 
 test('compileAndRun: ', () => {
     expect(compileAndRun('42')).toBe(42)

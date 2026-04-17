@@ -1,6 +1,7 @@
 import { promises as fs } from "fs"
 import * as path from "path"
-import { compile } from "./compiler"
+import { collectUsedOpcodes, compile } from "./compiler"
+import { stripRuntimeCommandSwitch } from "./strip-runtime-opcodes"
 import * as uglify from 'terser'
 
 const START_FLAG = '// [START_HERE]'
@@ -8,19 +9,58 @@ const END_FLAG = 'exports.run = run;'
 const replaces = [
     ['exports.getExecution = getExecution;', ''] as [string, string]
 ]
-const args = process.argv.slice(2)
 
+const argv = process.argv.slice(2)
 const flags: Record<string, boolean> = {}
+const mergeOpcodePaths: string[] = []
 
-while (args[0] && args[0].startsWith('--')) {
-    flags[args.shift()!] = true
+let i = 0
+while (i < argv.length) {
+    const a = argv[i]
+    if (a === '--merge-opcodes-from') {
+        if (i + 1 >= argv.length) {
+            throw new Error('--merge-opcodes-from requires a path')
+        }
+        mergeOpcodePaths.push(argv[i + 1]!)
+        i += 2
+        continue
+    }
+    if (a!.startsWith('--')) {
+        flags[a!] = true
+        i++
+        continue
+    }
+    break
+}
+
+const filename = argv[i]
+if (!filename) {
+    throw new Error('missing input file')
 }
 
 const debugMode = flags['--debug'] || false
 const JSONMode = flags['--json'] || false
 const binMode = flags['--bin'] || false
 const noMinimize = flags['--pretty'] || false
-const filename = args[0]
+const stripRuntime = flags['--strip-runtime'] || false
+
+async function minifyInput(source: string): Promise<string> {
+    if (noMinimize) {
+        return source
+    }
+    const r = await uglify.minify(source, {
+        compress: {
+            drop_debugger: false,
+        },
+        output: {
+            beautify: debugMode
+        }
+    })
+    if (!r.code) {
+        throw new Error('fail to minimize')
+    }
+    return r.code
+}
 
 async function main () {
     const runtimeFull = await fs.readFile(path.resolve(__dirname, './runtime.js'),{ encoding: 'utf-8' })
@@ -33,14 +73,7 @@ async function main () {
     }
 
     const content = await fs.readFile(filename, { encoding: 'utf-8' })
-    const contentMinimized = noMinimize ? content : (await uglify.minify(content, {
-        compress: {
-            drop_debugger: false,
-        },
-        output: {
-            beautify: debugMode
-        }
-    })).code
+    const contentMinimized = await minifyInput(content)
 
     if (debugMode && !noMinimize) {
         console.error(contentMinimized)
@@ -50,16 +83,30 @@ async function main () {
         throw new Error('fail to minimize')
     }
 
-    const [programDataRaw] = compile(contentMinimized, {
-        debug: debugMode,
-        range: debugMode
-    })
+    const compileOpts = { debug: debugMode, range: debugMode }
+    const [programDataRaw, compileInfo] = compile(contentMinimized, compileOpts)
     const programBytes = Buffer.from(new Uint32Array(programDataRaw).buffer)
     const programData = programBytes.toString('base64')
 
     if (binMode) {
         process.stdout.write(programBytes)
         return
+    }
+
+    if (stripRuntime) {
+        const opcodeSet = new Set(collectUsedOpcodes(programDataRaw, compileInfo.codeLength))
+        for (const extra of mergeOpcodePaths) {
+            const extraSrc = await fs.readFile(extra, { encoding: 'utf-8' })
+            const extraMin = await minifyInput(extraSrc)
+            if (!extraMin) {
+                throw new Error('fail to minimize')
+            }
+            const [extraProg, extraInfo] = compile(extraMin, compileOpts)
+            for (const n of collectUsedOpcodes(extraProg, extraInfo.codeLength)) {
+                opcodeSet.add(n)
+            }
+        }
+        runtime = stripRuntimeCommandSwitch(runtime, opcodeSet)
     }
 
     if (!JSONMode) {

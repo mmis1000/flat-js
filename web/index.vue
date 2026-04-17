@@ -130,6 +130,14 @@ import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
 import { Sim, TICKS_PER_SECOND, BOT_MOVE_PER_TICK, BOT_ROTATE_DEG_PER_TICK, SHOOT_COOLDOWN_TICKS, SCAN_TICKS_PER_RAY } from './game/sim'
+
+function emptyDebugInfo(): DebugInfo {
+    return {
+        sourceMap: [],
+        internals: [],
+        codeLength: 0
+    }
+}
 import { resetVmMathRandom } from './vm-deterministic-math'
 import { createVmHostRedirects, ensureHostPolyfillsCompiled, hostPolyfillProgramSet } from './vm-host-redirects'
 
@@ -388,7 +396,7 @@ export default Vue.extend({
             },
             state: 'idle' as State,
             refreshKey: Math.random(),
-            debugInfo: <DebugInfo>{ sourceMap: [], internals: [] },
+            debugInfo: emptyDebugInfo(),
             highlights: <[number, number, number, number][]>[],
             sim: null as Sim | null,
             /** Coalesce Monaco/debug updates to one paint per frame (avoids freezing at high tick rates). */
@@ -489,7 +497,7 @@ export default Vue.extend({
             this.cancelDebugHighlightRaf()
             this.execution = null
             this.program = []
-            this.debugInfo = { sourceMap: [], internals: [] }
+            this.debugInfo = emptyDebugInfo()
             this.vmHostRedirects = null
             this.stackContainer = { stack: [] as Stack }
             this.highlights = []
