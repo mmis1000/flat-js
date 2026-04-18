@@ -58,6 +58,8 @@ const CALL = Function.prototype.call
 const APPLY = Function.prototype.apply
 const BIND = Function.prototype.bind
 const REGEXP = RegExp
+/** Intrinsic `Function` from this realm; used to detect `Function(...)` / `new Function(...)` like `eval`. */
+const HOST_FUNCTION = Object.getPrototypeOf(function () {}).constructor
 
 export const enum FrameType {
     Function,
@@ -809,6 +811,31 @@ const getExecution = (
         )
 
         return result
+    }
+
+    const emulateFunctionConstructor = (parameterValues: any[]) => {
+        const parameterStrings = parameterValues.map((v) => String(v))
+        if (parameterStrings.length === 0) {
+            parameterStrings.push('')
+        }
+        const body = parameterStrings[parameterStrings.length - 1]
+        const paramNames = parameterStrings.slice(0, -1)
+        const src =
+            paramNames.length === 0
+                ? `(function(){${body}})`
+                : `(function(${paramNames.join(',')}){${body}})`
+        const [programData] = compileFunction(src, { evalMode: true })
+        return run(
+            programData,
+            0,
+            getCurrentFrame()[Fields.globalThis],
+            [],
+            undefined,
+            [],
+            compileFunction,
+            functionRedirects,
+            getDebugFunction
+        )
     }
 
     const step = (debug: boolean = false): Result => {
@@ -1592,6 +1619,7 @@ const getExecution = (
                     }
 
                     const fnTarget = functionRedirects.has(fn) ? functionRedirects.get(fn) : fn
+                    const vmGlobal = getCurrentFrame()[Fields.globalThis]
 
                     if (fn === BIND) {
                         const bound = bindInternal(self, parameters[0], parameters.slice(1))
@@ -1614,6 +1642,11 @@ const getExecution = (
                                 } else {
                                     pushCurrentFrameStack(emulateEval(String(parameters[0]), false))
                                 }
+                            } else if (
+                                typeof fnTarget === 'function' &&
+                                (fnTarget === Reflect.get(vmGlobal, 'Function') || fnTarget === HOST_FUNCTION)
+                            ) {
+                                pushCurrentFrameStack(emulateFunctionConstructor(parameters))
                             } else {
                                 const state: GeneratorState | undefined = generatorStates.get(fnTarget)
                                 if (state) {
@@ -1783,8 +1816,16 @@ const getExecution = (
                     }
 
                     if (!functionDescriptors.has(fn)) {
-                        // extern
-                        pushCurrentFrameStack(Reflect.construct(fn, parameters, fn))
+                        const vmGlobal = getCurrentFrame()[Fields.globalThis]
+                        if (
+                            typeof fn === 'function' &&
+                            (fn === Reflect.get(vmGlobal, 'Function') || fn === HOST_FUNCTION)
+                        ) {
+                            pushCurrentFrameStack(emulateFunctionConstructor(parameters))
+                        } else {
+                            // extern
+                            pushCurrentFrameStack(Reflect.construct(fn, parameters, fn))
+                        }
                     } else {
                         const des = functionDescriptors.get(fn)!
                         const newFrame: Frame = {
