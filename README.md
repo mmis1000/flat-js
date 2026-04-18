@@ -11,7 +11,7 @@ JavaScript bytecode compiler and interpreter: it compiles JS source to a flat op
 3. Optionally ship bytecode + tiny runtime instead of full source.
 4. Experiment with debuggers: stepping, source maps, and a browser UI.
 
-![Example debugger](./example.jpg)
+![Example debugger](./example.png)
 
 ---
 
