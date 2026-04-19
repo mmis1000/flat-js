@@ -1,5 +1,23 @@
 <template>
-    <div class="app" :class="{ running: state !== 'idle' }">
+    <div
+        class="app"
+        :class="{ running: state !== 'idle' }"
+        :data-mobile-top="mobileTopTab"
+        :data-mobile-bottom="mobileBottomTab"
+    >
+        <div class="mobile-tab-bar mobile-tab-bar-top">
+            <button
+                type="button"
+                :class="{ active: mobileTopTab === 'code' }"
+                @click="mobileTopTab = 'code'"
+            >Code</button>
+            <button
+                type="button"
+                :class="{ active: mobileTopTab === 'debug' }"
+                :disabled="state === 'idle'"
+                @click="mobileTopTab = 'debug'"
+            >Debug</button>
+        </div>
         <div v-show="state !== 'idle'" class="area-debug pane">
             <div class="pane-title">
                 debug
@@ -47,7 +65,19 @@
                 <button v-if="state === 'play'" class="run-button" @click="stop">Kill</button>
             </div>
         </div>
-        <div class="area-result">
+        <div class="mobile-tab-bar mobile-tab-bar-bottom">
+            <button
+                type="button"
+                :class="{ active: mobileBottomTab === 'game' }"
+                @click="mobileBottomTab = 'game'"
+            >Game</button>
+            <button
+                type="button"
+                :class="{ active: mobileBottomTab === 'output' }"
+                @click="mobileBottomTab = 'output'"
+            >Output</button>
+        </div>
+        <div class="area-game pane">
             <div class="pane-title game-pane-title">
                 <span>Game</span>
                 <div class="game-pane-controls">
@@ -102,20 +132,20 @@
             <div class="game-pane">
                 <game-canvas :sim="sim" />
             </div>
-            <div class="output-stack">
-                <div ref="result" class="result-pane">
-                    <div class="output-header">Output</div>
-                    <pre class="result">{{ result }}</pre>
-                </div>
-                <input
-                    v-if="state === 'paused'"
-                    class="pane-footer repl"
-                    v-model="replText"
-                    @keydown.enter="runRepl"
-                    type="text"
-                    placeholder="Code here..."
-                >
+        </div>
+        <div class="area-output pane">
+            <div ref="result" class="result-pane">
+                <div class="output-header">Output</div>
+                <pre class="result">{{ result }}</pre>
             </div>
+            <input
+                v-if="state === 'paused'"
+                class="pane-footer repl"
+                v-model="replText"
+                @keydown.enter="runRepl"
+                type="text"
+                placeholder="Code here..."
+            >
         </div>
     </div>
 </template>
@@ -413,6 +443,8 @@ export default Vue.extend({
             program: [] as number[],
             /** Last `createVmHostRedirects` map (Math.random + forEach); used by REPL `run`. */
             vmHostRedirects: null as WeakMap<Function, Function> | null,
+            mobileTopTab: 'code' as 'code' | 'debug',
+            mobileBottomTab: 'game' as 'game' | 'output',
         })()
     },
     computed: {
@@ -427,6 +459,11 @@ export default Vue.extend({
         },
     },
     watch: {
+        state (val: State) {
+            if (val === 'idle' && this.mobileTopTab === 'debug') {
+                this.mobileTopTab = 'code'
+            }
+        },
         async result () {
             const container = this.$refs.result as HTMLDivElement
             await this.$nextTick()
@@ -868,15 +905,19 @@ pre {
     max-width: 100%;
     min-width: 0;
     display: grid;
-    /* Code left (wide), game + output right column (tall, fixed max width) */
-    grid-template-areas: "code result";
+    /* Code left (wide), game on top-right, output on bottom-right */
+    grid-template-areas:
+        "code game"
+        "code output";
     grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr);
 }
 .app.running {
-    grid-template-areas: "debug code result";
+    grid-template-areas:
+        "debug code game"
+        "debug code output";
     grid-template-columns: minmax(0, 400px) minmax(0, 1fr) minmax(280px, 400px);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr);
 }
 .area-debug {
     grid-area: debug;
@@ -889,6 +930,20 @@ pre {
 .area-code {
     grid-area: code;
     min-width: 0;
+}
+.area-game {
+    grid-area: game;
+    min-width: 0;
+    min-height: 0;
+    border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+}
+.area-output {
+    grid-area: output;
+    min-width: 0;
+    min-height: 0;
+}
+.mobile-tab-bar {
+    display: none;
 }
 .code-pane-title {
     display: flex;
@@ -930,21 +985,6 @@ pre {
     width: 1px;
     background: rgba(255, 255, 255, 0.5);
 }
-.area-result {
-    grid-area: result;
-    min-width: 0;
-    min-height: 0;
-    display: grid;
-    /* Game gets a bit more vertical space than output */
-    grid-template-rows: auto minmax(0, 1.15fr) minmax(0, 1fr);
-}
-.output-stack {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-}
-
 .pane {
     display: flex;
     flex-direction: column;
@@ -1063,6 +1103,7 @@ pre {
     overflow: hidden;
 }
 .game-pane {
+    flex: 1 1 0;
     min-height: 0;
     min-width: 0;
     padding: 8px;
@@ -1071,7 +1112,6 @@ pre {
     justify-content: center;
     align-items: center;
     background: #000;
-    border-bottom: 1px solid rgba(127, 127, 127, 0.5);
     overflow: hidden;
 }
 .result {
@@ -1097,5 +1137,66 @@ pre {
 }
 .repl::placeholder {
     color: #777;
+}
+
+@media (max-width: 1100px) {
+    .app,
+    .app.running {
+        grid-template-areas:
+            "tabtop"
+            "top"
+            "tabbot"
+            "bottom";
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 1fr);
+    }
+    .mobile-tab-bar {
+        display: flex;
+        background: #1a1a1a;
+        border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+    }
+    .mobile-tab-bar-top {
+        grid-area: tabtop;
+    }
+    .mobile-tab-bar-bottom {
+        grid-area: tabbot;
+        border-top: 1px solid rgba(127, 127, 127, 0.5);
+    }
+    .mobile-tab-bar button {
+        flex: 1 1 0;
+        border: 0;
+        background: transparent;
+        color: #bbb;
+        padding: 0.75em 1em;
+        font: inherit;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+    }
+    .mobile-tab-bar button.active {
+        color: #fff;
+        border-bottom-color: #9cf;
+    }
+    .mobile-tab-bar button:disabled {
+        opacity: 0.4;
+        cursor: default;
+    }
+    .area-debug,
+    .area-code {
+        grid-area: top;
+        border-right: 0;
+    }
+    .area-game,
+    .area-output {
+        grid-area: bottom;
+        border-bottom: 0;
+    }
+    .app[data-mobile-top="code"] .area-debug,
+    .app[data-mobile-top="debug"] .area-code {
+        display: none;
+    }
+    .app[data-mobile-bottom="game"] .area-output,
+    .app[data-mobile-bottom="output"] .area-game {
+        display: none;
+    }
 }
 </style>
