@@ -29,12 +29,36 @@
   <script lang="ts">
   import { defineComponent, ref, computed, onMounted, onBeforeUnmount, PropType } from 'vue'
   import * as THREE from 'three'
-  import { Sim } from '../game/sim'
+  import { Sim, BOT_R, DISC_R } from '../game/sim'
   
   // 為了嚴格型別，將所需的結構定義在這邊，避免引發 any 警告
   type Rect = { x: number, y: number, w: number, h: number }
   type Target = Rect & { hit: boolean }
   type Disc = { x: number, y: number, vx: number, vy: number, r: number, alive: boolean }
+
+  /** Rounded rect in XY; half-extents include corner radius (matches obstacle ⊕ disk for bot center). */
+  function createRoundedRectShape(halfW: number, halfH: number, cornerR: number) {
+    const shape = new THREE.Shape()
+    const r = Math.min(cornerR, halfW, halfH)
+    if (r <= 0 || halfW <= 0 || halfH <= 0) {
+      shape.moveTo(-halfW, -halfH)
+      shape.lineTo(halfW, -halfH)
+      shape.lineTo(halfW, halfH)
+      shape.lineTo(-halfW, halfH)
+      shape.lineTo(-halfW, -halfH)
+      return shape
+    }
+    shape.moveTo(-halfW + r, -halfH)
+    shape.lineTo(halfW - r, -halfH)
+    shape.absarc(halfW - r, -halfH + r, r, -Math.PI / 2, 0, false)
+    shape.lineTo(halfW, halfH - r)
+    shape.absarc(halfW - r, halfH - r, r, 0, Math.PI / 2, false)
+    shape.lineTo(-halfW + r, halfH)
+    shape.absarc(-halfW + r, halfH - r, r, Math.PI / 2, Math.PI, false)
+    shape.lineTo(-halfW, -halfH + r)
+    shape.absarc(-halfW + r, -halfH + r, r, Math.PI, Math.PI * 1.5, false)
+    return shape
+  }
   
   // 定義競技場尺寸，與 sim.ts 保持一致
   const ARENA_W = 600
@@ -72,8 +96,12 @@
       const wallGroup = new THREE.Group()
       const targetGroup = new THREE.Group()
       const discGroup = new THREE.Group()
+      const obstacleClearanceGroup = new THREE.Group()
       let currentWallCount = -1
       let instancedWalls: THREE.InstancedMesh | null = null
+      let lastObstacleClearanceKey = ''
+      let botFootprintMesh: THREE.Mesh
+      let arenaBoundsLine: THREE.Line
   
       // 共用幾何體與材質
       // 牆壁基底為 1x1x1，藉由 scale 調整成任意矩形大小
@@ -101,6 +129,28 @@
         emissive: 0xcc5500,
         emissiveIntensity: 0.8,
         roughness: 0.2
+      })
+
+      const botFootprintGeo = new THREE.CircleGeometry(1, 48)
+      const botFootprintMat = new THREE.MeshBasicMaterial({
+        color: 0x44ddff,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
+      })
+      const obstacleClearanceMat = new THREE.MeshBasicMaterial({
+        color: 0xff6644,
+        transparent: true,
+        opacity: 0.18,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -2
       })
   
       let animationFrameId: number
@@ -145,6 +195,28 @@
         scene.add(wallGroup)
         scene.add(targetGroup)
         scene.add(discGroup)
+        scene.add(obstacleClearanceGroup)
+
+        botFootprintMesh = new THREE.Mesh(botFootprintGeo, botFootprintMat)
+        botFootprintMesh.rotation.x = -Math.PI / 2
+        botFootprintMesh.position.y = 0.12
+        botFootprintMesh.renderOrder = 2
+        scene.add(botFootprintMesh)
+
+        const br = BOT_R
+        const boundsPts = [
+          new THREE.Vector3(br, 0.1, br),
+          new THREE.Vector3(ARENA_W - br, 0.1, br),
+          new THREE.Vector3(ARENA_W - br, 0.1, ARENA_H - br),
+          new THREE.Vector3(br, 0.1, ARENA_H - br),
+          new THREE.Vector3(br, 0.1, br)
+        ]
+        arenaBoundsLine = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(boundsPts),
+          new THREE.LineBasicMaterial({ color: 0x88ff88, transparent: true, opacity: 0.5, depthWrite: false })
+        )
+        arenaBoundsLine.renderOrder = 1
+        scene.add(arenaBoundsLine)
   
         resizeObserver = new ResizeObserver((entries) => {
           for (const entry of entries) {
@@ -168,18 +240,44 @@
   
         // --- 1. 更新玩家視角 ---
         const bot = sim.bot
-        const eyeHeight = bot.r // 高度根據機器人半徑 (BOT_R = 15) 設定
-        
-        camera.position.set(bot.x, eyeHeight, bot.y)
-        playerLight.position.set(bot.x, eyeHeight + 5, bot.y)
-  
+        // Lower than bot.r so the forward view includes floor-level discs (meshes at y ≈ DISC_R).
+        const cameraEyeY = bot.r * 0.48
+        const lookAtY = DISC_R
+        const targetFloatY = bot.r
+
+        camera.position.set(bot.x, cameraEyeY, bot.y)
+        playerLight.position.set(bot.x, cameraEyeY + 4, bot.y)
+
         const dirX = Math.cos(bot.heading)
         const dirZ = Math.sin(bot.heading)
-        // 目標點設在遠方
-        camera.lookAt(bot.x + dirX * 100, eyeHeight, bot.y + dirZ * 100)
+        camera.lookAt(bot.x + dirX * 100, lookAtY, bot.y + dirZ * 100)
+
+        // --- Bot collision footprint + obstacle “no center” zones (same radii as sim tryBotMoveStep) ---
+        const br = bot.r
+        botFootprintMesh.position.set(bot.x, 0.12, bot.y)
+        botFootprintMesh.scale.set(br, br, 1)
+
+        const obstacles = sim.obstacles || []
+        const obsKey = `${obstacles.map(o => `${o.x}|${o.y}|${o.w}|${o.h}`).join(';')}#${br}`
+        if (obsKey !== lastObstacleClearanceKey) {
+          lastObstacleClearanceKey = obsKey
+          while (obstacleClearanceGroup.children.length > 0) {
+            const m = obstacleClearanceGroup.children[0] as THREE.Mesh
+            m.geometry.dispose()
+            obstacleClearanceGroup.remove(m)
+          }
+          for (const o of obstacles) {
+            const hw = o.w / 2 + br
+            const hh = o.h / 2 + br
+            const geo = new THREE.ShapeGeometry(createRoundedRectShape(hw, hh, br))
+            const mesh = new THREE.Mesh(geo, obstacleClearanceMat)
+            mesh.rotation.x = -Math.PI / 2
+            mesh.position.set(o.x + o.w / 2, 0.08, o.y + o.h / 2)
+            obstacleClearanceGroup.add(mesh)
+          }
+        }
   
         // --- 2. 渲染障礙物 (obstacles) 與邊界牆 ---
-        const obstacles = sim.obstacles || []
         
         // 動態產生四個邊界牆壁的 Rect
         const borderThickness = 20
@@ -224,7 +322,7 @@
             mesh.visible = true
             const t: Target = activeTargets[i]
             // 把目標放在方塊正中央浮空
-            mesh.position.set(t.x + t.w / 2, eyeHeight, t.y + t.h / 2)
+            mesh.position.set(t.x + t.w / 2, targetFloatY, t.y + t.h / 2)
             mesh.rotation.y += 0.03
             mesh.rotation.x += 0.02
           } else {
@@ -359,6 +457,11 @@
         if (resizeObserver && container.value) {
           resizeObserver.unobserve(container.value)
         }
+        while (obstacleClearanceGroup.children.length > 0) {
+          const m = obstacleClearanceGroup.children[0] as THREE.Mesh
+          m.geometry.dispose()
+          obstacleClearanceGroup.remove(m)
+        }
         if (renderer) renderer.dispose()
         wallGeo.dispose()
         wallMat.dispose()
@@ -366,6 +469,11 @@
         targetMat.dispose()
         discGeo.dispose()
         discMat.dispose()
+        botFootprintGeo.dispose()
+        botFootprintMat.dispose()
+        obstacleClearanceMat.dispose()
+        arenaBoundsLine.geometry.dispose()
+        ;(arenaBoundsLine.material as THREE.Material).dispose()
       })
   
       return {
