@@ -282,13 +282,16 @@ const CODE_SNIPPETS: CodeSnippet[] = [
 //                    type: 'wall' | 'obstacle' | 'target' | 'disc'
 //   won()            true once a disc has hit the green target
 // Win by hitting the green target with a disc.
+// Note: scan rays only see line-of-sight; the disc can still clip obstacles off-center,
+// so after shooting we strafe sideways to break "aim OK but disc always blocked" loops.
 
 clear()
 
 let unstuck = 0
 
 while (!won()) {
-  const rays = 17
+  // Fewer rays => shorter scan (fewer world ticks per loop); 9 is enough for ~11° steps on the arc.
+  const rays = 9
   const sweep = scan(rays)
 
   // Find a ray whose FIRST hit is the target (nothing in the way).
@@ -303,11 +306,11 @@ while (!won()) {
 
   if (bestIdx >= 0) {
     unstuck = 0
-    const t = bestIdx / (sweep.length - 1)
+    const t = bestIdx / (rays - 1)
     const deg = -45 + t * 90
     rotate(deg)
     shoot()
-    print('shot at ' + deg.toFixed(1) + 'deg, dist ' + bestDist.toFixed(0))
+    // Side-step: same LOS as scan can still mean a blocked disc path; strafe for a new firing point.
     if (Math.random() > 0.5) {
       move(5)
       rotate(90)
@@ -320,21 +323,17 @@ while (!won()) {
       rotate(90)
     }
   } else {
-    const want = 20
+    const want = 24
     if (unstuck !== 0) {
       move(want)
-      const res = lastMoveDistance()
-      print('lastMoveDistance: ' + res + ' want: ' + want)
-      if (res >= want - 0.5) {
+      if (lastMoveDistance() >= want - 0.5) {
         unstuck = 0
       } else {
         rotate(unstuck)
       }
     } else {
       move(want)
-      const res = lastMoveDistance()
-      print('lastMoveDistance: ' + res + ' want: ' + want)
-      if (res < want - 0.5) {
+      if (lastMoveDistance() < want - 0.5) {
         unstuck = -90 + Math.random() * 180
         rotate(unstuck)
       }
