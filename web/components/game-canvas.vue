@@ -30,6 +30,10 @@
   type Target = Rect & { hit: boolean }
   type Disc = { x: number, y: number, vx: number, vy: number, r: number, alive: boolean }
   
+  // 定義競技場尺寸，與 sim.ts 保持一致
+  const ARENA_W = 600
+  const ARENA_H = 400
+  
   export default defineComponent({
     name: 'GameCanvas',
     props: {
@@ -116,16 +120,16 @@
         scene.add(playerLight)
   
         // ARENA_W = 600, ARENA_H = 400，以此建立地板
-        const floorGeo = new THREE.PlaneGeometry(600, 400)
+        const floorGeo = new THREE.PlaneGeometry(ARENA_W, ARENA_H)
         const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111 })
         const floor = new THREE.Mesh(floorGeo, floorMat)
         floor.rotation.x = -Math.PI / 2
-        floor.position.set(300, 0, 200) // 原點在左上角，因此中心在 (300, 0, 200)
+        floor.position.set(ARENA_W / 2, 0, ARENA_H / 2) // 原點在左上角，因此中心在 (300, 0, 200)
         scene.add(floor)
   
         // 網格線輔助
-        const gridHelper = new THREE.GridHelper(600, 60, 0x004466, 0x001122)
-        gridHelper.position.set(300, 0.1, 200)
+        const gridHelper = new THREE.GridHelper(Math.max(ARENA_W, ARENA_H), 60, 0x004466, 0x001122)
+        gridHelper.position.set(ARENA_W / 2, 0.1, ARENA_H / 2)
         scene.add(gridHelper)
   
         scene.add(wallGroup)
@@ -160,17 +164,29 @@
         // 目標點設在遠方
         camera.lookAt(bot.x + dirX * 100, eyeHeight, bot.y + dirZ * 100)
   
-        // --- 2. 渲染障礙物 (obstacles) ---
+        // --- 2. 渲染障礙物 (obstacles) 與邊界牆 ---
         const obstacles = sim.obstacles || []
-        if (obstacles.length !== currentWallCount) {
+        
+        // 動態產生四個邊界牆壁的 Rect
+        const borderThickness = 20
+        const borderWalls: Rect[] = [
+          { x: -borderThickness, y: -borderThickness, w: ARENA_W + borderThickness * 2, h: borderThickness }, // 上
+          { x: -borderThickness, y: ARENA_H, w: ARENA_W + borderThickness * 2, h: borderThickness }, // 下
+          { x: -borderThickness, y: 0, w: borderThickness, h: ARENA_H }, // 左
+          { x: ARENA_W, y: 0, w: borderThickness, h: ARENA_H } // 右
+        ]
+  
+        const allWalls = [...obstacles, ...borderWalls]
+  
+        if (allWalls.length !== currentWallCount) {
           wallGroup.clear()
           if (instancedWalls) instancedWalls.dispose()
           
-          if (obstacles.length > 0) {
-            instancedWalls = new THREE.InstancedMesh(wallGeo, wallMat, obstacles.length)
+          if (allWalls.length > 0) {
+            instancedWalls = new THREE.InstancedMesh(wallGeo, wallMat, allWalls.length)
             const dummy = new THREE.Object3D()
             
-            obstacles.forEach((obs: Rect, i: number) => {
+            allWalls.forEach((obs: Rect, i: number) => {
               // 牆壁大小依據 Rect，高度固定為 40
               dummy.scale.set(obs.w, 40, obs.h)
               // 將牆壁中心點放置正確 (原點 x,y 加上寬高的半徑)
@@ -181,7 +197,7 @@
             instancedWalls.instanceMatrix.needsUpdate = true
             wallGroup.add(instancedWalls)
           }
-          currentWallCount = obstacles.length
+          currentWallCount = allWalls.length
         }
   
         // --- 3. 渲染未被擊中的目標 (targets) ---
@@ -238,7 +254,7 @@
         ctx.strokeRect(0, 0, width, height)
   
         // ARENA_W = 600, 縮放到 width = 150 (比例為 0.25)
-        const scale = width / 600
+        const scale = width / ARENA_W
         
         // 繪製掃描雷射 (如果有)
         if (sim.currentScanRays) {
@@ -252,7 +268,7 @@
           ctx.stroke()
         }
   
-        // 障礙物
+        // 障礙物 (小地圖不包含邊界牆)
         ctx.fillStyle = 'rgba(0, 150, 255, 0.8)'
         for (const obs of (sim.obstacles || [])) {
             ctx.fillRect(obs.x * scale, obs.y * scale, obs.w * scale, obs.h * scale)
@@ -274,6 +290,21 @@
             ctx.arc(disc.x * scale, disc.y * scale, Math.max(1, disc.r * scale), 0, Math.PI * 2)
             ctx.fill()
           }
+        }
+  
+        // 玩家軌跡 (Bot Path)
+        const path = sim.botPath
+        if (path && path.length >= 2) {
+            ctx.strokeStyle = 'rgba(105, 153, 255, 0.5)'
+            ctx.lineWidth = 2
+            ctx.lineJoin = 'round'
+            ctx.lineCap = 'round'
+            ctx.beginPath()
+            ctx.moveTo(path[0].x * scale, path[0].y * scale)
+            for (let i = 1; i < path.length; i++) {
+                ctx.lineTo(path[i].x * scale, path[i].y * scale)
+            }
+            ctx.stroke()
         }
   
         // 玩家
