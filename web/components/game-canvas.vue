@@ -97,8 +97,9 @@
       const targetGroup = new THREE.Group()
       const discGroup = new THREE.Group()
       const obstacleClearanceGroup = new THREE.Group()
-      let currentWallCount = -1
       let instancedWalls: THREE.InstancedMesh | null = null
+      /** Serialized obstacle rects; length alone is wrong for random layouts with a fixed count. */
+      let lastObstacleWallKey = ''
       let lastObstacleClearanceKey = ''
       let botFootprintMesh: THREE.Mesh
       let arenaBoundsLine: THREE.Line
@@ -258,7 +259,8 @@
         botFootprintMesh.scale.set(br, br, 1)
 
         const obstacles = sim.obstacles || []
-        const obsKey = `${obstacles.map(o => `${o.x}|${o.y}|${o.w}|${o.h}`).join(';')}#${br}`
+        const obstacleGeomKey = obstacles.map(o => `${o.x}|${o.y}|${o.w}|${o.h}`).join(';')
+        const obsKey = `${obstacleGeomKey}#${br}`
         if (obsKey !== lastObstacleClearanceKey) {
           lastObstacleClearanceKey = obsKey
           while (obstacleClearanceGroup.children.length > 0) {
@@ -289,19 +291,19 @@
         ]
   
         const allWalls = [...obstacles, ...borderWalls]
-  
-        if (allWalls.length !== currentWallCount) {
+
+        if (obstacleGeomKey !== lastObstacleWallKey) {
+          lastObstacleWallKey = obstacleGeomKey
           wallGroup.clear()
           if (instancedWalls) instancedWalls.dispose()
-          
+          instancedWalls = null
+
           if (allWalls.length > 0) {
             instancedWalls = new THREE.InstancedMesh(wallGeo, wallMat, allWalls.length)
             const dummy = new THREE.Object3D()
-            
+
             allWalls.forEach((obs: Rect, i: number) => {
-              // 牆壁大小依據 Rect，高度固定為 40
               dummy.scale.set(obs.w, 40, obs.h)
-              // 將牆壁中心點放置正確 (原點 x,y 加上寬高的半徑)
               dummy.position.set(obs.x + obs.w / 2, 0, obs.y + obs.h / 2)
               dummy.updateMatrix()
               instancedWalls!.setMatrixAt(i, dummy.matrix)
@@ -309,7 +311,6 @@
             instancedWalls.instanceMatrix.needsUpdate = true
             wallGroup.add(instancedWalls)
           }
-          currentWallCount = allWalls.length
         }
   
         // --- 3. 渲染未被擊中的目標 (targets) ---
