@@ -14,6 +14,15 @@ export type Snapshot = {
     scanRays?: { x1: number, y1: number, x2: number, y2: number }[]
 }
 
+type WorldJob =
+    | { type: 'move', signedDist: number }
+    | { type: 'rotate', rad: number }
+    | { type: 'shoot' }
+
+export type VmBarrierState =
+    | { kind: 'scan', phase: 'drain' | 'timing' | 'ready', rays: number, result?: ScanHit[][] }
+    | { kind: 'lastMoveDist', phase: 'drain' | 'ready' }
+
 // The only knob for "compute expensiveness". Higher = more code statements
 // execute per world-action in the same wallclock time. All per-tick costs
 // below are derived so that action wallclock duration stays constant.
@@ -122,6 +131,8 @@ export class Sim {
     lastSnapshot: Snapshot | null = null
     currentScanRays?: Snapshot['scanRays']
 
+    private worldQueue: WorldJob[] = []
+
     private pendingMoveRemaining = 0
     private pendingMoveMoved = 0
     private moveActive = false
@@ -136,6 +147,9 @@ export class Sim {
     private shootPhase: 'cooldown' | 'fire_next' | 'postfire' | null = null
 
     lastMoveReturnedDistance = 0
+
+    /** VM read barrier: host wait* arms it; only `advanceOneTick` advances phases. */
+    vmBarrier: VmBarrierState | null = null
 
     /** Bot center positions (sampled) for path visualization. */
     botPath: { x: number; y: number }[] = []
@@ -184,6 +198,8 @@ export class Sim {
         this.shootPhase = null
         this.lastMoveReturnedDistance = 0
         this.botPath = []
+        this.worldQueue = []
+        this.vmBarrier = null
     }
 
     private seedBotPath() {
@@ -318,25 +334,86 @@ export class Sim {
         return this.shootActive
     }
 
-    /** True while a bot API still has world ticks to consume before the VM may run again. */
-    isBotVmBlocking() {
-        return this.isMovePending() || this.isRotatePending() || this.isScanPending() || this.isShootPending()
+    /** True when no move/rotate/shoot segment is active and the FIFO is empty. */
+    isWorldActionIdle() {
+        return !this.moveActive && !this.rotateActive && !this.shootActive && this.worldQueue.length === 0
     }
 
-    beginMove(signedDist: number) {
+    /**
+     * True while the VM must not advance user bytecode: barrier is armed but not yet ready for get*Result.
+     * Only `advanceOneTick` should change barrier phase.
+     */
+    vmBarrierBlocksExecution() {
+        const b = this.vmBarrier
+        if (!b) return false
+        if (b.kind === 'scan') return b.phase !== 'ready'
+        return b.phase !== 'ready'
+    }
+
+    private startMoveJob(signedDist: number) {
         this.moveActive = true
         this.pendingMoveRemaining = signedDist
         this.pendingMoveMoved = 0
         this.lastMoveReturnedDistance = 0
     }
 
-    beginRotateRadians(rad: number) {
+    private startRotateJob(rad: number) {
         this.rotateActive = true
         this.pendingRotateRemaining = rad
     }
 
-    /** Raycast + visualization; scan duration ticks counted in advanceOneTick until cleared. */
-    prepareScan(rays: number): ScanHit[][] {
+    private startShootJob() {
+        this.shootActive = true
+        this.shootPhase = this.shootCooldown > 0 ? 'cooldown' : 'fire_next'
+    }
+
+    private tryStartNextWorldJob() {
+        if (this.moveActive || this.rotateActive || this.shootActive) return
+        while (this.worldQueue.length > 0) {
+            const job = this.worldQueue.shift()!
+            if (job.type === 'move') {
+                if (Math.abs(job.signedDist) < 1e-9) continue
+                this.startMoveJob(job.signedDist)
+                return
+            }
+            if (job.type === 'rotate') {
+                if (Math.abs(job.rad) < 1e-12) continue
+                this.startRotateJob(job.rad)
+                return
+            }
+            this.startShootJob()
+            return
+        }
+    }
+
+    beginMove(signedDist: number) {
+        if (Math.abs(signedDist) < 1e-9) return
+        if (this.isWorldActionIdle()) {
+            this.startMoveJob(signedDist)
+        } else {
+            this.worldQueue.push({ type: 'move', signedDist })
+        }
+    }
+
+    beginRotateRadians(rad: number) {
+        if (Math.abs(rad) < 1e-12) return
+        if (this.isWorldActionIdle()) {
+            this.startRotateJob(rad)
+        } else {
+            this.worldQueue.push({ type: 'rotate', rad })
+        }
+    }
+
+    beginShoot() {
+        if (this.isWorldActionIdle()) {
+            this.startShootJob()
+        } else {
+            this.worldQueue.push({ type: 'shoot' })
+        }
+    }
+
+    /** Start raycast + visualization + scan tick countdown (call only from barrier after world drain). */
+    private prepareScanInternal(rays: number): ScanHit[][] {
         rays = Math.max(1, Math.min(90, Math.floor(rays)))
         const result: ScanHit[][] = []
         const half = Math.PI / 4
@@ -360,9 +437,51 @@ export class Sim {
         return result
     }
 
-    beginShoot() {
-        this.shootActive = true
-        this.shootPhase = this.shootCooldown > 0 ? 'cooldown' : 'fire_next'
+    armScanBarrier(rays: number) {
+        if (this.vmBarrier != null) {
+            throw new Error('VM read barrier already active')
+        }
+        if (this.pendingScanTicks > 0) {
+            throw new Error('Scan already in progress')
+        }
+        rays = Math.max(1, Math.min(90, Math.floor(rays)))
+        this.vmBarrier = { kind: 'scan', phase: 'drain', rays }
+    }
+
+    armLastMoveDistanceBarrier() {
+        if (this.vmBarrier != null) {
+            throw new Error('VM read barrier already active')
+        }
+        this.vmBarrier = { kind: 'lastMoveDist', phase: 'drain' }
+    }
+
+    deliverScanResult(cb: (res: ScanHit[][]) => void) {
+        const b = this.vmBarrier
+        if (!b || b.kind !== 'scan' || b.phase !== 'ready' || b.result === undefined) {
+            throw new Error('scan result not ready')
+        }
+        cb(b.result)
+        this.vmBarrier = null
+    }
+
+    deliverLastMoveDistanceResult(cb: (d: number) => void) {
+        const b = this.vmBarrier
+        if (!b || b.kind !== 'lastMoveDist' || b.phase !== 'ready') {
+            throw new Error('lastMoveDistance not ready')
+        }
+        cb(this.lastMoveReturnedDistance)
+        this.vmBarrier = null
+    }
+
+    private processVmBarrierBeforeScanStep() {
+        const b = this.vmBarrier
+        if (!b) return
+        if (b.kind === 'scan' && b.phase === 'drain' && this.isWorldActionIdle()) {
+            this.prepareScanInternal(b.rays)
+            this.vmBarrier = { kind: 'scan', phase: 'timing', rays: b.rays }
+        } else if (b.kind === 'lastMoveDist' && b.phase === 'drain' && this.isWorldActionIdle()) {
+            this.vmBarrier = { kind: 'lastMoveDist', phase: 'ready' }
+        }
     }
 
     /** One world tick: pending bot work, then discs. */
@@ -373,6 +492,7 @@ export class Sim {
         this.stepPendingShoot()
         this.stepPendingRotate()
         this.stepPendingMove()
+        this.processVmBarrierBeforeScanStep()
         this.stepPendingScan()
 
         for (const d of this.discs) {
@@ -428,6 +548,7 @@ export class Sim {
             this.moveActive = false
             this.pendingMoveRemaining = 0
             this.pendingMoveMoved = 0
+            this.tryStartNextWorldJob()
             return
         }
         const step = Math.min(BOT_MOVE_PER_TICK, Math.abs(rem))
@@ -440,6 +561,7 @@ export class Sim {
             this.moveActive = false
             this.pendingMoveRemaining = 0
             this.pendingMoveMoved = 0
+            this.tryStartNextWorldJob()
             return
         }
         this.pendingMoveMoved += step
@@ -449,6 +571,7 @@ export class Sim {
             this.moveActive = false
             this.pendingMoveRemaining = 0
             this.pendingMoveMoved = 0
+            this.tryStartNextWorldJob()
         }
     }
 
@@ -458,6 +581,7 @@ export class Sim {
         if (Math.abs(rem) < 1e-12) {
             this.rotateActive = false
             this.pendingRotateRemaining = 0
+            this.tryStartNextWorldJob()
             return
         }
         const step = Math.min(BOT_ROTATE_RAD_PER_TICK, Math.abs(rem))
@@ -467,6 +591,7 @@ export class Sim {
         if (Math.abs(this.pendingRotateRemaining) < 1e-12) {
             this.rotateActive = false
             this.pendingRotateRemaining = 0
+            this.tryStartNextWorldJob()
         }
     }
 
@@ -474,8 +599,16 @@ export class Sim {
         if (this.pendingScanTicks <= 0) return
         this.pendingScanTicks--
         if (this.pendingScanTicks === 0) {
+            const b = this.vmBarrier
+            let serialized: ScanHit[][] | undefined
+            if (b?.kind === 'scan' && b.phase === 'timing' && this.pendingScanHits) {
+                serialized = this.pendingScanHits.map(ray => ray.map(h => ({ distance: h.distance, type: h.type })))
+            }
             this.pendingScanHits = null
             this.clearScanRays()
+            if (serialized && b?.kind === 'scan') {
+                this.vmBarrier = { kind: 'scan', phase: 'ready', rays: b.rays, result: serialized }
+            }
         }
     }
 
@@ -498,6 +631,7 @@ export class Sim {
             if (this.shootCooldown === 0) {
                 this.shootActive = false
                 this.shootPhase = null
+                this.tryStartNextWorldJob()
             }
         }
     }

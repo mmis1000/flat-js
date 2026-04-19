@@ -159,7 +159,7 @@ import GameCanvas from './components/game-canvas.vue'
 import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
-import { Sim, TICKS_PER_SECOND, BOT_MOVE_PER_TICK, BOT_ROTATE_DEG_PER_TICK, SHOOT_COOLDOWN_TICKS, SCAN_TICKS_PER_RAY } from './game/sim'
+import { Sim, TICKS_PER_SECOND } from './game/sim'
 
 function emptyDebugInfo(): DebugInfo {
     return {
@@ -273,10 +273,10 @@ const CODE_SNIPPETS: CodeSnippet[] = [
         label: 'Scan & aim',
         code: `// Robot controls:
 //   rotate(deg)      turn (deg), positive = clockwise
-//   move(distance)   move forward (schedules ticks; use lastMoveDistance() after)
-//   lastMoveDistance()  pixels moved for the last move (less if blocked)
-//   shoot()          fire a disc
-//   scan(rays)       1..90 rays across a 90-deg forward arc
+//   move(distance)   enqueue forward motion (FIFO with rotate/shoot); VM keeps running
+//   lastMoveDistance()  after prior moves finish: pixels moved for last completed segment (less if blocked)
+//   shoot()          enqueue a shot (FIFO)
+//   scan(rays)       1..90 rays across a 90-deg forward arc; waits for queued world actions + scan timing
 //                    returns array of per-ray hit lists (length === rays)
 //                    each hit: { distance, type }
 //                    type: 'wall' | 'obstacle' | 'target' | 'disc'
@@ -323,14 +323,18 @@ while (!won()) {
     const want = 20
     if (unstuck !== 0) {
       move(want)
-      if (lastMoveDistance() >= want - 0.5) {
+      const res = lastMoveDistance()
+      print('lastMoveDistance: ' + res + ' want: ' + want)
+      if (res >= want - 0.5) {
         unstuck = 0
       } else {
         rotate(unstuck)
       }
     } else {
       move(want)
-      if (lastMoveDistance() < want - 0.5) {
+      const res = lastMoveDistance()
+      print('lastMoveDistance: ' + res + ' want: ' + want)
+      if (res < want - 0.5) {
         unstuck = -90 + Math.random() * 180
         rotate(unstuck)
       }
@@ -344,7 +348,8 @@ print('win!')
     {
         id: 'rotate-sweep',
         label: 'Rotate sweep',
-        code: `// Same API as other snippet. Strategy: small turns each loop, fewer rays,
+        code: `// Same API as other snippet (move/rotate/shoot queue in parallel with VM; scan and
+// lastMoveDistance wait for the world). Strategy: small turns each loop, fewer rays,
 // shoot as soon as any ray sees the target first; otherwise creep and turn on block.
 
 clear()
@@ -596,6 +601,7 @@ export default Vue.extend({
                 let maxStack = getCurrentStackLength()
                 let skipping = false
                 let firstIgnored = false
+                const sim = this.sim
 
                 do {
                     result = execution[Fields.step](true)
@@ -619,6 +625,7 @@ export default Vue.extend({
                         skipping
                     )
                     && !result[Fields.done]
+                    && !(sim && sim.vmBarrierBlocksExecution())
                 )
 
                 if (!result[Fields.done]) {
@@ -693,40 +700,45 @@ export default Vue.extend({
                     if (result[Fields.done]) break
 
                     // One timer wake may advance several sim ticks when TICK_MS < MIN_TIMER_MS.
+                    // After each world tick, run VM until debug line changes, read barrier, or guard.
                     let wonThisBatch = false
+                    let highlightChangedBatch = false
                     for (let t = 0; t < ticksPerTimer; t++) {
                         sim.advanceOneTick()
                         if (sim.won) {
                             wonThisBatch = true
                             break
                         }
+
+                        let highlightChanged = false
+                        let guardSteps = 0
+                        while (
+                            <State>this.state === 'play'
+                            && !result[Fields.done]
+                            && !highlightChanged
+                            && !sim.vmBarrierBlocksExecution()
+                        ) {
+                            result = execution[Fields.step](true)
+                            if (sim.vmBarrierBlocksExecution()) {
+                                break
+                            }
+                            guardSteps++
+                            const posKey = getPos()?.join(',') ?? ''
+                            if (posKey !== prevPos && !this.getInternalsAtPtr(execution)) {
+                                prevPos = posKey
+                                highlightChanged = true
+                                highlightChangedBatch = true
+                                this.scheduleDebugHighlight()
+                            }
+                            if (guardSteps > 200000) break
+                        }
                     }
                     if (wonThisBatch) {
                         this.state = 'idle'
                         break
                     }
-                    if (sim.isBotVmBlocking()) {
-                        continue
-                    }
 
-                    let highlightChanged = false
-                    let guardSteps = 0
-                    while (<State>this.state === 'play' && !result[Fields.done] && !highlightChanged) {
-                        result = execution[Fields.step](true)
-                        if (sim.isBotVmBlocking()) {
-                            break
-                        }
-                        guardSteps++
-                        const posKey = getPos()?.join(',') ?? ''
-                        if (posKey !== prevPos && !this.getInternalsAtPtr(execution)) {
-                            prevPos = posKey
-                            highlightChanged = true
-                            this.scheduleDebugHighlight()
-                        }
-                        if (guardSteps > 200000) break
-                    }
-
-                    if (highlightChanged) await waitTick()
+                    if (highlightChangedBatch) await waitTick()
                 }
 
                 if (<State>this.state === 'paused') {
@@ -772,14 +784,20 @@ export default Vue.extend({
                 sim.beginMove(n)
                 return 0
             }
-            const lastMoveDistance = () => sim.lastMoveReturnedDistance
             const shoot = () => {
                 sim.beginShoot()
             }
-            const scan = (rays: number) => {
-                const r = Math.max(1, Math.min(90, Math.floor(Number(rays) || 36)))
-                const hits = sim.prepareScan(r)
-                return hits.map(ray => ray.map(h => ({ distance: h.distance, type: h.type })))
+            const waitForScan = (rays: number) => {
+                sim.armScanBarrier(Number(rays) || 36)
+            }
+            const getScanResult = (cb: (res: { distance: number, type: string }[][]) => void) => {
+                sim.deliverScanResult(cb)
+            }
+            const waitForLastMoveDrain = () => {
+                sim.armLastMoveDistanceBarrier()
+            }
+            const getLastMoveDistanceResult = (cb: (d: number) => void) => {
+                sim.deliverLastMoveDistanceResult(cb)
             }
             const won = () => sim.won
 
@@ -795,6 +813,47 @@ export default Vue.extend({
             this.program = programData
             const hostRedirects = createVmHostRedirects(compile, () => () => this.pause(), fakeGlobalThis)
             this.vmHostRedirects = hostRedirects.redirects
+
+            const [scanPolyProgram] = compile(`function vmScanPoly(rays) {
+  waitForScan(rays)
+  let result
+  getScanResult((res) => { result = res })
+  return result
+}
+vmScanPoly`, { evalMode: true })
+            hostPolyfillProgramSet.add(scanPolyProgram)
+            const scan = run(
+                scanPolyProgram,
+                0,
+                fakeGlobalThis,
+                [{ waitForScan, getScanResult, __proto__: null }],
+                undefined,
+                [],
+                compile,
+                hostRedirects.redirects,
+                () => () => this.pause()
+            )
+
+            const [lastMovePolyProgram] = compile(`function vmLastMovePoly() {
+  waitForLastMoveDrain()
+  let result
+  getLastMoveDistanceResult((res) => { result = res })
+  return result
+}
+vmLastMovePoly`, { evalMode: true })
+            hostPolyfillProgramSet.add(lastMovePolyProgram)
+            const lastMoveDistance = run(
+                lastMovePolyProgram,
+                0,
+                fakeGlobalThis,
+                [{ waitForLastMoveDrain, getLastMoveDistanceResult, __proto__: null }],
+                undefined,
+                [],
+                compile,
+                hostRedirects.redirects,
+                () => () => this.pause()
+            )
+
             this.execution = getExecution(
                 programData,
                 0,

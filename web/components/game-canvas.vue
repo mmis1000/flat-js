@@ -17,6 +17,12 @@
         height="100" 
         class="hud-canvas"
       ></canvas>
+  
+      <!-- 獲勝結算畫面 (WIN Screen) -->
+      <div v-if="isWon" class="win-overlay">
+        <div class="win-title">WIN</div>
+        <div class="win-ticks">{{ tickCount }} ticks</div>
+      </div>
     </div>
   </template>
   
@@ -46,6 +52,10 @@
     setup(props) {
       const container = ref<HTMLDivElement | null>(null)
       const hudCanvas = ref<HTMLCanvasElement | null>(null)
+      
+      // 遊戲狀態與結算
+      const isWon = ref(false)
+      const tickCount = ref(0)
       
       // 判斷 Sim 是否已經準備好 (確保 bot 物件存在)
       const isReady = computed<boolean>(() => {
@@ -124,7 +134,7 @@
         const floorMat = new THREE.MeshStandardMaterial({ color: 0x111111 })
         const floor = new THREE.Mesh(floorGeo, floorMat)
         floor.rotation.x = -Math.PI / 2
-        floor.position.set(ARENA_W / 2, 0, ARENA_H / 2) // 原點在左上角，因此中心在 (300, 0, 200)
+        floor.position.set(ARENA_W / 2, 0, ARENA_H / 2)
         scene.add(floor)
   
         // 網格線輔助
@@ -151,6 +161,10 @@
       const updateScene = () => {
         const sim = props.sim
         if (!sim || !sim.bot) return
+  
+        // --- 同步結算狀態給 Vue 介面 ---
+        isWon.value = sim.won
+        tickCount.value = sim.tick
   
         // --- 1. 更新玩家視角 ---
         const bot = sim.bot
@@ -357,7 +371,9 @@
       return {
         container,
         hudCanvas,
-        isReady
+        isReady,
+        isWon,
+        tickCount
       }
     }
   })
@@ -386,6 +402,7 @@
     right: 15px;
     pointer-events: none; /* 讓滑鼠點擊可以穿透小地圖 */
     border-radius: 4px;
+    z-index: 5;
   }
   
   .loading-overlay {
@@ -415,9 +432,46 @@
     margin-bottom: 20px;
   }
   
+  /* 結算畫面樣式 */
+  .win-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: rgba(0, 0, 0, 0.5); /* 半透明暗背景 */
+    z-index: 20;
+    pointer-events: none; /* 點擊事件穿透 */
+    animation: fadeIn 0.5s ease-out;
+  }
+  
+  .win-title {
+    color: #ffffff;
+    font-size: 48px;
+    font-family: sans-serif;
+    font-weight: bold;
+    text-shadow: 0 0 15px rgba(102, 255, 102, 0.8); /* 綠色發光字體 */
+    margin-bottom: 8px;
+  }
+  
+  .win-ticks {
+    color: #dddddd;
+    font-size: 16px;
+    font-family: sans-serif;
+  }
+  
   @keyframes spin {
     to {
       transform: rotate(360deg);
     }
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
   }
   </style>
