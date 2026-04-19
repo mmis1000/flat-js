@@ -866,13 +866,16 @@ vmLastMovePoly`, { evalMode: true })
             )
             return true
         },
-        async run() {
-            if (!this.setupExecution()) return
-            await this.runExecution()
+        async chainContinuousRuns() {
             while (this.continuousRun && this.state === 'idle') {
                 if (!this.setupExecution()) break
                 await this.runExecution()
             }
+        },
+        async run() {
+            if (!this.setupExecution()) return
+            await this.runExecution()
+            await this.chainContinuousRuns()
         },
         clearRunAverage() {
             this.scoreHistory = []
@@ -885,8 +888,9 @@ vmLastMovePoly`, { evalMode: true })
             this.state = 'paused'
             this.flushDebugHighlightSync()
         },
-        resume() {
-            this.runExecution()
+        async resume() {
+            await this.runExecution()
+            await this.chainContinuousRuns()
         },
         stop() {
             this.continuousRun = false
