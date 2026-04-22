@@ -1099,6 +1099,10 @@ vmLastMovePoly`, { evalMode: true })
 </script>
 
 <style>
+html {
+    --ui-font-family: "Aptos", "Segoe UI Variable", "Segoe UI", "SF Pro Text", "SF Pro Display", "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
+}
+
 body,
 html {
     background: black;
@@ -1110,6 +1114,8 @@ html {
 
 body {
     color: #eee;
+    font-family: var(--ui-font-family);
+    text-rendering: optimizeLegibility;
 }
 pre {
     margin: 0;
