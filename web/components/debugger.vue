@@ -5,7 +5,7 @@
         </div>
         <div class="area">
             <div v-for="scope in scopes" :key="getKey(scope)" :key1="getKey(scope)">
-                <debuggerValue displayKey="Scope" :initialExpand="!isGlobalThis(scope)" :refreshKey="refreshKey + refreshKeyInternal" :value="scope" :forcedProp="true"/>
+                <debuggerValue displayKey="Scope" :initialExpand="!isGlobalThis(scope)" :refreshKey="refreshKey + refreshKeyInternal" :value="scope" :forcedProp="true" :scopeValue="true" :scopeDebugNames="getScopeDebugNames(scope)"/>
             </div>
         </div>
     </div>
@@ -13,7 +13,8 @@
 
 <script lang="ts">
 import Vue from 'vue'
-import { Fields, Scope, Stack } from '../../src/runtime'
+import { DebugInfo } from '../../src/compiler'
+import { Fields, getScopeDebugPtr, Scope, Stack } from '../../src/runtime'
 import DebuggerValue from './debugger-value.vue'
 
 let id = 0
@@ -42,6 +43,17 @@ export default Vue.extend({
         refreshKey: {
             type: Number,
             default: 0
+        },
+        debugInfo: {
+            type: Object as () => DebugInfo,
+            default (): DebugInfo {
+                return {
+                    sourceMap: [],
+                    internals: [],
+                    scopeDebugMap: new Map(),
+                    codeLength: 0
+                }
+            }
         }
     },
     data () {
@@ -58,6 +70,10 @@ export default Vue.extend({
     },
     methods: {
         getKey,
+        getScopeDebugNames (scope: Scope) {
+            const ptr = getScopeDebugPtr(scope)
+            return ptr === undefined ? [] : [...(this.debugInfo.scopeDebugMap.get(ptr) ?? [])]
+        },
         isGlobalThis (v: any) {
             return v === globalThis
         }

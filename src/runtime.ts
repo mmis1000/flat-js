@@ -39,19 +39,22 @@ const decodeLiteralFromProgram = (program: number[], pos: number): any => {
     throw new Error('bad literal pool entry')
 }
 
-/** Pool entry starts at `pos` (`label` word). Same buffer shares one map so literals decode once per program. */
-const literalPoolCache = new WeakMap<number[], Map<number, any>>()
+/** Pool entry starts at `pos` (`label` word). Same buffer shares one sparse cache so literals decode once per program. */
+const literalPoolCache = new WeakMap<number[], any[]>()
 
 const getLiteralFromPool = (program: number[], pos: number): any => {
     let byPos = literalPoolCache.get(program)
     if (!byPos) {
-        byPos = new Map()
+        byPos = []
         literalPoolCache.set(program, byPos)
     }
-    if (!byPos.has(pos)) {
-        byPos.set(pos, decodeLiteralFromProgram(program, pos))
+    const cached = byPos[pos]
+    if (cached !== undefined) {
+        return cached
     }
-    return byPos.get(pos)
+    const value = decodeLiteralFromProgram(program, pos)
+    byPos[pos] = value
+    return value
 }
 
 const CALL = Function.prototype.call
@@ -166,15 +169,33 @@ type VariableRecord = {
     [Fields.name]: string
 }
 
-type VariableDescriptor = {
-    [Fields.tdz]: boolean,
-    [Fields.immutable]: boolean,
-    [Fields.value]: any
+const enum VariableFlags {
+    None = 0,
+    Immutable = 1 << 0,
+}
+
+type StaticVariableStore = {
+    names: string[],
+    flags: number[],
+    values: any[]
+}
+
+const SCOPE_FLAGS = Symbol('scopeFlags')
+const SCOPE_STATIC_SLOTS = Symbol('scopeStaticSlots')
+const SCOPE_STATIC_STORE = Symbol('scopeStaticStore')
+const SCOPE_DEBUG_PTR = Symbol('scopeDebugPtr')
+
+type ScopeWithInternals = Scope & {
+    [SCOPE_FLAGS]?: Record<string, number>
+    [SCOPE_STATIC_SLOTS]?: Record<string, number>
+    [SCOPE_STATIC_STORE]?: StaticVariableStore
+    [SCOPE_DEBUG_PTR]?: number
 }
 
 const is_not_defined = ' is not defined'
 const is_a_constant = ' is a constant'
 const getEmptyObject = Object.create.bind(Object, null, {})
+const TDZ_VALUE = Symbol('tdz')
 
 export type ResultStep = {
     [Fields.done]: false,
@@ -259,6 +280,69 @@ type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
 
 type Context = Record<string, any> | Frame
 
+export type ScopeDebugEntry = [string, unknown, boolean]
+
+const getScopeInternal = (scope: Scope) => scope as ScopeWithInternals
+
+export const isRuntimeInternalKey = (key: string | symbol) =>
+    key === SCOPE_FLAGS
+    || key === SCOPE_STATIC_SLOTS
+    || key === SCOPE_STATIC_STORE
+    || key === SCOPE_DEBUG_PTR
+
+export const getScopeDebugPtr = (scope: Scope) =>
+    getScopeInternal(scope)[SCOPE_DEBUG_PTR]
+
+const hasScopeBindingForDebug = (scope: Scope, name: string) => {
+    const internal = getScopeInternal(scope)
+    return internal[SCOPE_STATIC_SLOTS]?.[name] !== undefined
+        || internal[SCOPE_FLAGS]?.[name] !== undefined
+        || name in scope
+}
+
+const getScopeDebugNames = (scope: Scope, debugNames: readonly string[] = []) => {
+    const names: string[] = []
+    const seen = new Set<string>()
+    const push = (name: string) => {
+        if (!seen.has(name) && hasScopeBindingForDebug(scope, name)) {
+            seen.add(name)
+            names.push(name)
+        }
+    }
+
+    for (const name of debugNames) {
+        push(name)
+    }
+    for (const key of Reflect.ownKeys(scope)) {
+        if (typeof key === 'string' && !isRuntimeInternalKey(key)) {
+            push(key)
+        }
+    }
+    return names
+}
+
+const readScopeBindingValueForDebug = (scope: Scope, name: string) => {
+    const internal = getScopeInternal(scope)
+    const slotIndex = internal[SCOPE_STATIC_SLOTS]?.[name]
+    const value = slotIndex !== undefined
+        ? internal[SCOPE_STATIC_STORE]?.values[slotIndex]
+        : scope[name]
+    if (value === TDZ_VALUE) {
+        throw new ReferenceError(`Cannot access '${name}' before initialization`)
+    }
+    return value
+}
+
+export function getScopeDebugEntries(scope: Scope, debugNames: readonly string[] = []): ScopeDebugEntry[] {
+    return getScopeDebugNames(scope, debugNames).map((name): ScopeDebugEntry => {
+        try {
+            return [name, readScopeBindingValueForDebug(scope, name), false]
+        } catch (err) {
+            return [name, String(err), true]
+        }
+    })
+}
+
 type Execution = {
     [Fields.ptr]: number
     readonly [Fields.stack]: Stack
@@ -293,8 +377,6 @@ const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
 const environments = new WeakSet() as unknown as RefinedEnvSet
 
 const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
-
-const variableDescriptors = new WeakMap<Scope, Map<string, VariableDescriptor>>()
 
 type GeneratorState = {
     stack: Stack,
@@ -368,6 +450,9 @@ const getExecution = (
     const read = () => currentProgram[ptr++]
     const getCurrentFrame = () => stack[stack.length - 1]
     const peak = <T>(arr: T[], offset = 1): T => arr[arr.length - offset]
+    const setScopeDebugPtr = (scopePtr: number, scope: Scope) => {
+        getScopeInternal(scope)[SCOPE_DEBUG_PTR] = scopePtr
+    }
 
     /** Native property ops run in the host realm; VM bytecode compares errors to vmGlobal's constructors (e.g. test262 eshost). */
     const rethrowNativeErrorInRealm = (e: unknown, vmGlobal: any): never => {
@@ -384,58 +469,182 @@ const getExecution = (
         throw e
     }
 
-    const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean) => {
-        if (!variableDescriptors.has(scope)) {
-            variableDescriptors.set(scope, new Map())
-        }
+    const getScopeInternal = (scope: Scope) => scope as ScopeWithInternals
 
-        const descriptor = {
-            [Fields.tdz]: tdz,
-            [Fields.immutable]: immutable,
-            [Fields.value]: undefined
+    const getVariableFlagMap = (scope: Scope) => {
+        const internal = getScopeInternal(scope)
+        let map = internal[SCOPE_FLAGS]
+        if (!map) {
+            map = Object.create(null) as Record<string, number>
+            internal[SCOPE_FLAGS] = map
         }
+        return map
+    }
 
-        variableDescriptors.get(scope)!.set(name, descriptor)
+    const getStaticVariableSlotMap = (scope: Scope) => {
+        const internal = getScopeInternal(scope)
+        let map = internal[SCOPE_STATIC_SLOTS]
+        if (!map) {
+            map = Object.create(null) as Record<string, number>
+            internal[SCOPE_STATIC_SLOTS] = map
+        }
+        return map
+    }
+
+    const getStaticVariableStore = (scope: Scope) => {
+        const internal = getScopeInternal(scope)
+        let store = internal[SCOPE_STATIC_STORE]
+        if (!store) {
+            store = { names: [], flags: [], values: [] }
+            internal[SCOPE_STATIC_STORE] = store
+        }
+        return store
+    }
+
+    const getVariableFlag = (scope: Scope, name: string) =>
+        getScopeInternal(scope)[SCOPE_FLAGS]?.[name]
+
+    const setVariableFlag = (scope: Scope, name: string, flags: number) => {
+        getVariableFlagMap(scope)[name] = flags
+        const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
+        if (slotIndex !== undefined) {
+            getStaticVariableStore(scope).flags[slotIndex] = flags
+        }
+    }
+
+    const hasBinding = (scope: Scope, name: string) =>
+        getScopeInternal(scope)[SCOPE_FLAGS]?.[name] !== undefined || name in scope
+
+    const readBindingValue = (scope: Scope, name: string) => {
+        const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
+        if (slotIndex !== undefined) {
+            return getStaticVariableStore(scope).values[slotIndex]
+        }
+        return scope[name]
+    }
+
+    const writeBindingValue = (scope: Scope, name: string, value: any) => {
+        scope[name] = value
+        const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
+        if (slotIndex !== undefined) {
+            getStaticVariableStore(scope).values[slotIndex] = value
+        }
+        return value
+    }
+
+    const writeScopeDebugProperty = (scope: Scope, name: string, value: any) => {
+        scope[name] = value
+        return value
+    }
+
+    const getBindingValueChecked = (scope: Scope, name: string) => {
+        const value = readBindingValue(scope, name)
+        if (value === TDZ_VALUE) {
+            throw new ReferenceError(`Cannot access '${name}' before initialization`)
+        }
+        return value
+    }
+
+    const setBindingValueChecked = (scope: Scope, name: string, value: any) => {
+        if (readBindingValue(scope, name) === TDZ_VALUE) {
+            throw new ReferenceError(`Cannot access '${name}' before initialization`)
+        }
+        if ((getVariableFlag(scope, name) ?? VariableFlags.None) & VariableFlags.Immutable) {
+            throw new TypeError(name + is_a_constant)
+        }
+        return writeBindingValue(scope, name, value)
+    }
+
+    const initializeBindingValue = (scope: Scope, name: string, value: any) => {
+        return writeBindingValue(scope, name, value)
+    }
+
+    const clearBindingTDZ = (scope: Scope, name: string) => {
+        if (readBindingValue(scope, name) === TDZ_VALUE) {
+            writeBindingValue(scope, name, undefined)
+        }
+    }
+
+    const freezeBinding = (scope: Scope, name: string) => {
+        setVariableFlag(scope, name, (getVariableFlag(scope, name) ?? VariableFlags.None) | VariableFlags.Immutable)
+    }
+
+    const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean, trackStaticSlot: boolean) => {
+        const initialValue = tdz ? TDZ_VALUE : undefined
+        const flags = immutable ? VariableFlags.Immutable : VariableFlags.None
+
+        getVariableFlagMap(scope)[name] = flags
+        if (trackStaticSlot) {
+            const slotMap = getStaticVariableSlotMap(scope)
+            const store = getStaticVariableStore(scope)
+            const slotIndex = store.values.length
+            slotMap[name] = slotIndex
+            store.names.push(name)
+            store.flags.push(flags)
+            store.values.push(initialValue)
+        }
 
         Reflect.defineProperty(scope, name, {
             configurable: true,
-            get() {
-                if (descriptor[Fields.tdz]) {
-                    throw new ReferenceError(name + is_not_defined)
-                }
-                return descriptor[Fields.value]
-            },
-            set(v) {
-                if (descriptor[Fields.tdz]) {
-                    throw new ReferenceError(name + is_not_defined)
-                }
-                if (descriptor[Fields.immutable]) {
-                    throw new TypeError(name + is_a_constant)
-                }
-                descriptor[Fields.value] = v
-            }
+            writable: true,
+            value: initialValue
         })
     }
 
-    const defineVariable = (scope: Scope, name: string, type: VariableType) => {
+    const defineVariable = (scope: Scope, name: string, type: VariableType, trackStaticSlot: boolean = true) => {
         switch (type) {
             case VariableType.Const:
                 // seal it later
-                return defineVariableInternal(scope, name, true, false)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot)
             case VariableType.Let:
-                return defineVariableInternal(scope, name, true, false)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot)
             case VariableType.Function:
             case VariableType.Parameter:
             case VariableType.Var:
                 //don't have tdz
-                return defineVariableInternal(scope, name, false, false)
+                return defineVariableInternal(scope, name, false, false, trackStaticSlot)
         }
     }
-    const getVariableDescriptor = (scope: Scope, name: string) => {
-        const map = variableDescriptors.get(scope)
-        if (map) {
-            return map.get(name)
+    const getStaticVariableScope = (frame: Frame, depth: number) =>
+        frame[Fields.scopes][frame[Fields.scopes].length - 1 - depth]!
+
+    const getStaticVariableStoreAt = (scope: Scope) =>
+        getScopeInternal(scope)[SCOPE_STATIC_STORE]!
+
+    const getStaticVariableValue = (frame: Frame, depth: number, index: number) => {
+        const scope = getStaticVariableScope(frame, depth)
+        const store = getStaticVariableStoreAt(scope)
+        return store.values[index]
+    }
+
+    const getStaticVariableValueChecked = (frame: Frame, depth: number, index: number) => {
+        const value = getStaticVariableValue(frame, depth, index)
+        if (value === TDZ_VALUE) {
+            throw new ReferenceError('Cannot access lexical binding before initialization')
         }
+        return value
+    }
+
+    const setStaticVariableValue = (frame: Frame, depth: number, index: number, value: any) => {
+        const scope = getStaticVariableScope(frame, depth)
+        const store = getStaticVariableStoreAt(scope)
+        store.values[index] = value
+        scope[store.names[index]] = value
+        return value
+    }
+
+    const setStaticVariableValueChecked = (frame: Frame, depth: number, index: number, value: any) => {
+        const scope = getStaticVariableScope(frame, depth)
+        const store = getStaticVariableStoreAt(scope)
+        if (store.values[index] === TDZ_VALUE) {
+            throw new ReferenceError('Cannot access lexical binding before initialization')
+        }
+        if (store.flags[index] & VariableFlags.Immutable) {
+            throw new TypeError(is_a_constant)
+        }
+        store.values[index] = value
+        scope[store.names[index]] = value
+        return value
     }
 
     const MyArgument: { new(): {} } = function MyArgument () {} as any
@@ -700,15 +909,16 @@ const getExecution = (
         if (!ctx) {
             return null;
         }
-        for (let i = ctx[Fields.scopes].length - 1; i >= 0; i--) {
-            const scope = ctx[Fields.scopes][i]
-            if (variableDescriptors.get(scope)?.has(name) || name in scope) {
+        const scopes = ctx[Fields.scopes]
+        for (let i = scopes.length - 1; i >= 0; i--) {
+            const scope = scopes[i]
+            if (hasBinding(scope, name)) {
                 return scope
             }
         }
 
         const globalScope = ctx[Fields.globalThis]
-        if (variableDescriptors.get(globalScope)?.has(name) || name in globalScope) {
+        if (hasBinding(globalScope, name)) {
             return globalScope
         }
 
@@ -723,11 +933,7 @@ const getExecution = (
             const scope = findScope(env, name)
 
             if (scope) {
-                const descriptor = variableDescriptors.get(scope)?.get(name)
-                if (descriptor && descriptor[Fields.tdz]) {
-                    throw new ReferenceError(`Cannot access '${name}' before initialization`)
-                }
-                return scope[name]
+                return getBindingValueChecked(scope, name)
             } else {
                 const currentGlobal = env[Fields.globalThis]
                 if (name === SpecialVariable.This) {
@@ -753,16 +959,7 @@ const getExecution = (
             const scope = findScope(env, name)
 
             if (scope) {
-                const descriptor = variableDescriptors.get(scope)?.get(name)
-                if (descriptor) {
-                    if (descriptor[Fields.tdz]) {
-                        throw new ReferenceError(`Cannot access '${name}' before initialization`)
-                    }
-                    if (descriptor[Fields.immutable]) {
-                        throw new TypeError(is_a_constant)
-                    }
-                }
-                return (scope[name] = value)
+                return setBindingValueChecked(scope, name, value)
             } else {
                 throw new ReferenceError(name + is_not_defined)
             }
@@ -838,6 +1035,298 @@ const getExecution = (
         )
     }
 
+    let returnsExternal = false
+    let returnValue: unknown = null
+    let currentFrame: Frame = initialFrame
+    let currentFrameStack: any[] = initialFrame[Fields.valueStack]
+
+    const addCatchScope = (frame: TryFrame, name: string, value: any) => {
+        const newScope: Scope = {}
+        defineVariable(newScope, name, VariableType.Var)
+        initializeBindingValue(newScope, name, value)
+        frame[Fields.scopes].push(newScope)
+    }
+
+    const executeReturn = (value: any) => {
+        const currentFrame = peak(stack)
+        // try to find upper try frame or return (if any and hand control to it)
+        switch (currentFrame[Fields.type]) {
+            case FrameType.Function: {
+                const frame = currentFrame as FunctionFrame
+
+                const genState = frame[Fields.generator] as GeneratorState | undefined
+                const isGenBase = !!(genState && genState.baseFrame === frame)
+
+                // exit
+                const returnAddr = frame[Fields.return]
+
+                if (isGenBase) {
+                    genState!.completed = true
+                    genState!.stack = []
+                    stack.pop()
+                    if (returnAddr < 0) {
+                        returnsExternal = true
+                        returnValue = { value, done: true }
+                        return value
+                    }
+                    ptr = returnAddr
+                    currentProgram = peak(stack)[Fields.programSection]
+                    peak(stack)[Fields.valueStack].push({ value, done: true })
+                    return value
+                }
+
+                if (returnAddr < 0) {
+                    // leave the whole function
+                    returnsExternal = true
+                    returnValue = value
+                    return value
+                } else {
+                    stack.pop()
+                    ptr = returnAddr
+                    currentProgram = peak(stack)[Fields.programSection]
+
+                    if (
+                        frame[Fields.invokeType] === InvokeType.Apply
+                        || (value !== null && typeof value === 'object')
+                        || typeof value === 'function'
+                    ) {
+                        peak(stack)[Fields.valueStack].push(value)
+                    } else {
+                        peak(stack)[Fields.valueStack].push(getValue(frame, SpecialVariable.This))
+                    }
+                }
+            }
+                break
+            case FrameType.Try: {
+                const frame = currentFrame as TryFrame
+
+                // as if we return on upper try catch
+                frame[Fields.valueStack].push(value)
+                initiateReturn()
+            }
+                break
+        }
+    }
+
+    const initiateReturn = () => {
+        const frame = peak(stack) as TryFrame
+        const value = frame[Fields.valueStack].pop()
+        const finallyAddr = frame[Fields.finally]
+
+        // restore scopes
+        frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
+
+        const state = frame[Fields.state]
+        switch (state) {
+            case TryCatchFinallyState.Try:
+            case TryCatchFinallyState.Catch: {
+                if (finallyAddr >= 0) {
+                    frame[Fields.state] = TryCatchFinallyState.Finally
+                    frame[Fields.resolveType] = ResolveType.return
+                    frame[Fields.value] = value
+                    ptr = finallyAddr
+                } else {
+                    stack.pop()
+                    executeReturn(value)
+                    return
+                }
+            }
+                break;
+            case TryCatchFinallyState.Finally: {
+                stack.pop()
+                executeReturn(value)
+                return
+            }
+                break;
+            default:
+                const nothing: never = state
+
+        }
+    }
+
+    const executeThrow = (value: any) => {
+        loop: while (true) {
+            if (stack.length === 0) {
+                throw value
+            }
+            const currentFrame = peak(stack)
+            switch (currentFrame[Fields.type]) {
+                case FrameType.Function: {
+                    const fframe = currentFrame as FunctionFrame
+                    const gs = fframe[Fields.generator] as GeneratorState | undefined
+                    if (gs && gs.baseFrame === fframe) {
+                        // Error escapes the generator — mark completed and continue
+                        // unwinding so it surfaces in the VM caller.
+                        gs.completed = true
+                        gs.stack = []
+                    }
+                    stack.pop()
+                }
+                    break
+                case FrameType.Try: {
+                    const frame = currentFrame as TryFrame
+
+                    if (frame[Fields.state] === TryCatchFinallyState.Finally) {
+                        stack.pop()
+                    } else {
+
+                        // as if we throw on upper try catch
+                        currentFrame[Fields.valueStack].push(value)
+                        initiateThrow();
+                        return
+                    }
+                }
+
+            }
+        }
+
+        throw value
+    }
+
+    const initiateThrow = () => {
+        const frame = peak(stack) as TryFrame
+        const value = frame[Fields.valueStack].pop()
+        const exitAddr = frame[Fields.exit]
+        const finallyAddr = frame[Fields.finally]
+        const catchAddr = frame[Fields.catch]
+
+        // restore scopes
+        frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
+
+        const state = frame[Fields.state]
+        switch (state) {
+            case TryCatchFinallyState.Try: {
+                frame[Fields.resolveType] = ResolveType.throw
+                frame[Fields.value] = value
+
+                if (catchAddr >= 0) {
+                    frame[Fields.state] = TryCatchFinallyState.Catch
+                    if (frame[Fields.variable] !== undefined) {
+                        addCatchScope(frame, frame[Fields.variable], value)
+                    }
+
+                    ptr = catchAddr
+                    currentProgram = frame[Fields.programSection]
+                } else if (finallyAddr >= 0) {
+                    frame[Fields.state] = TryCatchFinallyState.Finally
+                    ptr = finallyAddr
+                    currentProgram = frame[Fields.programSection]
+                } else {
+                    ptr = exitAddr
+                    currentProgram = frame[Fields.programSection]
+                }
+            }
+                break;
+            case TryCatchFinallyState.Catch: {
+                frame[Fields.state] = TryCatchFinallyState.Finally
+                frame[Fields.resolveType] = ResolveType.throw
+                frame[Fields.value] = value
+
+                if (finallyAddr >= 0) {
+                    ptr = finallyAddr
+                    currentProgram = frame[Fields.programSection]
+                } else {
+                    stack.pop()
+                    executeThrow(value)
+                }
+                break
+            }
+
+            case TryCatchFinallyState.Finally: {
+                stack.pop()
+                executeThrow(value)
+            }
+                break
+            default:
+                const nothing: never = state
+        }
+    }
+
+    const executeBreak = () => {
+        const frame = stack.pop() as TryFrame
+        let depth: number = frame[Fields.depth]
+        // stack.pop()
+
+        loop: while (true) {
+            depth--
+            if (depth < 0) {
+                throw new Error('something went wrong')
+            } if (depth === 0) {
+                // actually break
+                // break always happens within the same vm
+                ptr = frame[Fields.break]
+                break loop
+            } else {
+                // try to jump to next try catch
+                const nextFrame = peak(stack) as TryFrame
+                const finallyAddr = nextFrame[Fields.finally]
+                if (finallyAddr >= 0) {
+                    const state = nextFrame[Fields.state]
+                    switch (state) {
+                        case TryCatchFinallyState.Try:
+                        case TryCatchFinallyState.Catch: {
+                            nextFrame[Fields.state] = TryCatchFinallyState.Finally
+                            nextFrame[Fields.resolveType] = ResolveType.break
+                            nextFrame[Fields.depth] = depth
+                            nextFrame[Fields.break] = frame[Fields.break]
+                            ptr = finallyAddr
+                            break loop
+                        }
+                    }
+                } else {
+                    stack.pop()
+                }
+            }
+        }
+    }
+
+    const initiateBreak = () => {
+        const frame = peak(stack) as TryFrame
+        const breakAddr: number = frame[Fields.valueStack].pop()
+        const depth: number = frame[Fields.valueStack].pop()
+        const finallyAddr = frame[Fields.finally]
+
+        frame[Fields.break] = breakAddr
+        frame[Fields.depth] = depth
+
+        // restore scopes
+        frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
+
+        const state = frame[Fields.state]
+        switch (state) {
+            case TryCatchFinallyState.Try:
+            case TryCatchFinallyState.Catch: {
+                if (finallyAddr >= 0) {
+                    frame[Fields.state] = TryCatchFinallyState.Finally
+                    frame[Fields.resolveType] = ResolveType.break
+                    // frame[Fields.value] = value
+                    ptr = finallyAddr
+                    currentProgram = frame[Fields.programSection]
+                } else {
+                    // stack.pop()
+                    executeBreak()
+                }
+                break
+            }
+
+            case TryCatchFinallyState.Finally: {
+                // stack.pop()
+                executeBreak()
+            }
+                break
+            default:
+                const nothing: never = state
+        }
+    }
+
+    const popCurrentFrameStack = <T = unknown>(): T => {
+        return currentFrameStack.pop() as T
+    }
+
+    const pushCurrentFrameStack = (arg: any): number => {
+        return currentFrameStack.push(arg)
+    }
+
     const step = (debug: boolean = false): Result => {
         if (stack.length > 0) {
             currentProgram = peak(stack)[Fields.programSection]
@@ -845,289 +1334,8 @@ const getExecution = (
         if (ptr >= currentProgram.length) {
              return { [Fields.done]: true, [Fields.value]: undefined, [Fields.evalResult]: undefined }
         }
-        const opCode = currentProgram[ptr];
-        let returnsExternal = false
-        let returnValue: unknown = null
-
-        const addCatchScope = (frame: TryFrame, name: string, value: any) => {
-            const newScope: Scope = {}
-            defineVariable(newScope, name, VariableType.Var)
-            newScope[name] = value
-            frame[Fields.scopes].push(newScope)
-        }
-
-        const executeReturn = (value: any) => {
-            const currentFrame = peak(stack)
-            // try to find upper try frame or return (if any and hand control to it)
-            switch (currentFrame[Fields.type]) {
-                case FrameType.Function: {
-                    const frame = currentFrame as FunctionFrame
-
-                    const genState = frame[Fields.generator] as GeneratorState | undefined
-                    const isGenBase = !!(genState && genState.baseFrame === frame)
-
-                    // exit
-                    const returnAddr = frame[Fields.return]
-
-                    if (isGenBase) {
-                        genState!.completed = true
-                        genState!.stack = []
-                        stack.pop()
-                        if (returnAddr < 0) {
-                            returnsExternal = true
-                            returnValue = { value, done: true }
-                            return value
-                        }
-                        ptr = returnAddr
-                        currentProgram = peak(stack)[Fields.programSection]
-                        peak(stack)[Fields.valueStack].push({ value, done: true })
-                        return value
-                    }
-
-                    if (returnAddr < 0) {
-                        // leave the whole function
-                        returnsExternal = true
-                        returnValue = value
-                        return value
-                    } else {
-                        stack.pop()
-                        ptr = returnAddr
-                        currentProgram = peak(stack)[Fields.programSection]
-
-                        if (
-                            frame[Fields.invokeType] === InvokeType.Apply
-                            || ( value !== null && typeof value === 'object')
-                            || typeof value === 'function'
-                        ) {
-                            peak(stack)[Fields.valueStack].push(value)
-                        } else {
-                            peak(stack)[Fields.valueStack].push(getValue(frame, SpecialVariable.This))
-                        }
-                    }
-                }
-                    break
-                case FrameType.Try: {
-                    const frame = currentFrame as TryFrame
-
-                    // as if we return on upper try catch
-                    frame[Fields.valueStack].push(value)
-                    initiateReturn()
-                }
-                    break
-            }
-        }
-
-        const initiateReturn = () => {
-            const frame = peak(stack) as TryFrame
-            const value = frame[Fields.valueStack].pop()
-            const finallyAddr = frame[Fields.finally]
-
-            // restore scopes
-            frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
-
-            const state = frame[Fields.state]
-            switch (state) {
-                case TryCatchFinallyState.Try:
-                case TryCatchFinallyState.Catch: {
-                    if (finallyAddr >= 0) {
-                        frame[Fields.state] = TryCatchFinallyState.Finally
-                        frame[Fields.resolveType] = ResolveType.return
-                        frame[Fields.value] = value
-                        ptr = finallyAddr
-                    } else {
-                        stack.pop()
-                        executeReturn(value)
-                        return
-                    }
-                }
-                    break;
-                case TryCatchFinallyState.Finally: {
-                    stack.pop()
-                    executeReturn(value)
-                    return
-                }
-                    break;
-                default:
-                    const nothing: never = state
-
-            }
-        }
-
-        const executeThrow = (value: any) => {
-            loop: while (true) {
-                if (stack.length === 0) {
-                    throw value
-                }
-                const currentFrame = peak(stack)
-                switch (currentFrame[Fields.type]) {
-                    case FrameType.Function: {
-                        const fframe = currentFrame as FunctionFrame
-                        const gs = fframe[Fields.generator] as GeneratorState | undefined
-                        if (gs && gs.baseFrame === fframe) {
-                            // Error escapes the generator — mark completed and continue
-                            // unwinding so it surfaces in the VM caller.
-                            gs.completed = true
-                            gs.stack = []
-                        }
-                        stack.pop()
-                    }
-                        break
-                    case FrameType.Try: {
-                        const frame = currentFrame as TryFrame
-
-                        if (frame[Fields.state] === TryCatchFinallyState.Finally) {
-                            stack.pop()
-                        } else {
-
-                            // as if we throw on upper try catch
-                            currentFrame[Fields.valueStack].push(value)
-                            initiateThrow();
-                            return
-                        }
-                    }
-
-                }
-            }
-
-            throw value
-        }
-
-        const initiateThrow = () => {
-            const frame = peak(stack) as TryFrame
-            const value = frame[Fields.valueStack].pop()
-            const exitAddr = frame[Fields.exit]
-            const finallyAddr = frame[Fields.finally]
-            const catchAddr = frame[Fields.catch]
-
-            // restore scopes
-            frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
-
-            const state = frame[Fields.state]
-            switch (state) {
-                case TryCatchFinallyState.Try: {
-                    frame[Fields.resolveType] = ResolveType.throw
-                    frame[Fields.value] = value
-
-                    if (catchAddr >= 0) {
-                        frame[Fields.state] = TryCatchFinallyState.Catch
-                        if (frame[Fields.variable] !== undefined) {
-                            addCatchScope(frame, frame[Fields.variable], value)
-                        }
-
-                        ptr = catchAddr
-                        currentProgram = frame[Fields.programSection]
-                    } else if (finallyAddr >= 0) {
-                        frame[Fields.state] = TryCatchFinallyState.Finally
-                        ptr = finallyAddr
-                        currentProgram = frame[Fields.programSection]
-                    } else {
-                        ptr = exitAddr
-                        currentProgram = frame[Fields.programSection]
-                    }
-                }
-                    break;
-                case TryCatchFinallyState.Catch: {
-                    frame[Fields.state] = TryCatchFinallyState.Finally
-                    frame[Fields.resolveType] = ResolveType.throw
-                    frame[Fields.value] = value
-
-                    if (finallyAddr >= 0) {
-                        ptr = finallyAddr
-                        currentProgram = frame[Fields.programSection]
-                    } else {
-                        stack.pop()
-                        executeThrow(value)
-                    }
-                    break
-                }
-
-                case TryCatchFinallyState.Finally: {
-                    stack.pop()
-                    executeThrow(value)
-                }
-                    break
-                default:
-                    const nothing: never = state
-            }
-        }
-
-        const executeBreak = () => {
-            const frame = stack.pop() as TryFrame
-            let depth: number = frame[Fields.depth]
-            // stack.pop()
-
-            loop: while (true) {
-                depth--
-                if (depth < 0) {
-                    throw new Error('something went wrong')
-                } if (depth === 0) {
-                    // actually break
-                    // break always happens within the same vm
-                    ptr = frame[Fields.break]
-                    break loop
-                } else {
-                    // try to jump to next try catch
-                    const nextFrame = peak(stack) as TryFrame
-                    const finallyAddr = nextFrame[Fields.finally]
-                    if (finallyAddr >= 0) {
-                        const state = nextFrame[Fields.state]
-                        switch (state) {
-                            case TryCatchFinallyState.Try:
-                            case TryCatchFinallyState.Catch: {
-                                nextFrame[Fields.state] = TryCatchFinallyState.Finally
-                                nextFrame[Fields.resolveType] = ResolveType.break
-                                nextFrame[Fields.depth] = depth
-                                nextFrame[Fields.break] = frame[Fields.break]
-                                ptr = finallyAddr
-                                break loop
-                            }
-                        }
-                    } else {
-                        stack.pop()
-                    }
-                }
-            }
-        }
-
-        const initiateBreak = () => {
-            const frame = peak(stack) as TryFrame
-            const breakAddr: number = frame[Fields.valueStack].pop()
-            const depth: number = frame[Fields.valueStack].pop()
-            const finallyAddr = frame[Fields.finally]
-
-            
-            frame[Fields.break] = breakAddr
-            frame[Fields.depth] = depth
-
-            // restore scopes
-            frame[Fields.scopes] = frame[Fields.savedScopes].slice(0)
-
-            const state = frame[Fields.state]
-            switch (state) {
-                case TryCatchFinallyState.Try:
-                case TryCatchFinallyState.Catch: {
-                    if (finallyAddr >= 0) {
-                        frame[Fields.state] = TryCatchFinallyState.Finally
-                        frame[Fields.resolveType] = ResolveType.break
-                        // frame[Fields.value] = value
-                        ptr = finallyAddr
-                        currentProgram = frame[Fields.programSection]
-                    } else {
-                        // stack.pop()
-                        executeBreak()
-                    }
-                    break
-                }
-
-                case TryCatchFinallyState.Finally: {
-                    // stack.pop()
-                    executeBreak()
-                }
-                    break
-                default:
-                    const nothing: never = state
-            }
-        }
+        returnsExternal = false
+        returnValue = null
 
         try {
             // Handle pending actions (from generator .throw())
@@ -1140,20 +1348,11 @@ const getExecution = (
             // console.log(ptr)
             const currentPtr = commandPtr = ptr
             const command: OpCode = read()
-            const currentFrame = getCurrentFrame()
+            currentFrame = getCurrentFrame()
+            currentFrameStack = currentFrame[Fields.valueStack]
 
-            if (currentFrame[Fields.programSection].length !== currentProgram.length) {
+            if (debug && currentFrame[Fields.programSection].length !== currentProgram.length) {
                 debugger
-            }
-
-            const popCurrentFrameStack = <T = unknown>(): T => {
-                const val = currentFrame[Fields.valueStack].pop()
-                return val
-            }
-
-            const pushCurrentFrameStack = (arg: any): number => {
-                const res = currentFrame[Fields.valueStack].push(arg)
-                return res
             }
 
             command: switch (command) {
@@ -1178,6 +1377,18 @@ const getExecution = (
                     break
                 case OpCode.GetRecord:
                     pushCurrentFrameStack(currentFrame)
+                    break
+                case OpCode.GetStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    pushCurrentFrameStack(getStaticVariableValueChecked(currentFrame, depth, index))
+                }
+                    break
+                case OpCode.GetStaticUnchecked: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    pushCurrentFrameStack(getStaticVariableValue(currentFrame, depth, index))
+                }
                     break
                 case OpCode.NullLiteral:
                     pushCurrentFrameStack(null)
@@ -1206,7 +1417,7 @@ const getExecution = (
                     } else {
                         const scope = findScope(ctx, name)
                         if (scope) {
-                            scope[name] = value
+                            setBindingValueChecked(scope, name, value)
                         } else {
                             throw new ReferenceError(name + is_not_defined)
                         }
@@ -1219,17 +1430,38 @@ const getExecution = (
                     }
                 }
                     break;
+                case OpCode.SetStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const value = popCurrentFrameStack()
+                    pushCurrentFrameStack(setStaticVariableValueChecked(currentFrame, depth, index, value))
+                }
+                    break
+                case OpCode.SetStaticUnchecked: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const value = popCurrentFrameStack()
+                    pushCurrentFrameStack(setStaticVariableValue(currentFrame, depth, index, value))
+                }
+                    break
                 case OpCode.SetInitialized: {
                     const value = popCurrentFrameStack()
                     const name = popCurrentFrameStack<string>()
                     const ctx = popCurrentFrameStack<Frame>()
                     
                     const scope = findScope(ctx, name)!
-                    
-                    const desc = variableDescriptors.get(scope)!.get(name)!
-                    desc[Fields.tdz] = false
-                    desc[Fields.value] = value
-
+                    initializeBindingValue(scope, name, value)
+                    pushCurrentFrameStack(value)
+                }
+                    break
+                case OpCode.SetInitializedStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const value = popCurrentFrameStack()
+                    const scope = getStaticVariableScope(currentFrame, depth)
+                    const store = getStaticVariableStoreAt(scope)
+                    store.values[index] = value
+                    scope[store.names[index]] = value
                     pushCurrentFrameStack(value)
                 }
                     break
@@ -1258,6 +1490,50 @@ const getExecution = (
                     pushCurrentFrameStack(r)
                 }
                     break;
+                case OpCode.BPlusEqualStatic:
+                case OpCode.BMinusEqualStatic:
+                case OpCode.BSlashEqualStatic:
+                case OpCode.BAsteriskEqualStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const rightVal = popCurrentFrameStack()
+                    const leftValue = getStaticVariableValueChecked(currentFrame, depth, index)
+                    const commandCurrent = command
+
+                    const exprs: Record<typeof commandCurrent, (a: any, b:any) => any> = {
+                        [OpCode.BPlusEqualStatic]: (a, b) => a + b,
+                        [OpCode.BMinusEqualStatic]: (a, b) => a - b,
+                        [OpCode.BSlashEqualStatic]: (a, b) => a / b,
+                        [OpCode.BAsteriskEqualStatic]: (a, b) => a * b
+                    }
+
+                    const r = exprs[command](leftValue, rightVal)
+                    setStaticVariableValueChecked(currentFrame, depth, index, r)
+                    pushCurrentFrameStack(r)
+                }
+                    break
+                case OpCode.BPlusEqualStaticUnchecked:
+                case OpCode.BMinusEqualStaticUnchecked:
+                case OpCode.BSlashEqualStaticUnchecked:
+                case OpCode.BAsteriskEqualStaticUnchecked: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const rightVal = popCurrentFrameStack()
+                    const leftValue = getStaticVariableValue(currentFrame, depth, index)
+                    const commandCurrent = command
+
+                    const exprs: Record<typeof commandCurrent, (a: any, b:any) => any> = {
+                        [OpCode.BPlusEqualStaticUnchecked]: (a, b) => a + b,
+                        [OpCode.BMinusEqualStaticUnchecked]: (a, b) => a - b,
+                        [OpCode.BSlashEqualStaticUnchecked]: (a, b) => a / b,
+                        [OpCode.BAsteriskEqualStaticUnchecked]: (a, b) => a * b
+                    }
+
+                    const r = exprs[command](leftValue, rightVal)
+                    setStaticVariableValue(currentFrame, depth, index, r)
+                    pushCurrentFrameStack(r)
+                }
+                    break
                 case OpCode.DefineKeepCtx: {
                     const value = popCurrentFrameStack()
                     const name = popCurrentFrameStack<string>()
@@ -1294,10 +1570,19 @@ const getExecution = (
                         const scope = findScope(ctx, name)
                         if (scope) {
                             hit = true
-                            const desc = getVariableDescriptor(scope, name)
-                            if (desc && (flag & SetFlag.DeTDZ)) desc[Fields.tdz] = false
-                            scope[name] = value
-                            if (desc && (flag & SetFlag.Freeze)) desc[Fields.immutable] = true
+                            if (flag & SetFlag.DeTDZ) {
+                                clearBindingTDZ(scope, name)
+                            }
+                            if (!(flag & SetFlag.DeTDZ) && readBindingValue(scope, name) === TDZ_VALUE) {
+                                throw new ReferenceError(`Cannot access '${name}' before initialization`)
+                            }
+                            if ((getVariableFlag(scope, name) ?? VariableFlags.None) & VariableFlags.Immutable) {
+                                throw new TypeError(name + is_a_constant)
+                            }
+                            writeBindingValue(scope, name, value)
+                            if (flag & SetFlag.Freeze) {
+                                freezeBinding(scope, name)
+                            }
                         }
 
                         if (!hit) {
@@ -1387,10 +1672,10 @@ const getExecution = (
                                     enumerable: true,
                                     configurable: true,
                                     get () {
-                                        return scope[argumentNames[i]]
+                                        return readBindingValue(scope, argumentNames[i])
                                     },
                                     set (v) {
-                                        scope[argumentNames[i]] = v
+                                        writeBindingValue(scope, argumentNames[i], v)
                                     }
                                 })
                             } else {
@@ -1426,6 +1711,7 @@ const getExecution = (
                             scope = getEmptyObject()
                             currentFrame[Fields.scopes].push(scope)
                         }
+                        setScopeDebugPtr(commandPtr, scope)
 
                         switch (functionType) {
                             case FunctionTypes.FunctionDeclaration:
@@ -1441,11 +1727,11 @@ const getExecution = (
                             case FunctionTypes.SetAccessor:
                             case FunctionTypes.Constructor:
                             case FunctionTypes.DerivedConstructor:
-                                defineVariable(scope, SpecialVariable.This, VariableType.Var)
-                                scope[SpecialVariable.This] = self
-                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var)
-                                scope[SpecialVariable.NewTarget] = undefined
-                                scope['arguments'] = getArgumentObject(scope, fn)
+                                defineVariable(scope, SpecialVariable.This, VariableType.Var, false)
+                                initializeBindingValue(scope, SpecialVariable.This, self)
+                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var, false)
+                                initializeBindingValue(scope, SpecialVariable.NewTarget, undefined)
+                                writeScopeDebugProperty(scope, 'arguments', getArgumentObject(scope, fn))
                         }
 
                         switch (functionType) {
@@ -1456,7 +1742,11 @@ const getExecution = (
                             case FunctionTypes.AsyncFunctionExpression:
                             case FunctionTypes.AsyncMethod:
                                 if (name !== '') {
-                                    scope[name] = fn
+                                    if (hasBinding(scope, name)) {
+                                        initializeBindingValue(scope, name, fn)
+                                    } else {
+                                        writeScopeDebugProperty(scope, name, fn)
+                                    }
                                 }
                         }
 
@@ -1465,7 +1755,7 @@ const getExecution = (
                         }
 
                         for (let [index, name] of argumentNames.entries()) {
-                            scope[name] = parameters[index]
+                            initializeBindingValue(scope, name, parameters[index])
                         }
                     } else if (invokeType === InvokeType.Construct) {
                         const name = popCurrentFrameStack<string>()
@@ -1474,6 +1764,7 @@ const getExecution = (
 
                         const scope: Scope = getEmptyObject()
                         currentFrame[Fields.scopes].push(scope)
+                        setScopeDebugPtr(commandPtr, scope)
 
                         switch (functionType) {
                             case FunctionTypes.MethodDeclaration:
@@ -1485,23 +1776,27 @@ const getExecution = (
                             case FunctionTypes.FunctionDeclaration:
                             case FunctionTypes.FunctionExpression:
                             case FunctionTypes.Constructor:
-                                defineVariable(scope, SpecialVariable.This, VariableType.Var)
-                                scope[SpecialVariable.This] = Object.create(newTarget.prototype)
-                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var)
-                                scope[SpecialVariable.NewTarget] = newTarget
-                                scope['arguments'] = getArgumentObject(scope, fn)
+                                defineVariable(scope, SpecialVariable.This, VariableType.Var, false)
+                                initializeBindingValue(scope, SpecialVariable.This, Object.create(newTarget.prototype))
+                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var, false)
+                                initializeBindingValue(scope, SpecialVariable.NewTarget, newTarget)
+                                writeScopeDebugProperty(scope, 'arguments', getArgumentObject(scope, fn))
                                 break
                             case FunctionTypes.DerivedConstructor:
-                                defineVariable(scope, SpecialVariable.This, VariableType.Let)
-                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var)
-                                scope[SpecialVariable.NewTarget] = newTarget
-                                scope['arguments'] = getArgumentObject(scope, fn)
+                                defineVariable(scope, SpecialVariable.This, VariableType.Let, false)
+                                defineVariable(scope, SpecialVariable.NewTarget, VariableType.Var, false)
+                                initializeBindingValue(scope, SpecialVariable.NewTarget, newTarget)
+                                writeScopeDebugProperty(scope, 'arguments', getArgumentObject(scope, fn))
                                 break
                         }
 
                         switch (functionType) {
                             case FunctionTypes.FunctionExpression:
-                                scope[name] = fn
+                                if (hasBinding(scope, name)) {
+                                    initializeBindingValue(scope, name, fn)
+                                } else {
+                                    writeScopeDebugProperty(scope, name, fn)
+                                }
                         }
 
                         for (let v of variables) {
@@ -1509,7 +1804,7 @@ const getExecution = (
                         }
 
                         for (let [index, name] of argumentNames.entries()) {
-                            scope[name] = parameters[index]
+                            initializeBindingValue(scope, name, parameters[index])
                         }
                     }
                 }
@@ -1526,6 +1821,7 @@ const getExecution = (
 
                     const scope: Scope = getEmptyObject()
                     currentFrame[Fields.scopes].push(scope)
+                    setScopeDebugPtr(commandPtr, scope)
 
                     for (let v of variables) {
                         defineVariable(scope, v[Fields.name], v[Fields.type])
@@ -1541,8 +1837,18 @@ const getExecution = (
                     const name = peak(currentFrame[Fields.valueStack])
                     const scope = findScope(env, name)
                     if (scope) {
-                        const desc = getVariableDescriptor(scope, name)
-                        if (desc) desc[Fields.tdz] = false
+                        clearBindingTDZ(scope, name)
+                    }
+                }
+                    break
+                case OpCode.DeTDZStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const scope = getStaticVariableScope(currentFrame, depth)
+                    const store = getStaticVariableStoreAt(scope)
+                    if (store.values[index] === TDZ_VALUE) {
+                        store.values[index] = undefined
+                        scope[store.names[index]] = undefined
                     }
                 }
                     break
@@ -1551,9 +1857,17 @@ const getExecution = (
                     const name = peak(currentFrame[Fields.valueStack])
                     const scope = findScope(env, name)
                     if (scope) {
-                        const desc = getVariableDescriptor(scope, name)
-                        if (desc) desc[Fields.immutable] = true
+                        freezeBinding(scope, name)
                     }
+                }
+                    break
+                case OpCode.FreezeVariableStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const scope = getStaticVariableScope(currentFrame, depth)
+                    const store = getStaticVariableStoreAt(scope)
+                    store.flags[index] |= VariableFlags.Immutable
+                    setVariableFlag(scope, store.names[index], store.flags[index])
                 }
                     break
                 case OpCode.DefineFunction: {
@@ -2070,8 +2384,9 @@ const getExecution = (
                     if (environments.has(ctx)) {
                         const frame: Frame = ctx
                         for (let i = frame[Fields.scopes].length - 1; i >= 0; i--) {
-                            if (Reflect.getOwnPropertyDescriptor(frame[Fields.scopes][i], name)) {
-                                pushCurrentFrameStack(typeof frame[Fields.scopes][i][name]) 
+                            const scope = frame[Fields.scopes][i]
+                            if (hasBinding(scope, name)) {
+                                pushCurrentFrameStack(typeof getBindingValueChecked(scope, name)) 
                                 break command;
                             }
                         }
@@ -2079,6 +2394,18 @@ const getExecution = (
                     } else {
                         pushCurrentFrameStack(typeof ctx[name])
                     }
+                }
+                    break
+                case OpCode.TypeofStaticReference: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    pushCurrentFrameStack(typeof getStaticVariableValueChecked(currentFrame, depth, index))
+                }
+                    break
+                case OpCode.TypeofStaticReferenceUnchecked: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    pushCurrentFrameStack(typeof getStaticVariableValue(currentFrame, depth, index))
                 }
                     break
                 case OpCode.GetPropertyIterator: {
@@ -2167,9 +2494,9 @@ const getExecution = (
                         const scope = findScope(env, name)
 
                         if (scope) {
-                            const old = scope[name]
+                            const old = getBindingValueChecked(scope, name)
                             const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
-                            scope[name] = newVal
+                            setBindingValueChecked(scope, name, newVal)
                             pushCurrentFrameStack(old)
                         } else {
                             throw new ReferenceError(name + is_not_defined)
@@ -2187,6 +2514,26 @@ const getExecution = (
                     }
                 }
                     break;
+                case OpCode.PostFixPlusPLusStatic:
+                case OpCode.PostFixMinusMinusStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const old = getStaticVariableValueChecked(currentFrame, depth, index)
+                    const newVal = command === OpCode.PostFixPlusPLusStatic ? old + 1 : old - 1
+                    setStaticVariableValueChecked(currentFrame, depth, index, newVal)
+                    pushCurrentFrameStack(old)
+                }
+                    break
+                case OpCode.PostFixPlusPLusStaticUnchecked:
+                case OpCode.PostFixMinusMinusStaticUnchecked: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const old = getStaticVariableValue(currentFrame, depth, index)
+                    const newVal = command === OpCode.PostFixPlusPLusStaticUnchecked ? old + 1 : old - 1
+                    setStaticVariableValue(currentFrame, depth, index, newVal)
+                    pushCurrentFrameStack(old)
+                }
+                    break
                 case OpCode.PrefixUnaryPlus:
                 case OpCode.PrefixUnaryMinus: 
                 case OpCode.PrefixExclamation:
@@ -2224,6 +2571,26 @@ const getExecution = (
                     pushCurrentFrameStack(newVal)
                 }
                     break;
+                case OpCode.PrefixPlusPlusStatic:
+                case OpCode.PrefixMinusMinusStatic: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const currentValue = getStaticVariableValueChecked(currentFrame, depth, index)
+                    const newVal = command === OpCode.PrefixPlusPlusStatic ? currentValue + 1 : currentValue - 1
+                    setStaticVariableValueChecked(currentFrame, depth, index, newVal)
+                    pushCurrentFrameStack(newVal)
+                }
+                    break
+                case OpCode.PrefixPlusPlusStaticUnchecked:
+                case OpCode.PrefixMinusMinusStaticUnchecked: {
+                    const index = popCurrentFrameStack<number>()
+                    const depth = popCurrentFrameStack<number>()
+                    const currentValue = getStaticVariableValue(currentFrame, depth, index)
+                    const newVal = command === OpCode.PrefixPlusPlusStaticUnchecked ? currentValue + 1 : currentValue - 1
+                    setStaticVariableValue(currentFrame, depth, index, newVal)
+                    pushCurrentFrameStack(newVal)
+                }
+                    break
                 case OpCode.Delete: {
                     const name = popCurrentFrameStack<string>()
                     const ctx = popCurrentFrameStack<Record<string, any>>()

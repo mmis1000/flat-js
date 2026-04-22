@@ -66,6 +66,8 @@ export const enum InvokeType {
     Generator
 }
 
+export type ProgramScopeDebugMap = Map<number, readonly string[]>
+
 
 
 type VariableDeclaration = {
@@ -219,6 +221,26 @@ export const enum OpCode {
     /**
      * ```txt
      * Stack:
+     *   scopeDepth
+     *   scopeIndex
+     * Result:
+     *   value
+     * ```
+     */
+    GetStatic,
+    /**
+     * ```txt
+     * Stack:
+     *   scopeDepth
+     *   scopeIndex
+     * Result:
+     *   value
+     * ```
+     */
+    GetStaticUnchecked,
+    /**
+     * ```txt
+     * Stack:
      *   env
      *   name
      *   value
@@ -230,6 +252,17 @@ export const enum OpCode {
     /**
      * ```txt
      * Stack:
+     *   value
+     *   scopeDepth
+     *   scopeIndex
+     * Result:
+     *   value
+     * ```
+     */
+    SetInitializedStatic,
+    /**
+     * ```txt
+     * Stack:
      *   env or object
      *   name
      *   value
@@ -238,6 +271,28 @@ export const enum OpCode {
      * ```
      */
     Set,
+    /**
+     * ```txt
+     * Stack:
+     *   value
+     *   scopeDepth
+     *   scopeIndex
+     * Result:
+     *   value
+     * ```
+     */
+    SetStatic,
+    /**
+     * ```txt
+     * Stack:
+     *   value
+     *   scopeDepth
+     *   scopeIndex
+     * Result:
+     *   value
+     * ```
+     */
+    SetStaticUnchecked,
     /**
      * ```txt
      * Stack:
@@ -294,11 +349,27 @@ export const enum OpCode {
     /**
      * ```txt
      * Stack:
+     *   scopeDepth
+     *   scopeIndex
+     * ```
+    */
+    DeTDZStatic,
+    /**
+     * ```txt
+     * Stack:
      *   env or object // no consume
      *   name // no consume
      * ```
     */
     FreezeVariable,
+    /**
+     * ```txt
+     * Stack:
+     *   scopeDepth
+     *   scopeIndex
+     * ```
+    */
+    FreezeVariableStatic,
 
     /**
      * ```tst
@@ -424,6 +495,22 @@ export const enum OpCode {
      * ```
      */
     TypeofReference,
+    /**
+     * ```txt
+     * Stack:
+     *   scopeDepth
+     *   scopeIndex
+     * ```
+     */
+    TypeofStaticReference,
+    /**
+     * ```txt
+     * Stack:
+     *   scopeDepth
+     *   scopeIndex
+     * ```
+     */
+    TypeofStaticReferenceUnchecked,
 
     /**
      * ```txt
@@ -541,12 +628,28 @@ export const enum OpCode {
     // assign and update
     /** += */
     BPlusEqual,
+    /** static += */
+    BPlusEqualStatic,
+    /** unchecked static += */
+    BPlusEqualStaticUnchecked,
     /** -= */
     BMinusEqual,
+    /** static -= */
+    BMinusEqualStatic,
+    /** unchecked static -= */
+    BMinusEqualStaticUnchecked,
     /** /= */
     BSlashEqual,
+    /** static /= */
+    BSlashEqualStatic,
+    /** unchecked static /= */
+    BSlashEqualStaticUnchecked,
     /** *= */
     BAsteriskEqual,
+    /** static *= */
+    BAsteriskEqualStatic,
+    /** unchecked static *= */
+    BAsteriskEqualStaticUnchecked,
 
     /**
      * Stack:
@@ -573,6 +676,8 @@ export const enum OpCode {
     ThrowReferenceError,
 
     PostFixMinusMinus,
+    PostFixMinusMinusStatic,
+    PostFixMinusMinusStaticUnchecked,
     /**
      * ```txt
      * a++
@@ -582,13 +687,19 @@ export const enum OpCode {
      * ```
      */
     PostFixPlusPLus,
+    PostFixPlusPLusStatic,
+    PostFixPlusPLusStaticUnchecked,
     PrefixUnaryPlus,
     PrefixUnaryMinus,
     PrefixExclamation,
     PrefixTilde,
 
     PrefixPlusPlus,
+    PrefixPlusPlusStatic,
+    PrefixPlusPlusStaticUnchecked,
     PrefixMinusMinus,
+    PrefixMinusMinusStatic,
+    PrefixMinusMinusStaticUnchecked,
 
     /**
      * debugger;
@@ -651,6 +762,7 @@ type Op<Code extends OpCode = OpCode> = {
     offset: number,
     // indicate this is a instruction than shouldn't be paused at
     internal: boolean,
+    scopeDebugNames?: string[],
     source?: { start: number, end: number }
 }
 
@@ -903,6 +1015,38 @@ function linkScopes(node: ts.Node, parentMap: ParentMap, scopes: Scopes, scopeCh
     findFunction(node)
 }
 
+function unwrapParenthesized(node: ts.Node): ts.Node {
+    while (ts.isParenthesizedExpression(node)) {
+        node = node.expression
+    }
+    return node
+}
+
+function collectEvalTaintedFunctions(node: ts.Node, parentMap: ParentMap, functions: Functions) {
+    const tainted = new Set<VariableRoot>()
+
+    function visit(node: ts.Node) {
+        if (ts.isCallExpression(node)) {
+            const callee = unwrapParenthesized(node.expression)
+            if (ts.isIdentifier(callee) && callee.text === 'eval') {
+                let current: ts.Node | undefined = node
+                while (current) {
+                    if (functions.has(current as VariableRoot)) {
+                        tainted.add(current as VariableRoot)
+                    }
+                    current = parentMap.get(current)?.node
+                }
+            }
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(node)
+
+    return tainted
+}
+
 /* istanbul ignore next */
 const mapVariables = (scopes: Scopes, scopeChild: ScopeChild) => {
     const hasParent: Set<ts.Node> = new Set()
@@ -981,6 +1125,28 @@ function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
     }
 }
 
+function pushUniqueName(list: string[], name: string) {
+    if (name !== '' && !list.includes(name)) {
+        list.push(name)
+    }
+}
+
+function getScopeDebugNames(node: ts.Node, scopes: Scopes): string[] {
+    const names: string[] = [...(scopes.get(node)?.keys() ?? [])]
+
+    if (isScopeRoot(node) && !ts.isSourceFile(node) && !ts.isArrowFunction(node)) {
+        pushUniqueName(names, SpecialVariable.This)
+        pushUniqueName(names, SpecialVariable.NewTarget)
+        pushUniqueName(names, 'arguments')
+    }
+
+    if (ts.isFunctionExpression(node) && node.name) {
+        pushUniqueName(names, node.name.text)
+    }
+
+    return names
+}
+
 function generateVariableList(node: ts.Node, scopes: Scopes): Op[] {
     const variables = scopes.get(node)!
 
@@ -993,9 +1159,11 @@ function generateVariableList(node: ts.Node, scopes: Scopes): Op[] {
 }
 
 function generateEnterScope(node: ts.Node, scopes: Scopes): Op<OpCode>[] {
+    const enter = op(OpCode.EnterScope)
+    enter.scopeDebugNames = getScopeDebugNames(node, scopes)
     const result = [
         ...generateVariableList(node, scopes),
-        op(OpCode.EnterScope)
+        enter
     ]
 
     if (result.length <= 2) {
@@ -1038,9 +1206,17 @@ function generateSegment(
     scopes: Scopes,
     parentMap: ParentMap,
     functions: Functions,
+    evalTaintedFunctions: Set<VariableRoot>,
     { withPos = false, withEval = false, withStrict = false }: SegmentOptions = {}
 ): Segment {
     let functionDeclarations: ts.FunctionDeclaration[] = []
+    type StaticAccess = {
+        depth: number
+        index: number
+        type: VariableType
+    }
+    const staticScopeSlotIndices = new Map<ts.Node, Map<string, number>>()
+    const staticResolutionEnabled = !withEval && !evalTaintedFunctions.has(node)
 
     function extractQuote(node: ts.Node) {
         if (ts.isParenthesizedExpression(node)) {
@@ -1048,6 +1224,87 @@ function generateSegment(
         } else {
             return node
         }
+    }
+    function isRuntimeScopeNode(node: ts.Node) {
+        return functions.has(node as VariableRoot) || (scopes.get(node)?.size ?? 0) > 0
+    }
+    function getHiddenRuntimeScopeDepth(node: ts.Node) {
+        if (ts.isSwitchStatement(node)) {
+            return 1
+        }
+        if (ts.isCatchClause(node) && node.variableDeclaration != null) {
+            return 1
+        }
+        return 0
+    }
+    function canStaticResolveScope(scopeNode: ts.Node) {
+        return !(ts.isSourceFile(scopeNode) && !withStrict)
+    }
+    function isStaticAccessUnchecked(access: StaticAccess) {
+        return access.type === VariableType.Var
+            || access.type === VariableType.Function
+            || access.type === VariableType.Parameter
+    }
+    function getStaticScopeSlotIndex(scopeNode: ts.Node, name: string): number | null {
+        let indexMap = staticScopeSlotIndices.get(scopeNode)
+        if (!indexMap) {
+            indexMap = new Map<string, number>()
+            const names = [...(scopes.get(scopeNode)?.keys() ?? [])].reverse()
+            for (let i = 0; i < names.length; i++) {
+                indexMap.set(names[i], i)
+            }
+            staticScopeSlotIndices.set(scopeNode, indexMap)
+        }
+        return indexMap.get(name) ?? null
+    }
+    function tryResolveStaticAccess(node: ts.Node, name: string): StaticAccess | null {
+        if (!staticResolutionEnabled) {
+            return null
+        }
+
+        let current: ts.Node | undefined = node
+        let depth = 0
+        while (current) {
+            if (isRuntimeScopeNode(current)) {
+                const scope = scopes.get(current)
+                if (scope?.has(name)) {
+                    if (!canStaticResolveScope(current)) {
+                        return null
+                    }
+                    const declaration = scope.get(name)!
+                    const index = getStaticScopeSlotIndex(current, name)
+                    if (index == null) {
+                        throw new Error('missing static slot for ' + name)
+                    }
+                    return { depth, index, type: declaration.type }
+                }
+                depth++
+            }
+            depth += getHiddenRuntimeScopeDepth(current)
+            current = parentMap.get(current)?.node
+        }
+
+        return null
+    }
+    function generateStaticAccessOps({ depth, index }: StaticAccess): Segment {
+        return [
+            op(OpCode.Literal, 2, [depth]),
+            op(OpCode.Literal, 2, [index]),
+        ]
+    }
+    function generateIdentifierGet(node: ts.Identifier): Segment {
+        const access = tryResolveStaticAccess(node, node.text)
+        if (access) {
+            return [
+                ...generateStaticAccessOps(access),
+                op(isStaticAccessUnchecked(access) ? OpCode.GetStaticUnchecked : OpCode.GetStatic),
+            ]
+        }
+        return [
+            op(OpCode.GetRecord),
+            op(OpCode.Literal, 2, [node.text]),
+            op(OpCode.Get),
+        ]
     }
     function generateLeft(node: ts.Node, flag: number): Segment {
         const res = generateLeft_(node, flag)
@@ -1157,30 +1414,49 @@ function generateSegment(
                 if (!ts.isIdentifier(declaration.name)) {
                     throw new Error('not support pattern yet')
                 }
+                const staticAccess = tryResolveStaticAccess(declaration.name, declaration.name.text)
 
                 if (declaration.initializer) {
-                    ops.push(...generateLeft(declaration.name, flag))
-
-                    ops.push(...generate(declaration.initializer, flag))
-
-                    ops.push(op(OpCode.SetInitialized))
+                    if (staticAccess) {
+                        ops.push(...generate(declaration.initializer, flag))
+                        ops.push(...generateStaticAccessOps(staticAccess))
+                        ops.push(op(OpCode.SetInitializedStatic))
+                    } else {
+                        ops.push(...generateLeft(declaration.name, flag))
+                        ops.push(...generate(declaration.initializer, flag))
+                        ops.push(op(OpCode.SetInitialized))
+                    }
                     ops.push(op(OpCode.Pop))
                     if (node.flags & ts.NodeFlags.Const) {
-                        ops.push(...markInternals([
-                            ...generateLeft(declaration.name, flag),
-                            op(OpCode.FreezeVariable),
-                            op(OpCode.Pop),
-                            op(OpCode.Pop)
-                        ]))
+                        if (staticAccess) {
+                            ops.push(...markInternals([
+                                ...generateStaticAccessOps(staticAccess),
+                                op(OpCode.FreezeVariableStatic),
+                            ]))
+                        } else {
+                            ops.push(...markInternals([
+                                ...generateLeft(declaration.name, flag),
+                                op(OpCode.FreezeVariable),
+                                op(OpCode.Pop),
+                                op(OpCode.Pop)
+                            ]))
+                        }
                     }
                 } else if (node.flags & ts.NodeFlags.Let) {
                     // unblock without doing anything
-                    ops.push(
-                        ...generateLeft(declaration.name, flag),
-                        op(OpCode.DeTDZ),
-                        op(OpCode.Pop),
-                        op(OpCode.Pop)
-                    )
+                    if (staticAccess) {
+                        ops.push(...markInternals([
+                            ...generateStaticAccessOps(staticAccess),
+                            op(OpCode.DeTDZStatic),
+                        ]))
+                    } else {
+                        ops.push(
+                            ...generateLeft(declaration.name, flag),
+                            op(OpCode.DeTDZ),
+                            op(OpCode.Pop),
+                            op(OpCode.Pop)
+                        )
+                    }
                 } else {
                     // a var without value effectively does nothing
                     // the variable already handled by the scope step
@@ -1287,11 +1563,7 @@ function generateSegment(
         }
 
         if (ts.isIdentifier(node)) {
-            return [
-                op(OpCode.GetRecord),
-                op(OpCode.Literal, 2, [node.text]),
-                op(OpCode.Get)
-            ]
+            return generateIdentifierGet(node)
         }
         if (ts.isReturnStatement(node)) {
             if (node.expression !== undefined) {
@@ -1323,11 +1595,29 @@ function generateSegment(
             // Prefix update
             switch (node.operator) {
                 case ts.SyntaxKind.PlusPlusToken:
+                    if (ts.isIdentifier(node.operand)) {
+                        const staticAccess = tryResolveStaticAccess(node.operand, node.operand.text)
+                        if (staticAccess) {
+                            return [
+                                ...generateStaticAccessOps(staticAccess),
+                                op(isStaticAccessUnchecked(staticAccess) ? OpCode.PrefixPlusPlusStaticUnchecked : OpCode.PrefixPlusPlusStatic)
+                            ]
+                        }
+                    }
                     return [
                         ...generateLeft(node.operand, flag),
                         op(OpCode.PrefixPlusPlus)
                     ]
                 case ts.SyntaxKind.MinusMinusToken:
+                    if (ts.isIdentifier(node.operand)) {
+                        const staticAccess = tryResolveStaticAccess(node.operand, node.operand.text)
+                        if (staticAccess) {
+                            return [
+                                ...generateStaticAccessOps(staticAccess),
+                                op(isStaticAccessUnchecked(staticAccess) ? OpCode.PrefixMinusMinusStaticUnchecked : OpCode.PrefixMinusMinusStatic)
+                            ]
+                        }
+                    }
                     return [
                         ...generateLeft(node.operand, flag),
                         op(OpCode.PrefixMinusMinus)
@@ -1418,6 +1708,19 @@ function generateSegment(
             }
 
             if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
+                if (ts.isIdentifier(self) && self.text !== 'eval') {
+                    const staticAccess = tryResolveStaticAccess(self, self.text)
+                    if (staticAccess) {
+                        return [
+                            ...generateStaticAccessOps(staticAccess),
+                            op(isStaticAccessUnchecked(staticAccess) ? OpCode.GetStaticUnchecked : OpCode.GetStatic),
+                            ...args,
+                            op(OpCode.Literal, 2, [node.arguments.length]),
+                            op(OpCode.CallValue)
+                        ]
+                    }
+                }
+
                 const leftOps = generateLeft(self, flag)
 
                 const isEval = ts.isIdentifier(self) && self.text === 'eval'
@@ -1783,6 +2086,29 @@ function generateSegment(
                 case ts.SyntaxKind.AsteriskEqualsToken:
                 case ts.SyntaxKind.EqualsToken:
                     const left = extractQuote(node.left)
+                    if (ts.isIdentifier(left)) {
+                        const staticAccess = tryResolveStaticAccess(left, left.text)
+                        if (staticAccess) {
+                            return [
+                                ...generate(node.right, flag),
+                                ...generateStaticAccessOps(staticAccess),
+                                op(
+                                    kind === ts.SyntaxKind.EqualsToken
+                                        ? (isStaticAccessUnchecked(staticAccess) ? OpCode.SetStaticUnchecked : OpCode.SetStatic)
+                                    : kind === ts.SyntaxKind.PlusEqualsToken
+                                        ? (isStaticAccessUnchecked(staticAccess) ? OpCode.BPlusEqualStaticUnchecked : OpCode.BPlusEqualStatic)
+                                    : kind === ts.SyntaxKind.MinusEqualsToken
+                                        ? (isStaticAccessUnchecked(staticAccess) ? OpCode.BMinusEqualStaticUnchecked : OpCode.BMinusEqualStatic)
+                                    : kind === ts.SyntaxKind.SlashEqualsToken
+                                        ? (isStaticAccessUnchecked(staticAccess) ? OpCode.BSlashEqualStaticUnchecked : OpCode.BSlashEqualStatic)
+                                    : kind === ts.SyntaxKind.AsteriskEqualsToken
+                                        ? (isStaticAccessUnchecked(staticAccess) ? OpCode.BAsteriskEqualStaticUnchecked : OpCode.BAsteriskEqualStatic)
+                                    :
+                                    abort('Why Am I here?')
+                                )
+                            ]
+                        }
+                    }
                     if (
                         ts.isPropertyAccessExpression(left) ||
                         ts.isElementAccessExpression(left) ||
@@ -1872,6 +2198,13 @@ function generateSegment(
         if (ts.isTypeOfExpression(node)) {
             const unwrapped = extractQuote(node.expression)
             if (ts.isIdentifier(unwrapped)) {
+                const staticAccess = tryResolveStaticAccess(unwrapped, unwrapped.text)
+                if (staticAccess) {
+                    return [
+                        ...generateStaticAccessOps(staticAccess),
+                        op(isStaticAccessUnchecked(staticAccess) ? OpCode.TypeofStaticReferenceUnchecked : OpCode.TypeofStaticReference)
+                    ]
+                }
                 return [
                     op(OpCode.GetRecord),
                     op(OpCode.Literal, 2, [unwrapped.text]),
@@ -1888,11 +2221,29 @@ function generateSegment(
         if (ts.isPostfixUnaryExpression(node)) {
             switch (node.operator) {
                 case ts.SyntaxKind.PlusPlusToken:
+                    if (ts.isIdentifier(node.operand)) {
+                        const staticAccess = tryResolveStaticAccess(node.operand, node.operand.text)
+                        if (staticAccess) {
+                            return [
+                                ...generateStaticAccessOps(staticAccess),
+                                op(isStaticAccessUnchecked(staticAccess) ? OpCode.PostFixPlusPLusStaticUnchecked : OpCode.PostFixPlusPLusStatic)
+                            ]
+                        }
+                    }
                     return [
                         ...generateLeft(node.operand, flag),
                         op(OpCode.PostFixPlusPLus)
                     ]
                 case ts.SyntaxKind.MinusMinusToken:
+                    if (ts.isIdentifier(node.operand)) {
+                        const staticAccess = tryResolveStaticAccess(node.operand, node.operand.text)
+                        if (staticAccess) {
+                            return [
+                                ...generateStaticAccessOps(staticAccess),
+                                op(isStaticAccessUnchecked(staticAccess) ? OpCode.PostFixMinusMinusStaticUnchecked : OpCode.PostFixMinusMinusStatic)
+                            ]
+                        }
+                    }
                     return [
                         ...generateLeft(node.operand, flag),
                         op(OpCode.PostFixMinusMinus)
@@ -2809,7 +3160,9 @@ function generateSegment(
     } else {
         entry.push(op(OpCode.NodeFunctionType, 2, [node]))
     }
-    entry.push(op(OpCode.EnterFunction))
+    const enterFunction = op(OpCode.EnterFunction)
+    enterFunction.scopeDebugNames = getScopeDebugNames(node, scopes)
+    entry.push(enterFunction)
 
     markInternals(entry)
 
@@ -2993,6 +3346,7 @@ export type CompileOptions = {
 export type DebugInfo = {
     sourceMap: [number, number, number, number][],
     internals: boolean[],
+    scopeDebugMap: ProgramScopeDebugMap,
     /** Byte length of executable code (words before literal pool tail). */
     codeLength: number
 }
@@ -3079,13 +3433,14 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
     searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
     resolveScopes(sourceNode, parentMap, functions, scopes)
     linkScopes(sourceNode, parentMap, scopes, scopeChild)
+    const evalTaintedFunctions = collectEvalTaintedFunctions(sourceNode, parentMap, functions)
 
     const program: Segment[] = []
 
     const functionToSegment = new Map<ts.Node, Segment>()
 
     for (let item of functions) {
-        const generated = generateSegment(item, scopes, parentMap, functions, {
+        const generated = generateSegment(item, scopes, parentMap, functions, evalTaintedFunctions, {
             withPos: range,
             withEval: (item.kind === ts.SyntaxKind.SourceFile) && evalMode
         })
@@ -3111,8 +3466,17 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
 
     const literalValues: any[] = []
     const programData: number[] = []
+    const scopeDebugMap: ProgramScopeDebugMap = new Map()
     const sourceMap: [number, number, number, number][] = []
     const internals: boolean[] = []
+
+    if (range || debug) {
+        for (const it of flattened) {
+            if (it.scopeDebugNames && it.scopeDebugNames.length > 0) {
+                scopeDebugMap.set(it.offset, [...it.scopeDebugNames])
+            }
+        }
+    }
 
     if (range) {
         for (let it of flattened) {
@@ -3142,5 +3506,5 @@ export function compile(src: string,  { debug = false, range = false, evalMode =
 
     finalizeLiteralPool(programData, literalValues)
 
-    return [programData, { sourceMap, internals, codeLength }]
+    return [programData, { sourceMap, internals, scopeDebugMap, codeLength }]
 }

@@ -23,6 +23,7 @@
 
 <script lang="ts">
 import Vue from 'vue'
+import { getScopeDebugEntries, isRuntimeInternalKey } from '../../src/runtime'
 
 enum EntryType {
     stringKeyProp,
@@ -52,6 +53,14 @@ export default Vue.extend({
         forcedProp: {
             type: Boolean,
             default: false
+        },
+        scopeValue: {
+            type: Boolean,
+            default: false
+        },
+        scopeDebugNames: {
+            type: Array as () => string[],
+            default: () => []
         },
         refreshKey: {
             type: Number,
@@ -86,7 +95,15 @@ export default Vue.extend({
                 return []
             }
 
-            const keys = Reflect.ownKeys(this.value as any)
+            if (this.scopeValue) {
+                return getScopeDebugEntries(this.value as any, this.scopeDebugNames as string[]).map(([key, value, isError]) => [
+                    isError ? EntryType.stringKeyError : EntryType.stringKeyProp,
+                    this.wrapIdentifier(key),
+                    value
+                ])
+            }
+
+            const keys = Reflect.ownKeys(this.value as any).filter(key => !isRuntimeInternalKey(key))
 
             const entries: [EntryType, string | symbol, unknown | PropertyDescriptor][] = []
 

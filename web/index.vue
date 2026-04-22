@@ -23,7 +23,7 @@
                 debug
             </div>
             <div class="pane-content">
-                <debugger :refreshKey="refreshKey" :stack-container="stackContainer" />
+                <debugger :refreshKey="refreshKey" :stack-container="stackContainer" :debug-info="debugInfo" />
             </div>
         </div>
         <div class="area-code pane">
@@ -165,6 +165,7 @@ function emptyDebugInfo(): DebugInfo {
     return {
         sourceMap: [],
         internals: [],
+        scopeDebugMap: new Map(),
         codeLength: 0
     }
 }
@@ -266,6 +267,20 @@ function makeGlobalThis() {
 const fakeGlobalThis = makeGlobalThis()
 
 type CodeSnippet = { id: string, label: string, code: string }
+
+function sameSourceMapPos(
+    a: [number, number, number, number] | undefined,
+    b: [number, number, number, number] | undefined
+) {
+    return a === b || (
+        a !== undefined
+        && b !== undefined
+        && a[0] === b[0]
+        && a[1] === b[1]
+        && a[2] === b[2]
+        && a[3] === b[3]
+    )
+}
 
 const CODE_SNIPPETS: CodeSnippet[] = [
     {
@@ -595,7 +610,7 @@ export default Vue.extend({
                     return this.getSourceMapAtPtr(execution)
                 }
 
-                const originalPos = getPos()?.join(',') ?? ''
+                const originalPos = getPos()
                 const getCurrentStackLength = () => execution[Fields.stack].filter(it => it[Fields.type] === FrameType.Function).length
                 let maxStack = getCurrentStackLength()
                 let skipping = false
@@ -619,7 +634,7 @@ export default Vue.extend({
                     maxStack = Math.min(maxStack, getCurrentStackLength())
                 } while (
                     (
-                        (getPos()?.join(',') ?? '') === originalPos ||
+                        sameSourceMapPos(getPos(), originalPos) ||
                         this.getInternalsAtPtr(execution) ||
                         skipping
                     )
@@ -667,7 +682,7 @@ export default Vue.extend({
                 return this.getSourceMapAtPtr(execution)
             }
 
-            let prevPos = getPos()?.join(',') ?? ''
+            let prevPos = getPos()
             const TICK_MS = 1000 / TICKS_PER_SECOND
             // Browsers clamp setTimeout to ~4ms; below that, batch multiple sim ticks per wake.
             const MIN_TIMER_MS = 4
@@ -717,14 +732,14 @@ export default Vue.extend({
                             && !highlightChanged
                             && !sim.vmBarrierBlocksExecution()
                         ) {
-                            result = execution[Fields.step](true)
+                            result = execution[Fields.step]()
                             if (sim.vmBarrierBlocksExecution()) {
                                 break
                             }
                             guardSteps++
-                            const posKey = getPos()?.join(',') ?? ''
-                            if (posKey !== prevPos && !this.getInternalsAtPtr(execution)) {
-                                prevPos = posKey
+                            const pos = getPos()
+                            if (!sameSourceMapPos(pos, prevPos) && !this.getInternalsAtPtr(execution)) {
+                                prevPos = pos
                                 highlightChanged = true
                                 highlightChangedBatch = true
                                 this.scheduleDebugHighlight()
