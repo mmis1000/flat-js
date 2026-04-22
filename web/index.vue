@@ -83,6 +83,8 @@
                 v-model="text"
                 :readonly="state !== 'idle'"
                 :highlights="highlights"
+                :breakpoints="breakpointLines"
+                @toggle-breakpoint="toggleBreakpoint"
             ></monaco>
         </div>
         <div class="mobile-tab-bar mobile-tab-bar-bottom">
@@ -490,6 +492,7 @@ export default Vue.extend({
             refreshKey: Math.random(),
             debugInfo: emptyDebugInfo(),
             highlights: <[number, number, number, number][]>[],
+            breakpointLines: [] as number[],
             sim: null as Sim | null,
             simRunner: null as SimulationRunner | null,
             /** Coalesce Monaco/debug updates to one paint per frame (avoids freezing at high tick rates). */
@@ -592,6 +595,31 @@ export default Vue.extend({
                 return true
             }
             return false
+        },
+        toggleBreakpoint(lineNumber: number) {
+            const points = new Set(this.breakpointLines)
+            if (points.has(lineNumber)) {
+                points.delete(lineNumber)
+            } else {
+                points.add(lineNumber)
+            }
+            this.breakpointLines = [...points].sort((a, b) => a - b)
+        },
+        posHasBreakpoint(pos: [number, number, number, number] | undefined): boolean {
+            if (!pos) {
+                return false
+            }
+            const startLine = pos[0] + 1
+            const endLine = pos[2] + 1
+            return this.breakpointLines.some((line) => line >= startLine && line <= endLine)
+        },
+        getBreakpointLinesInPos(pos: [number, number, number, number] | undefined): number[] {
+            if (!pos) {
+                return []
+            }
+            const startLine = pos[0] + 1
+            const endLine = pos[2] + 1
+            return this.breakpointLines.filter((line) => line >= startLine && line <= endLine)
         },
         cancelDebugHighlightRaf() {
             if (this.highlightRafId) {
@@ -753,6 +781,7 @@ export default Vue.extend({
             }
         },
         async runExecution() {
+            const resumedFromPause = this.state === 'paused'
             this.state = 'play'
             const execution = this.execution
             const sim = this.sim
@@ -776,6 +805,9 @@ export default Vue.extend({
             }
 
             let prevPos = getPos()
+            const ignoredBreakpointLines = new Set(
+                resumedFromPause ? this.getBreakpointLinesInPos(prevPos) : []
+            )
             const TICK_MS = 1000 / TICKS_PER_SECOND
             // Browsers clamp setTimeout to ~4ms; below that, batch multiple sim ticks per wake.
             const MIN_TIMER_MS = 4
@@ -832,12 +864,27 @@ export default Vue.extend({
                             guardSteps++
                             const pos = getPos()
                             if (!sameSourceMapPos(pos, prevPos) && !this.getInternalsAtPtr(execution)) {
+                                const breakpointLinesInPos = this.getBreakpointLinesInPos(pos)
+                                if (
+                                    ignoredBreakpointLines.size > 0
+                                    && !breakpointLinesInPos.some(line => ignoredBreakpointLines.has(line))
+                                ) {
+                                    ignoredBreakpointLines.clear()
+                                }
                                 prevPos = pos
+                                if (breakpointLinesInPos.some(line => !ignoredBreakpointLines.has(line))) {
+                                    highlightChanged = true
+                                    this.pause()
+                                    break
+                                }
                                 highlightChanged = true
                                 highlightChangedBatch = true
                                 this.scheduleDebugHighlight()
                             }
                             if (guardSteps > 200000) break
+                        }
+                        if (<State>this.state === 'paused') {
+                            break
                         }
                     }
                     if (wonThisBatch) {

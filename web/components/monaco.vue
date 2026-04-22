@@ -24,6 +24,12 @@ export default Vue.extend({
             default () {
                 return []
             }
+        },
+        breakpoints: {
+            type: Array as () => number[],
+            default () {
+                return []
+            }
         }
     },
     data () {
@@ -35,6 +41,9 @@ export default Vue.extend({
     computed: {
         highlightSerialized (): string {
             return JSON.stringify(this.highlights)
+        },
+        breakpointSerialized (): string {
+            return JSON.stringify(this.breakpoints)
         }
     },
     watch: {
@@ -51,12 +60,30 @@ export default Vue.extend({
             })
         },
         highlightSerialized () {
+            this.applyDecorations()
+        },
+        breakpointSerialized () {
+            this.applyDecorations()
+        }
+    },
+    methods: {
+        applyDecorations () {
             this.currentDecorations = this.editor.deltaDecorations(
                 this.currentDecorations,
-                this.highlights.map(([r1, c1, r2, c2]) => ({
-                    range: new monaco.Range(r1, c1, r2, c2), 
-                    options: { inlineClassName: 'inline-highlight' }
-                }))
+                [
+                    ...this.breakpoints.map((lineNumber) => ({
+                        range: new monaco.Range(lineNumber, 1, lineNumber, 1),
+                        options: {
+                            isWholeLine: true,
+                            glyphMarginClassName: 'breakpoint-glyph',
+                            glyphMarginHoverMessage: { value: 'Pause on this line' },
+                        }
+                    })),
+                    ...this.highlights.map(([r1, c1, r2, c2]) => ({
+                        range: new monaco.Range(r1, c1, r2, c2),
+                        options: { inlineClassName: 'inline-highlight' }
+                    }))
+                ]
             )
         }
     },
@@ -66,7 +93,8 @@ export default Vue.extend({
             value: this.value,
             language: 'javascript',
             scrollBeyondLastLine: false,
-            automaticLayout: true
+            automaticLayout: true,
+            glyphMargin: true,
         });
 
         editor.onDidChangeModelContent(ev => {
@@ -76,21 +104,26 @@ export default Vue.extend({
             }
         })
 
+        editor.onMouseDown((ev: monaco.editor.IEditorMouseEvent) => {
+            if (!ev.event.leftButton) return
+            const lineNumber = ev.target.position?.lineNumber
+            if (!lineNumber) return
+            if (
+                ev.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+                || ev.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS
+            ) {
+                ev.event.preventDefault()
+                this.$emit('toggle-breakpoint', lineNumber)
+            }
+        })
+
         if (this.readonly) {
             this.editor.updateOptions({
                 readOnly: true
             })
         }
 
-        if (this.highlights.length > 0) {
-            this.currentDecorations = this.editor.deltaDecorations(
-                this.currentDecorations,
-                this.highlights.map(([r1, c1, r2, c2]) => ({
-                    range: new monaco.Range(r1, c1, r2, c2), 
-                    options: { inlineClassName: 'inline-highlight' }
-                }))
-            )
-        }
+        this.applyDecorations()
     }
 })
 </script>
@@ -116,5 +149,15 @@ export default Vue.extend({
     bottom: 0.5px;
     width: 2px;
     background: rgb(251, 255, 0);
+}
+
+::v-deep .breakpoint-glyph {
+    width: 12px !important;
+    height: 12px !important;
+    margin-left: 4px;
+    margin-top: 4px;
+    border-radius: 999px;
+    background: #ff6868;
+    box-shadow: 0 0 0 1px rgba(33, 10, 10, 0.45), 0 0 10px rgba(255, 104, 104, 0.4);
 }
 </style>
