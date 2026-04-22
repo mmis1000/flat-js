@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flat JS Sim Stepping"
+  short_description: "Grounding for arena tick and VM step semantics"
+  default_prompt: "Use $flat-js-sim-stepping to ground changes to the arena tick loop, scan barriers, and debugger stepping."
