@@ -202,7 +202,7 @@ import GameCanvas from './components/game-canvas.vue'
 import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
-import { Sim, TICKS_PER_SECOND } from './game/sim'
+import { createSimulationSession, Sim, SimulationRunner, TICKS_PER_SECOND } from './game/sim'
 
 function emptyDebugInfo(): DebugInfo {
     return {
@@ -491,6 +491,7 @@ export default Vue.extend({
             debugInfo: emptyDebugInfo(),
             highlights: <[number, number, number, number][]>[],
             sim: null as Sim | null,
+            simRunner: null as SimulationRunner | null,
             /** Coalesce Monaco/debug updates to one paint per frame (avoids freezing at high tick rates). */
             highlightRafId: 0,
             /** >1 shortens wait between sim/VM steps (wall-clock); scales runExecution waitTick delays. */
@@ -610,6 +611,7 @@ export default Vue.extend({
         releaseVmResources() {
             this.releaseVmExecution()
             this.sim = null
+            this.simRunner = null
         },
         /** At most one Monaco highlight + debugger refresh per animation frame. */
         scheduleDebugHighlight() {
@@ -665,6 +667,8 @@ export default Vue.extend({
                 let skipping = false
                 let firstIgnored = false
                 const sim = this.sim
+                const runner = this.simRunner
+                if (!sim || !runner) return
 
                 do {
                     result = execution[Fields.step](true)
@@ -713,7 +717,8 @@ export default Vue.extend({
             this.state = 'play'
             const execution = this.execution
             const sim = this.sim
-            if (!sim || !execution) {
+            const runner = this.simRunner
+            if (!sim || !runner || !execution) {
                 this.state = 'idle'
                 return
             }
@@ -767,8 +772,8 @@ export default Vue.extend({
                     let wonThisBatch = false
                     let highlightChangedBatch = false
                     for (let t = 0; t < ticksPerTimer; t++) {
-                        sim.advanceOneTick()
-                        if (sim.won) {
+                        runner.stepOneTick()
+                        if (sim.view.won) {
                             wonThisBatch = true
                             break
                         }
@@ -808,9 +813,9 @@ export default Vue.extend({
                     this.flushDebugHighlightSync()
                 }
 
-                if (result[Fields.done] || sim.won) {
+                if (result[Fields.done] || sim.view.won) {
                     this.state = 'idle'
-                    this.scoreHistory.push(sim.tick)
+                    this.scoreHistory.push(sim.view.tick)
                 }
                 if (<State>this.state === 'idle') {
                     this.releaseVmExecution()
@@ -829,8 +834,9 @@ export default Vue.extend({
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
             }
 
-            const sim = new Sim({ randomizedStage: this.randomizedStage })
+            const { sim, runner } = createSimulationSession({ randomizedStage: this.randomizedStage })
             this.sim = sim
+            this.simRunner = runner
 
             const rotate = (deg: number) => {
                 const n = Number(deg) || 0
@@ -862,7 +868,7 @@ export default Vue.extend({
             const getLastMoveDistanceResult = (cb: (d: number) => void) => {
                 sim.deliverLastMoveDistanceResult(cb)
             }
-            const won = () => sim.won
+            const won = () => sim.view.won
 
             let programData: number[], debugInfo: DebugInfo
             try {

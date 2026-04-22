@@ -33,6 +33,7 @@ import {
     ActiveIntent,
     ARENA_H,
     ARENA_W,
+    Bot,
     BOT_R,
     Disc,
     DISC_R,
@@ -253,7 +254,7 @@ export default Vue.extend({
     },
     computed: {
         isReady(): boolean {
-            return !!(this.sim && this.sim.bot)
+            return !!(this.sim && this.sim.view.bot)
         },
     },
     watch: {
@@ -581,32 +582,36 @@ export default Vue.extend({
 
         updateWorldVisuals() {
             const sim = this.sim
-            if (!sim || !sim.bot) {
+            if (!sim) {
+                return
+            }
+            const view = sim.view
+            if (!view.bot) {
                 return
             }
 
-            this.isWon = sim.won
-            this.tickCount = sim.tick
+            this.isWon = view.won
+            this.tickCount = view.tick
 
-            const obstacleKey = sim.obstacles.map(o => `${o.x}|${o.y}|${o.w}|${o.h}`).join(';')
+            const obstacleKey = view.obstacles.map(o => `${o.x}|${o.y}|${o.w}|${o.h}`).join(';')
             if (obstacleKey !== this.lastObstacleKey) {
                 this.lastObstacleKey = obstacleKey
-                this.rebuildWallMeshes(sim.obstacles)
-                this.rebuildObstacleHitboxes(sim.obstacles)
+                this.rebuildWallMeshes(view.obstacles as Rect[])
+                this.rebuildObstacleHitboxes(view.obstacles as Rect[])
             }
 
-            const targetKey = sim.targets.map(t => `${t.x}|${t.y}|${t.w}|${t.h}`).join(';')
+            const targetKey = view.targets.map(t => `${t.x}|${t.y}|${t.w}|${t.h}`).join(';')
             if (targetKey !== this.lastTargetKey) {
                 this.lastTargetKey = targetKey
-                this.rebuildTargets(sim.targets)
+                this.rebuildTargets(view.targets as Target[])
             }
 
-            this.updateBot(sim.bot)
-            this.updateTargetVisibility(sim.targets)
-            this.updateDiscs(sim.discs)
-            this.updateScanRays(sim.currentScanRays ?? [])
-            this.updateIntentMarkers(sim.activeIntent)
-            this.updateHitboxVisibility(sim.targets)
+            this.updateBot(view.bot)
+            this.updateTargetVisibility(view.targets as Target[])
+            this.updateDiscs(view.discs as Disc[])
+            this.updateScanRays((view.currentScanRays ?? []) as ScanRayVisual[])
+            this.updateIntentMarkers(view.activeIntent)
+            this.updateHitboxVisibility(view.targets as Target[])
         },
 
         rebuildWallMeshes(obstacles: Rect[]) {
@@ -665,7 +670,7 @@ export default Vue.extend({
             }
         },
 
-        updateBot(bot: Sim['bot']) {
+        updateBot(bot: Bot) {
             if (!this.botGroup) {
                 return
             }
@@ -770,7 +775,7 @@ export default Vue.extend({
             }
         },
 
-        updateCamera(bot: Sim['bot']) {
+        updateCamera(bot: Bot) {
             if (!this.camera || !this.playerLight) {
                 return
             }
@@ -841,7 +846,11 @@ export default Vue.extend({
 
         drawTacticalMap(canvas: HTMLCanvasElement | undefined, compact: boolean) {
             const sim = this.sim
-            if (!sim || !sim.bot) {
+            if (!sim) {
+                return
+            }
+            const view = sim.view
+            if (!view.bot) {
                 return
             }
 
@@ -887,7 +896,7 @@ export default Vue.extend({
             }
             ctx.restore()
 
-            for (const ray of sim.currentScanRays ?? []) {
+            for (const ray of view.currentScanRays ?? []) {
                 const palette = rayColor(ray.hitType)
                 ctx.strokeStyle = palette.stroke
                 ctx.lineWidth = compact ? 1 : 2
@@ -898,18 +907,18 @@ export default Vue.extend({
             }
 
             ctx.fillStyle = 'rgba(11, 139, 215, 0.88)'
-            for (const obstacle of sim.obstacles) {
+            for (const obstacle of view.obstacles) {
                 ctx.fillRect(toX(obstacle.x), toY(obstacle.y), obstacle.w * scale, obstacle.h * scale)
             }
 
             if (this.showHitboxes) {
                 ctx.lineWidth = compact ? 1.2 : 2
                 ctx.strokeStyle = 'rgba(255, 90, 54, 0.92)'
-                for (const obstacle of sim.obstacles) {
+                for (const obstacle of view.obstacles) {
                     ctx.strokeRect(toX(obstacle.x), toY(obstacle.y), obstacle.w * scale, obstacle.h * scale)
                 }
                 ctx.strokeStyle = 'rgba(34, 255, 136, 0.92)'
-                for (const target of sim.targets) {
+                for (const target of view.targets) {
                     if (!target.hit) {
                         ctx.strokeRect(toX(target.x), toY(target.y), target.w * scale, target.h * scale)
                     }
@@ -917,14 +926,14 @@ export default Vue.extend({
             }
 
             ctx.fillStyle = '#22ff88'
-            for (const target of sim.targets) {
+            for (const target of view.targets) {
                 if (!target.hit) {
                     ctx.fillRect(toX(target.x), toY(target.y), target.w * scale, target.h * scale)
                 }
             }
 
             ctx.fillStyle = '#ffd54a'
-            for (const disc of sim.discs) {
+            for (const disc of view.discs) {
                 if (!disc.alive) {
                     continue
                 }
@@ -933,42 +942,42 @@ export default Vue.extend({
                 ctx.fill()
             }
 
-            if (sim.botPath.length >= 2) {
+            if (view.botPath.length >= 2) {
                 ctx.strokeStyle = compact ? 'rgba(103, 235, 255, 0.48)' : 'rgba(103, 235, 255, 0.56)'
                 ctx.lineWidth = compact ? 1.4 : 2.2
                 ctx.lineJoin = 'round'
                 ctx.lineCap = 'round'
                 ctx.beginPath()
-                ctx.moveTo(toX(sim.botPath[0].x), toY(sim.botPath[0].y))
-                for (let i = 1; i < sim.botPath.length; i++) {
-                    ctx.lineTo(toX(sim.botPath[i].x), toY(sim.botPath[i].y))
+                ctx.moveTo(toX(view.botPath[0].x), toY(view.botPath[0].y))
+                for (let i = 1; i < view.botPath.length; i++) {
+                    ctx.lineTo(toX(view.botPath[i].x), toY(view.botPath[i].y))
                 }
                 ctx.stroke()
             }
 
-            if (sim.activeIntent?.kind === 'move') {
+            if (view.activeIntent?.kind === 'move') {
                 ctx.strokeStyle = 'rgba(103, 235, 255, 0.95)'
                 ctx.lineWidth = compact ? 1.5 : 2.4
                 ctx.beginPath()
-                ctx.arc(toX(sim.activeIntent.endX), toY(sim.activeIntent.endY), compact ? 7 : 10, 0, Math.PI * 2)
+                ctx.arc(toX(view.activeIntent.endX), toY(view.activeIntent.endY), compact ? 7 : 10, 0, Math.PI * 2)
                 ctx.stroke()
                 ctx.beginPath()
-                ctx.moveTo(toX(sim.activeIntent.endX) - 11, toY(sim.activeIntent.endY))
-                ctx.lineTo(toX(sim.activeIntent.endX) + 11, toY(sim.activeIntent.endY))
-                ctx.moveTo(toX(sim.activeIntent.endX), toY(sim.activeIntent.endY) - 11)
-                ctx.lineTo(toX(sim.activeIntent.endX), toY(sim.activeIntent.endY) + 11)
+                ctx.moveTo(toX(view.activeIntent.endX) - 11, toY(view.activeIntent.endY))
+                ctx.lineTo(toX(view.activeIntent.endX) + 11, toY(view.activeIntent.endY))
+                ctx.moveTo(toX(view.activeIntent.endX), toY(view.activeIntent.endY) - 11)
+                ctx.lineTo(toX(view.activeIntent.endX), toY(view.activeIntent.endY) + 11)
                 ctx.stroke()
-            } else if (sim.activeIntent?.kind === 'rotate') {
-                const tipX = sim.activeIntent.startX + Math.cos(sim.activeIntent.endHeading) * INTENT_ARROW_LENGTH
-                const tipY = sim.activeIntent.startY + Math.sin(sim.activeIntent.endHeading) * INTENT_ARROW_LENGTH
+            } else if (view.activeIntent?.kind === 'rotate') {
+                const tipX = view.activeIntent.startX + Math.cos(view.activeIntent.endHeading) * INTENT_ARROW_LENGTH
+                const tipY = view.activeIntent.startY + Math.sin(view.activeIntent.endHeading) * INTENT_ARROW_LENGTH
                 ctx.strokeStyle = 'rgba(255, 191, 60, 0.95)'
                 ctx.fillStyle = 'rgba(255, 191, 60, 0.95)'
                 ctx.lineWidth = compact ? 1.6 : 2.4
                 ctx.beginPath()
-                ctx.moveTo(toX(sim.activeIntent.startX), toY(sim.activeIntent.startY))
+                ctx.moveTo(toX(view.activeIntent.startX), toY(view.activeIntent.startY))
                 ctx.lineTo(toX(tipX), toY(tipY))
                 ctx.stroke()
-                const arrowAngle = Math.atan2(tipY - sim.activeIntent.startY, tipX - sim.activeIntent.startX)
+                const arrowAngle = Math.atan2(tipY - view.activeIntent.startY, tipX - view.activeIntent.startX)
                 const arrowSize = compact ? 7 : 10
                 ctx.beginPath()
                 ctx.moveTo(toX(tipX), toY(tipY))
@@ -988,22 +997,22 @@ export default Vue.extend({
                 ctx.strokeStyle = 'rgba(103, 235, 255, 0.95)'
                 ctx.lineWidth = compact ? 1.3 : 2
                 ctx.beginPath()
-                ctx.arc(toX(sim.bot.x), toY(sim.bot.y), sim.bot.r * scale, 0, Math.PI * 2)
+                ctx.arc(toX(view.bot.x), toY(view.bot.y), view.bot.r * scale, 0, Math.PI * 2)
                 ctx.stroke()
             }
 
             ctx.fillStyle = '#56d8ff'
             ctx.beginPath()
-            ctx.arc(toX(sim.bot.x), toY(sim.bot.y), Math.max(4, sim.bot.r * scale), 0, Math.PI * 2)
+            ctx.arc(toX(view.bot.x), toY(view.bot.y), Math.max(4, view.bot.r * scale), 0, Math.PI * 2)
             ctx.fill()
 
-            const dx = Math.cos(sim.bot.heading)
-            const dy = Math.sin(sim.bot.heading)
+            const dx = Math.cos(view.bot.heading)
+            const dy = Math.sin(view.bot.heading)
             ctx.strokeStyle = '#fff7c0'
             ctx.lineWidth = compact ? 1.4 : 2.4
             ctx.beginPath()
-            ctx.moveTo(toX(sim.bot.x), toY(sim.bot.y))
-            ctx.lineTo(toX(sim.bot.x + dx * sim.bot.r * 1.8), toY(sim.bot.y + dy * sim.bot.r * 1.8))
+            ctx.moveTo(toX(view.bot.x), toY(view.bot.y))
+            ctx.lineTo(toX(view.bot.x + dx * view.bot.r * 1.8), toY(view.bot.y + dy * view.bot.r * 1.8))
             ctx.stroke()
         },
 
@@ -1019,10 +1028,11 @@ export default Vue.extend({
             }
 
             const sim = this.sim!
+            const bot = sim.view.bot
             this.updateWorldVisuals()
 
-            if (this.viewMode === 'follow3d' && this.camera && this.renderer) {
-                this.updateCamera(sim.bot)
+            if (this.viewMode === 'follow3d' && this.camera && this.renderer && bot) {
+                this.updateCamera(bot)
                 this.renderer.render(this.scene!, this.camera)
                 this.drawTacticalMap(this.$refs.hudCanvas as HTMLCanvasElement | undefined, true)
             } else {
