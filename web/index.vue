@@ -1,7 +1,7 @@
 <template>
     <div
         class="app"
-        :class="{ running: state !== 'idle' }"
+        :class="{ running: state !== 'idle', 'debug-collapsed': debugPaneCollapsed }"
         :data-mobile-top="mobileTopTab"
         :data-mobile-bottom="mobileBottomTab"
     >
@@ -19,34 +19,64 @@
             >Debug</button>
         </div>
         <div v-show="state !== 'idle'" class="area-debug pane">
-            <div class="pane-title">
-                debug
+            <div class="pane-title debug-pane-title">
+                <span class="debug-pane-heading">Debug</span>
+                <button
+                    type="button"
+                    class="debug-rail-button"
+                    @click="debugPaneCollapsed = !debugPaneCollapsed"
+                >
+                    {{ debugPaneCollapsed ? 'Expand' : 'Collapse' }}
+                </button>
             </div>
-            <div class="pane-content">
+            <div v-show="!debugPaneCollapsed" class="pane-content">
                 <debugger :refreshKey="refreshKey" :stack-container="stackContainer" :debug-info="debugInfo" />
             </div>
         </div>
         <div class="area-code pane">
             <div class="pane-title code-pane-title">
-                <span>Code</span>
-                <label class="snippet-label">
-                    Snippet
-                    <select
-                        v-model="selectedSnippetId"
-                        class="snippet-select"
-                        :disabled="state !== 'idle'"
-                        title="Load a starter program (only while idle)"
-                        @change="applySnippet"
+                <div class="code-title-group">
+                    <span>Code</span>
+                    <button
+                        v-if="state !== 'idle'"
+                        type="button"
+                        class="debug-rail-toggle"
+                        :aria-pressed="!debugPaneCollapsed"
+                        @click="debugPaneCollapsed = !debugPaneCollapsed"
                     >
-                        <option
-                            v-for="s in snippetList"
-                            :key="s.id"
-                            :value="s.id"
+                        {{ debugPaneCollapsed ? 'Show scopes' : 'Hide scopes' }}
+                    </button>
+                </div>
+                <div class="code-toolbar">
+                    <label class="snippet-label">
+                        Snippet
+                        <select
+                            v-model="selectedSnippetId"
+                            class="snippet-select"
+                            :disabled="state !== 'idle'"
+                            title="Load a starter program (only while idle)"
+                            @change="applySnippet"
                         >
-                            {{ s.label }}
-                        </option>
-                    </select>
-                </label>
+                            <option
+                                v-for="s in snippetList"
+                                :key="s.id"
+                                :value="s.id"
+                            >
+                                {{ s.label }}
+                            </option>
+                        </select>
+                    </label>
+                    <div class="execution-controls">
+                        <button v-if="state === 'idle'" class="run-button" @click="run">Run</button>
+                        <button v-if="state === 'idle'" class="run-button" @click="runAndPause">Run and pause</button>
+                        <button v-if="state === 'paused'" class="run-button" @click="resume">Resume</button>
+                        <button v-if="state === 'paused'" class="run-button" @click="stepExecution(false)">Step</button>
+                        <button v-if="state === 'paused'" class="run-button" @click="stepExecution(true)">Step in</button>
+                        <button v-if="state === 'paused'" class="run-button" @click="stop">Kill</button>
+                        <button v-if="state === 'play'" class="run-button" @click="pause">Pause</button>
+                        <button v-if="state === 'play'" class="run-button" @click="stop">Kill</button>
+                    </div>
+                </div>
             </div>
             <monaco
                 class="pane-content"
@@ -54,16 +84,6 @@
                 :readonly="state !== 'idle'"
                 :highlights="highlights"
             ></monaco>
-            <div class="pane-footer">
-                <button v-if="state === 'idle'" class="run-button" @click="run">Run</button>
-                <button v-if="state === 'idle'" class="run-button" @click="runAndPause">Run and pause</button>
-                <button v-if="state === 'paused'" class="run-button" @click="resume">Resume</button>
-                <button v-if="state === 'paused'" class="run-button" @click="stepExecution(false)">Step</button>
-                <button v-if="state === 'paused'" class="run-button" @click="stepExecution(true)">Step in</button>
-                <button v-if="state === 'paused'" class="run-button" @click="stop">Kill</button>
-                <button v-if="state === 'play'" class="run-button" @click="pause">Pause</button>
-                <button v-if="state === 'play'" class="run-button" @click="stop">Kill</button>
-            </div>
         </div>
         <div class="mobile-tab-bar mobile-tab-bar-bottom">
             <button
@@ -81,6 +101,22 @@
             <div class="pane-title game-pane-title">
                 <span>Game</span>
                 <div class="game-pane-controls">
+                    <div class="game-view-toggle" role="group" aria-label="Game view">
+                        <button
+                            type="button"
+                            :class="{ active: gameViewMode === 'follow3d' }"
+                            @click="gameViewMode = 'follow3d'"
+                        >
+                            3D
+                        </button>
+                        <button
+                            type="button"
+                            :class="{ active: gameViewMode === 'map2d' }"
+                            @click="gameViewMode = 'map2d'"
+                        >
+                            Map
+                        </button>
+                    </div>
                     <label class="game-random-label">
                         <input
                             v-model="randomizedStage"
@@ -88,6 +124,13 @@
                             :disabled="state !== 'idle'"
                         >
                         Random stage
+                    </label>
+                    <label class="game-hitbox-label">
+                        <input
+                            v-model="showHitboxes"
+                            type="checkbox"
+                        >
+                        Show hitboxes
                     </label>
                     <label class="game-continuous-label">
                         <input
@@ -130,7 +173,7 @@
                 </div>
             </div>
             <div class="game-pane">
-                <game-canvas :sim="sim" />
+                <game-canvas :sim="sim" :view-mode="gameViewMode" :show-hitboxes="showHitboxes" />
             </div>
         </div>
         <div class="area-output pane">
@@ -462,6 +505,9 @@ export default Vue.extend({
             program: [] as number[],
             /** Last `createVmHostRedirects` map (Math.random + forEach); used by REPL `run`. */
             vmHostRedirects: null as WeakMap<Function, Function> | null,
+            debugPaneCollapsed: false,
+            gameViewMode: 'follow3d' as 'follow3d' | 'map2d',
+            showHitboxes: false,
             mobileTopTab: 'code' as 'code' | 'debug',
             mobileBottomTab: 'game' as 'game' | 'output',
         })()
@@ -481,6 +527,9 @@ export default Vue.extend({
         state (val: State) {
             if (val === 'idle' && this.mobileTopTab === 'debug') {
                 this.mobileTopTab = 'code'
+            }
+            if (val === 'idle') {
+                this.debugPaneCollapsed = false
             }
         },
         async result () {
@@ -976,30 +1025,36 @@ pre {
 </style>
 <style scoped>
 .app {
+    --debug-width: 0px;
     height: 100vh;
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
     min-width: 0;
     display: grid;
-    /* Code left (wide), game on top-right, output on bottom-right */
     grid-template-areas:
         "code game"
         "code output";
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 400px);
-    grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) clamp(420px, 32vw, 620px);
+    grid-template-rows: minmax(300px, 1.45fr) minmax(160px, 0.72fr);
+    background: #000;
 }
 .app.running {
+    --debug-width: 340px;
     grid-template-areas:
         "debug code game"
         "debug code output";
-    grid-template-columns: minmax(0, 400px) minmax(0, 1fr) minmax(280px, 400px);
-    grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-columns: var(--debug-width) minmax(0, 1fr) clamp(420px, 32vw, 620px);
+}
+.app.running.debug-collapsed {
+    --debug-width: 64px;
 }
 .area-debug {
     grid-area: debug;
-    border-right: 1px solid rgba(127, 127, 127, 0.5);
     min-width: 0;
+    min-height: 0;
+    border-right: 1px solid rgba(127, 127, 127, 0.5);
+    background: rgba(3, 8, 12, 0.92);
 }
 .area-debug .pane-content {
     overflow-y: auto;
@@ -1007,26 +1062,107 @@ pre {
 .area-code {
     grid-area: code;
     min-width: 0;
+    min-height: 0;
 }
 .area-game {
     grid-area: game;
     min-width: 0;
     min-height: 0;
     border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+    background: #01060a;
 }
 .area-output {
     grid-area: output;
     min-width: 0;
     min-height: 0;
+    background: #030507;
 }
 .mobile-tab-bar {
     display: none;
 }
-.code-pane-title {
+.pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+.pane-title {
+    padding: 0.9em 1em;
+    flex: 0 0 auto;
+    border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+}
+.pane-content {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+.pane-footer {
+    flex: 0 0 auto;
+}
+.debug-pane-title {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.78em;
+    color: #d0edf8;
+}
+.debug-pane-heading {
+    font-weight: 600;
+}
+.debug-rail-button,
+.debug-rail-toggle,
+.run-button,
+.game-clear-avg,
+.game-view-toggle button {
+    border: 1px solid rgba(120, 180, 205, 0.28);
+    background: linear-gradient(180deg, rgba(31, 46, 58, 0.98), rgba(15, 22, 29, 0.98));
+    color: #f7fbff;
+    border-radius: 999px;
+    font: inherit;
+    cursor: pointer;
+}
+.debug-rail-button,
+.debug-rail-toggle,
+.game-clear-avg {
+    padding: 0.35em 0.75em;
+}
+.app.running.debug-collapsed .debug-pane-title {
+    align-items: center;
+    justify-content: flex-start;
+    flex-direction: column;
+    height: 100%;
+    padding: 0.8em 0.4em;
+}
+.app.running.debug-collapsed .debug-pane-heading {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+}
+.code-pane-title {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75em 1em;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.code-title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    min-width: 0;
+}
+.code-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75em 1em;
+    flex-wrap: wrap;
+    flex: 1 1 26em;
     min-width: 0;
 }
 .snippet-label {
@@ -1040,38 +1176,16 @@ pre {
     background: #333;
     color: #eee;
     border: 1px solid #555;
-    padding: 0.2em 0.35em;
-    border-radius: 2px;
+    padding: 0.25em 0.4em;
+    border-radius: 999px;
     min-width: 0;
 }
-.area-code .pane-footer {
+.execution-controls {
     display: flex;
-    align-items: stretch;
-    justify-content: stretch;
-}
-.area-code .pane-footer > * {
-    flex: 1 1 0;
-    position: relative;
-}
-.area-code .pane-footer > *:not(:first-child)::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: rgba(255, 255, 255, 0.5);
-}
-.pane {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    overflow: clip;
-}
-.pane-title {
-    padding: 1em;
-    flex-grow: 0;
-    border-bottom: 1px solid rgba(127, 127, 127, 0.5);
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.45em;
+    flex-wrap: wrap;
 }
 .game-pane-title {
     display: flex;
@@ -1089,7 +1203,27 @@ pre {
     gap: 0.65em 1em;
     min-width: 0;
 }
-.game-random-label {
+.game-view-toggle {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(120, 180, 205, 0.28);
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(9, 16, 23, 0.9);
+}
+.game-view-toggle button {
+    padding: 0.35em 0.8em;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #9ec7d9;
+}
+.game-view-toggle button.active {
+    background: #67ebff;
+    color: #05131b;
+}
+.game-random-label,
+.game-hitbox-label {
     display: flex;
     align-items: center;
     gap: 0.35em;
@@ -1098,7 +1232,8 @@ pre {
     cursor: pointer;
     user-select: none;
 }
-.game-random-label input {
+.game-random-label input,
+.game-hitbox-label input {
     cursor: pointer;
 }
 .game-speed-label {
@@ -1112,8 +1247,8 @@ pre {
     background: #333;
     color: #eee;
     border: 1px solid #555;
-    padding: 0.2em 0.35em;
-    border-radius: 2px;
+    padding: 0.25em 0.4em;
+    border-radius: 999px;
 }
 .game-continuous-label {
     display: flex;
@@ -1137,32 +1272,14 @@ pre {
 }
 .game-clear-avg {
     font-size: 0.8em;
-    padding: 0.2em 0.5em;
-    background: #333;
-    color: #ccc;
-    border: 1px solid #555;
-    border-radius: 2px;
-    cursor: pointer;
 }
 .game-clear-avg:disabled {
     opacity: 0.45;
     cursor: default;
 }
-.pane-content {
-    flex-grow: 1;
-    flex-basis: 0;
-    min-width: 0;
-    overflow: hidden;
-    overflow: clip;
-}
-.pane-footer {
-    flex-grow: 0;
-}
 .run-button {
-    border: 0;
-    background: #777;
-    padding: 1em;
-    color: white;
+    padding: 0.42em 0.82em;
+    white-space: nowrap;
 }
 .output-header {
     flex-shrink: 0;
@@ -1183,12 +1300,12 @@ pre {
     flex: 1 1 0;
     min-height: 0;
     min-width: 0;
-    padding: 8px;
+    padding: 10px;
     box-sizing: border-box;
     display: flex;
     justify-content: center;
     align-items: center;
-    background: #000;
+    background: #02090d;
     overflow: hidden;
 }
 .result {
@@ -1226,6 +1343,9 @@ pre {
             "bottom";
         grid-template-columns: minmax(0, 1fr);
         grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 1fr);
+    }
+    .app.running.debug-collapsed {
+        --debug-width: 0px;
     }
     .mobile-tab-bar {
         display: flex;
@@ -1274,6 +1394,19 @@ pre {
     .app[data-mobile-bottom="game"] .area-output,
     .app[data-mobile-bottom="output"] .area-game {
         display: none;
+    }
+    .code-pane-title,
+    .game-pane-title {
+        align-items: stretch;
+    }
+    .code-toolbar,
+    .game-pane-controls,
+    .execution-controls {
+        justify-content: flex-start;
+    }
+    .app.running.debug-collapsed .debug-pane-heading {
+        writing-mode: initial;
+        transform: none;
     }
 }
 </style>

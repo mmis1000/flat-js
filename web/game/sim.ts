@@ -4,6 +4,24 @@ export type Disc = { x: number, y: number, vx: number, vy: number, r: number, al
 export type Bot = { x: number, y: number, r: number, heading: number }
 export type HitType = 'wall' | 'obstacle' | 'target' | 'disc'
 export type ScanHit = { distance: number, type: HitType }
+export type ScanRayHitType = HitType | 'miss'
+export type ScanRayVisual = {
+    x1: number
+    y1: number
+    x2: number
+    y2: number
+    distance: number
+    hitType: ScanRayHitType
+}
+export type ActiveIntent = {
+    kind: 'move' | 'rotate'
+    startX: number
+    startY: number
+    startHeading: number
+    endX: number
+    endY: number
+    endHeading: number
+}
 
 export type Snapshot = {
     tick: number
@@ -11,7 +29,7 @@ export type Snapshot = {
     discs: Disc[]
     targets: Target[]
     won: boolean
-    scanRays?: { x1: number, y1: number, x2: number, y2: number }[]
+    scanRays?: ScanRayVisual[]
 }
 
 type WorldJob =
@@ -130,6 +148,7 @@ export class Sim {
     shootCooldown = 0
     lastSnapshot: Snapshot | null = null
     currentScanRays?: Snapshot['scanRays']
+    activeIntent: ActiveIntent | null = null
 
     private worldQueue: WorldJob[] = []
 
@@ -197,6 +216,7 @@ export class Sim {
         this.shootActive = false
         this.shootPhase = null
         this.lastMoveReturnedDistance = 0
+        this.activeIntent = null
         this.botPath = []
         this.worldQueue = []
         this.vmBarrier = null
@@ -355,16 +375,36 @@ export class Sim {
         this.pendingMoveRemaining = signedDist
         this.pendingMoveMoved = 0
         this.lastMoveReturnedDistance = 0
+        const destination = this.previewMoveDestination(signedDist)
+        this.activeIntent = {
+            kind: 'move',
+            startX: this.bot.x,
+            startY: this.bot.y,
+            startHeading: this.bot.heading,
+            endX: destination.x,
+            endY: destination.y,
+            endHeading: this.bot.heading,
+        }
     }
 
     private startRotateJob(rad: number) {
         this.rotateActive = true
         this.pendingRotateRemaining = rad
+        this.activeIntent = {
+            kind: 'rotate',
+            startX: this.bot.x,
+            startY: this.bot.y,
+            startHeading: this.bot.heading,
+            endX: this.bot.x,
+            endY: this.bot.y,
+            endHeading: this.bot.heading + rad,
+        }
     }
 
     private startShootJob() {
         this.shootActive = true
         this.shootPhase = this.shootCooldown > 0 ? 'cooldown' : 'fire_next'
+        this.activeIntent = null
     }
 
     private tryStartNextWorldJob() {
@@ -423,12 +463,15 @@ export class Sim {
             const angle = this.bot.heading - half + t * (2 * half)
             const hits = this.castRay(this.bot.x, this.bot.y, angle)
             result.push(hits)
-            const first = hits.length > 0 ? hits[0].distance : SCAN_RANGE
+            const first = hits[0]
+            const distance = first?.distance ?? SCAN_RANGE
             rayVis.push({
                 x1: this.bot.x,
                 y1: this.bot.y,
-                x2: this.bot.x + Math.cos(angle) * first,
-                y2: this.bot.y + Math.sin(angle) * first,
+                x2: this.bot.x + Math.cos(angle) * distance,
+                y2: this.bot.y + Math.sin(angle) * distance,
+                distance,
+                hitType: first?.type ?? 'miss',
             })
         }
         this.currentScanRays = rayVis
@@ -523,15 +566,7 @@ export class Sim {
     private tryBotMoveStep(dx: number, dy: number): boolean {
         const nx = this.bot.x + dx
         const ny = this.bot.y + dy
-        let blocked = false
-        if (nx - this.bot.r < 0 || nx + this.bot.r > ARENA_W || ny - this.bot.r < 0 || ny + this.bot.r > ARENA_H) {
-            blocked = true
-        }
-        if (!blocked) {
-            for (const o of this.obstacles) {
-                if (circleHitsRect(nx, ny, this.bot.r, o)) { blocked = true; break }
-            }
-        }
+        const blocked = this.isBotPositionBlocked(nx, ny)
         if (!blocked) {
             this.bot.x = nx
             this.bot.y = ny
@@ -540,15 +575,55 @@ export class Sim {
         return blocked
     }
 
+    private isBotPositionBlocked(x: number, y: number): boolean {
+        if (x - this.bot.r < 0 || x + this.bot.r > ARENA_W || y - this.bot.r < 0 || y + this.bot.r > ARENA_H) {
+            return true
+        }
+        for (const o of this.obstacles) {
+            if (circleHitsRect(x, y, this.bot.r, o)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private previewMoveDestination(signedDist: number) {
+        let previewX = this.bot.x
+        let previewY = this.bot.y
+        let remaining = signedDist
+        const dirX = Math.cos(this.bot.heading)
+        const dirY = Math.sin(this.bot.heading)
+
+        while (Math.abs(remaining) >= 1e-9) {
+            const step = Math.min(BOT_MOVE_PER_TICK, Math.abs(remaining))
+            const sign = Math.sign(remaining)
+            const nx = previewX + dirX * step * sign
+            const ny = previewY + dirY * step * sign
+            if (this.isBotPositionBlocked(nx, ny)) {
+                break
+            }
+            previewX = nx
+            previewY = ny
+            remaining -= step * sign
+        }
+
+        return { x: previewX, y: previewY }
+    }
+
+    private finishMoveJob() {
+        this.lastMoveReturnedDistance = this.pendingMoveMoved
+        this.moveActive = false
+        this.pendingMoveRemaining = 0
+        this.pendingMoveMoved = 0
+        this.activeIntent = null
+        this.tryStartNextWorldJob()
+    }
+
     private stepPendingMove() {
         if (!this.moveActive) return
         const rem = this.pendingMoveRemaining
         if (Math.abs(rem) < 1e-9) {
-            this.lastMoveReturnedDistance = this.pendingMoveMoved
-            this.moveActive = false
-            this.pendingMoveRemaining = 0
-            this.pendingMoveMoved = 0
-            this.tryStartNextWorldJob()
+            this.finishMoveJob()
             return
         }
         const step = Math.min(BOT_MOVE_PER_TICK, Math.abs(rem))
@@ -557,31 +632,28 @@ export class Sim {
         const dy = Math.sin(this.bot.heading) * step * s
         const blocked = this.tryBotMoveStep(dx, dy)
         if (blocked) {
-            this.lastMoveReturnedDistance = this.pendingMoveMoved
-            this.moveActive = false
-            this.pendingMoveRemaining = 0
-            this.pendingMoveMoved = 0
-            this.tryStartNextWorldJob()
+            this.finishMoveJob()
             return
         }
         this.pendingMoveMoved += step
         this.pendingMoveRemaining = rem - step * s
         if (Math.abs(this.pendingMoveRemaining) < 1e-9) {
-            this.lastMoveReturnedDistance = this.pendingMoveMoved
-            this.moveActive = false
-            this.pendingMoveRemaining = 0
-            this.pendingMoveMoved = 0
-            this.tryStartNextWorldJob()
+            this.finishMoveJob()
         }
+    }
+
+    private finishRotateJob() {
+        this.rotateActive = false
+        this.pendingRotateRemaining = 0
+        this.activeIntent = null
+        this.tryStartNextWorldJob()
     }
 
     private stepPendingRotate() {
         if (!this.rotateActive) return
         const rem = this.pendingRotateRemaining
         if (Math.abs(rem) < 1e-12) {
-            this.rotateActive = false
-            this.pendingRotateRemaining = 0
-            this.tryStartNextWorldJob()
+            this.finishRotateJob()
             return
         }
         const step = Math.min(BOT_ROTATE_RAD_PER_TICK, Math.abs(rem))
@@ -589,9 +661,7 @@ export class Sim {
         this.bot.heading += step * s
         this.pendingRotateRemaining = rem - step * s
         if (Math.abs(this.pendingRotateRemaining) < 1e-12) {
-            this.rotateActive = false
-            this.pendingRotateRemaining = 0
-            this.tryStartNextWorldJob()
+            this.finishRotateJob()
         }
     }
 
