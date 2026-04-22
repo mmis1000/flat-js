@@ -657,6 +657,38 @@ export default Vue.extend({
             let result: Result
 
             try {
+                const sim = this.sim
+                const runner = this.simRunner
+                if (!sim || !runner) return
+
+                const drainVmBarrier = () => {
+                    let barrierTicks = 0
+                    while (sim.vmBarrierBlocksExecution()) {
+                        runner.stepOneTick()
+                        barrierTicks++
+                        if (sim.view.won) {
+                            this.state = 'idle'
+                            return
+                        }
+                        if (barrierTicks > 200000) {
+                            break
+                        }
+                    }
+                }
+
+                if (sim.vmBarrierBlocksExecution()) {
+                    drainVmBarrier()
+                    if (this.state === 'idle') {
+                        this.cancelDebugHighlightRaf()
+                        this.highlights = []
+                        return
+                    }
+                    if (sim.vmBarrierBlocksExecution()) {
+                        this.flushDebugHighlightSync()
+                        return
+                    }
+                }
+
                 const getPos = () => {
                     return this.getSourceMapAtPtr(execution)
                 }
@@ -666,12 +698,20 @@ export default Vue.extend({
                 let maxStack = getCurrentStackLength()
                 let skipping = false
                 let firstIgnored = false
-                const sim = this.sim
-                const runner = this.simRunner
-                if (!sim || !runner) return
 
                 do {
                     result = execution[Fields.step](true)
+
+                    if (sim.vmBarrierBlocksExecution()) {
+                        drainVmBarrier()
+                        if (this.state === 'idle') {
+                            break
+                        }
+                        if (sim.vmBarrierBlocksExecution()) {
+                            this.flushDebugHighlightSync()
+                            return
+                        }
+                    }
 
                     if (!skipping) {
                         skipping = stepIn ? false : getCurrentStackLength() > maxStack
@@ -692,13 +732,12 @@ export default Vue.extend({
                         skipping
                     )
                     && !result[Fields.done]
-                    && !(sim && sim.vmBarrierBlocksExecution())
                 )
 
                 if (!result[Fields.done]) {
                     this.scheduleDebugHighlight()
                 }
-                if (result[Fields.done]) {
+                if (result[Fields.done] || sim.view.won) {
                     this.state = 'idle'
                 }
                 if (this.state === 'idle') {
