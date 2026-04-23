@@ -210,6 +210,7 @@ import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
 import { createSimulationSession, Sim, SimulationRunner, StageMode, TICKS_PER_SECOND } from './game/sim'
 import { CODE_SNIPPETS, CodeSnippet } from './game/code-snippets'
+import { createTickWaiter } from './game/tick-waiter'
 
 function emptyDebugInfo(): DebugInfo {
     return {
@@ -675,18 +676,13 @@ export default Vue.extend({
                 ? TICK_MS
                 : Math.max(MIN_TIMER_MS, ticksPerTimer * TICK_MS)
 
-            let nextWakeAt = performance.now()
             const scaledWaitMs = () => {
                 const s = Math.max(0.1, Math.min(128, this.gameSpeedMultiplier))
                 return waitDurationMs / s
             }
-            const waitTick = async () => {
-                nextWakeAt += scaledWaitMs()
-                const now = performance.now()
-                if (now < nextWakeAt) {
-                    await new Promise(r => setTimeout(r, nextWakeAt - now))
-                }
-            }
+            // Repeated near-immediate wakes can starve the browser event loop on high-speed runs.
+            // After a short streak, force a real timer yield and restart pacing from "now".
+            const waitTick = createTickWaiter({ scaledWaitMs })
 
             try {
                 while (<State>this.state === 'play') {
