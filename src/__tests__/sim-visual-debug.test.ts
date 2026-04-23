@@ -22,14 +22,23 @@ function makeSingleBotStage(overrides?: Partial<StageDefinition['actors'][number
     }
 }
 
-test('sim exposes a frozen read-only view and no public tick method', () => {
-    const { sim } = createSimulationSession()
+test('sim exposes snapshot views without a public tick method', () => {
+    const { sim, runner } = createSimulationSession()
+    const bot = sim.view.bot
+    const targets = sim.view.targets
 
     expect((sim as any).advanceOneTick).toBeUndefined()
-    expect(Object.isFrozen(sim.view)).toBe(true)
-    expect(Object.isFrozen(sim.view.discs)).toBe(true)
-    expect(Object.isFrozen(sim.view.targets)).toBe(true)
-    expect(Object.isFrozen(sim.view.bot)).toBe(true)
+    expect(Object.isFrozen(sim.view)).toBe(false)
+
+    if (bot) {
+        ;(bot as any).x = -999
+    }
+    ;(targets as any).length = 0
+
+    runner.stepOneTick()
+
+    expect(sim.view.bot?.x).not.toBe(-999)
+    expect(sim.view.targets.length).toBeGreaterThan(0)
 })
 
 test('scan ray visuals keep the first hit type and distance', () => {
@@ -139,4 +148,3 @@ test('barrier state only advances when the runner steps', () => {
     runner.stepOneTick()
     expect(sim.view.currentScanRays).toBeDefined()
 })
-

@@ -185,8 +185,11 @@ export type StageDefinition = {
     objects: StageObjectDefinition[]
 }
 
+export type StageMode = 'default' | 'random' | 'hardRandom'
+
 export type SimOptions = {
     stage?: StageDefinition
+    stageMode?: StageMode
     randomizedStage?: boolean
     seed?: number
 }
@@ -221,4 +224,3 @@ export const TARGET_H = 40
 
 export const PRIMARY_CONTROLLER_ID = 'player-1'
 export const PRIMARY_TEAM_ID = 'team-1'
-

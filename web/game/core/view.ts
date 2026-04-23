@@ -1,7 +1,6 @@
 import {
     ActiveIntent,
     Bot,
-    DeepReadonly,
     Disc,
     Point,
     Rect,
@@ -79,20 +78,9 @@ function cloneActiveIntent(world: WorldState): ActiveIntent | null {
     return { ...activeAction.intent }
 }
 
-function deepFreeze<T>(value: T): DeepReadonly<T> {
-    if (value == null || typeof value !== 'object' || Object.isFrozen(value)) {
-        return value as DeepReadonly<T>
-    }
-    Object.freeze(value)
-    for (const nested of Object.values(value as Record<string, unknown>)) {
-        deepFreeze(nested)
-    }
-    return value as DeepReadonly<T>
-}
-
-export function projectSimView(world: WorldState, freeze = true): SimView {
+export function projectSimView(world: WorldState): SimView {
     const actor = getPrimaryActor(world)
-    const view = {
+    const view: SimView = {
         tick: world.tick,
         bot: cloneBot(world),
         discs: cloneDiscs(world),
@@ -106,6 +94,5 @@ export function projectSimView(world: WorldState, freeze = true): SimView {
         lastMoveReturnedDistance: actor?.lastMoveReturnedDistance ?? 0,
         botPath: clonePoints(actor?.path ?? []),
     }
-    return freeze ? deepFreeze(view) as SimView : view as SimView
+    return view
 }
-

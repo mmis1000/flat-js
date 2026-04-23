@@ -27,6 +27,7 @@ export type {
     ScanHit,
     ScanRayHitType,
     ScanRayVisual,
+    StageMode,
     SimOptions,
     SimView,
     Snapshot,
@@ -162,4 +163,3 @@ export function createSimulationTestHarness(options?: SimOptions & { hooks?: Sim
         },
     }
 }
-

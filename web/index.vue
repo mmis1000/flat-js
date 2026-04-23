@@ -119,13 +119,17 @@
                             Map
                         </button>
                     </div>
-                    <label class="game-random-label">
-                        <input
-                            v-model="randomizedStage"
-                            type="checkbox"
+                    <label class="game-stage-label">
+                        Stage
+                        <select
+                            v-model="stageMode"
+                            class="game-stage-select"
                             :disabled="state !== 'idle'"
                         >
-                        Random stage
+                            <option value="default">Default</option>
+                            <option value="random">Random</option>
+                            <option value="hardRandom">Hard random</option>
+                        </select>
                     </label>
                     <label class="game-hitbox-label">
                         <input
@@ -204,7 +208,8 @@ import GameCanvas from './components/game-canvas.vue'
 import { FrameType, Result, Stack } from '../src/runtime'
 import { Fields } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
-import { createSimulationSession, Sim, SimulationRunner, TICKS_PER_SECOND } from './game/sim'
+import { createSimulationSession, Sim, SimulationRunner, StageMode, TICKS_PER_SECOND } from './game/sim'
+import { CODE_SNIPPETS, CodeSnippet } from './game/code-snippets'
 
 function emptyDebugInfo(): DebugInfo {
     return {
@@ -311,8 +316,6 @@ function makeGlobalThis() {
 
 const fakeGlobalThis = makeGlobalThis()
 
-type CodeSnippet = { id: string, label: string, code: string }
-
 function sameSourceMapPos(
     a: [number, number, number, number] | undefined,
     b: [number, number, number, number] | undefined
@@ -326,152 +329,6 @@ function sameSourceMapPos(
         && a[3] === b[3]
     )
 }
-
-const CODE_SNIPPETS: CodeSnippet[] = [
-    {
-        id: 'scan-aim',
-        label: 'Scan & aim',
-        code: `// Robot controls:
-//   rotate(deg)      turn (deg), positive = clockwise
-//   move(distance)   enqueue forward motion (FIFO with rotate/shoot); VM keeps running
-//   lastMoveDistance()  after prior moves finish: pixels moved for last completed segment (less if blocked)
-//   shoot()          enqueue a shot (FIFO)
-//   scan(rays)       1..90 rays across a 90-deg forward arc; waits for queued world actions + scan timing
-//                    returns array of per-ray hit lists (length === rays)
-//                    each hit: { distance, type }
-//                    type: 'wall' | 'obstacle' | 'target' | 'disc'
-//   won()            true once a disc has hit the green target
-// Win by hitting the green target with a disc.
-// Note: scan rays only see line-of-sight; the disc can still clip obstacles off-center,
-// so after shooting we strafe sideways to break "aim OK but disc always blocked" loops.
-
-clear()
-
-let unstuck = 0
-
-while (!won()) {
-  // Fewer rays => shorter scan (fewer world ticks per loop); 9 is enough for ~11° steps on the arc.
-  const rays = 9
-  const sweep = scan(rays)
-
-  // Find a ray whose FIRST hit is the target (nothing in the way).
-  let bestIdx = -1, bestDist = Infinity
-  for (let i = 0; i < sweep.length; i++) {
-    const hits = sweep[i]
-    if (hits.length > 0 && hits[0].type === 'target' && hits[0].distance < bestDist) {
-      bestDist = hits[0].distance
-      bestIdx = i
-    }
-  }
-
-  if (bestIdx >= 0) {
-    unstuck = 0
-    const t = bestIdx / (rays - 1)
-    const deg = -45 + t * 90
-    rotate(deg)
-    shoot()
-    // Side-step: same LOS as scan can still mean a blocked disc path; strafe for a new firing point.
-    if (Math.random() > 0.5) {
-      move(5)
-      rotate(90)
-      move(8)
-      rotate(-90)
-    } else {
-      move(5)
-      rotate(-90)
-      move(8)
-      rotate(90)
-    }
-  } else {
-    const want = 24
-    if (unstuck !== 0) {
-      move(want)
-      if (lastMoveDistance() >= want - 0.5) {
-        unstuck = 0
-      } else {
-        rotate(unstuck)
-      }
-    } else {
-      move(want)
-      if (lastMoveDistance() < want - 0.5) {
-        unstuck = -90 + Math.random() * 180
-        rotate(unstuck)
-      }
-    }
-  }
-}
-print('win!')
-
-`,
-    },
-    {
-        id: 'rotate-sweep',
-        label: 'Rotate sweep',
-        code: `// Same API as other snippet (move/rotate/shoot queue in parallel with VM; scan and
-// lastMoveDistance wait for the world). Strategy: small turns each loop, fewer rays,
-// shoot as soon as any ray sees the target first; otherwise creep and turn on block.
-
-clear()
-
-let unstuck = 0
-
-while (!won()) {
-  if (unstuck === 0) {
-    rotate(10)
-  }
-  const rays = 11
-  const sweep = scan(rays)
-
-  let hitIdx = -1
-  for (let i = 0; i < sweep.length; i++) {
-    const h = sweep[i]
-    if (h.length > 0 && h[0].type === 'target') {
-      hitIdx = i
-      break
-    }
-  }
-
-  if (hitIdx >= 0) {
-    unstuck = 0
-    const t = hitIdx / (rays - 1)
-    const deg = -45 + t * 90
-    rotate(deg)
-    shoot()
-    print('shot ~' + deg.toFixed(0) + 'deg')
-    if (Math.random() > 0.5) {
-      move(5)
-      rotate(90)
-      move(8)
-      rotate(-90)
-    } else {
-      move(5)
-      rotate(-90)
-      move(8)
-      rotate(90)
-    }
-  } else {
-    const want = 14
-    if (unstuck !== 0) {
-      move(want)
-      if (lastMoveDistance() >= want - 0.5) {
-        unstuck = 0
-      } else {
-        rotate(unstuck)
-      }
-    } else {
-      move(want)
-      if (lastMoveDistance() < want - 0.5) {
-        unstuck = -90 + Math.random() * 180
-        rotate(unstuck)
-      }
-    }
-  }
-}
-print('win!')
-
-`,
-    },
-]
 
 export default Vue.extend({
     components: {
@@ -499,8 +356,8 @@ export default Vue.extend({
             highlightRafId: 0,
             /** >1 shortens wait between sim/VM steps (wall-clock); scales runExecution waitTick delays. */
             gameSpeedMultiplier: 1,
-            /** Random obstacles/targets/bot (margins only; not forced winnable from spawn). */
-            randomizedStage: false,
+            /** Stage preset for the current run. */
+            stageMode: 'default' as StageMode,
             /** Chain Run → new sim + VM until unchecked or Kill. */
             continuousRun: false,
             /** Ticks at end of each completed run (not counted on Kill). */
@@ -920,7 +777,7 @@ export default Vue.extend({
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
             }
 
-            const { sim, runner } = createSimulationSession({ randomizedStage: this.randomizedStage })
+            const { sim, runner } = createSimulationSession({ stageMode: this.stageMode })
             this.sim = sim
             this.simRunner = runner
 
@@ -1270,12 +1127,17 @@ pre {
     font-size: 0.85em;
     color: #bbb;
 }
-.snippet-select {
+.snippet-select,
+.game-stage-select,
+.game-speed-select {
     background: #333;
     color: #eee;
     border: 1px solid #555;
     padding: 0.25em 0.4em;
     border-radius: 999px;
+}
+.snippet-select,
+.game-stage-select {
     min-width: 0;
 }
 .execution-controls {
@@ -1320,17 +1182,18 @@ pre {
     background: #67ebff;
     color: #05131b;
 }
-.game-random-label,
+.game-stage-label,
 .game-hitbox-label {
     display: flex;
     align-items: center;
     gap: 0.35em;
     font-size: 0.85em;
     color: #bbb;
+}
+.game-hitbox-label {
     cursor: pointer;
     user-select: none;
 }
-.game-random-label input,
 .game-hitbox-label input {
     cursor: pointer;
 }
@@ -1340,13 +1203,6 @@ pre {
     gap: 0.35em;
     font-size: 0.85em;
     color: #bbb;
-}
-.game-speed-select {
-    background: #333;
-    color: #eee;
-    border: 1px solid #555;
-    padding: 0.25em 0.4em;
-    border-radius: 999px;
 }
 .game-continuous-label {
     display: flex;
