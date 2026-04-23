@@ -54,11 +54,11 @@ const RANDOM_STAGE_ATTEMPTS = 220
 const HARD_RANDOM_STAGE_ATTEMPTS = 320
 const HARD_STAGE_HEADING_SAMPLES = 24
 const HARD_STAGE_GRID_STEP = 24
-const HARD_STAGE_MIN_PATH_DISTANCE = 96
 const HARD_STAGE_START_LINK_DISTANCE = HARD_STAGE_GRID_STEP * 2
 const PATH_SAMPLE_STEP = 6
 const DEFAULT_RANDOM_OBSTACLE_COUNT = 4
-const HARD_RANDOM_OBSTACLE_COUNT = 5
+const HARD_RANDOM_MIN_OBSTACLE_COUNT = 7
+const HARD_RANDOM_MAX_OBSTACLE_COUNT = 10
 
 type StageTargetRect = Rect & { index: number }
 type HardStageTargetSolution = {
@@ -67,12 +67,14 @@ type HardStageTargetSolution = {
     y: number
     heading: number
     pathDistance: number
+    bendCount: number
 }
 
 export type HardStageAnalysis = {
     spawnHasDirectTargetShot: boolean
     reachableCellCount: number
     targetSolutions: HardStageTargetSolution[]
+    obstacleCount: number
     score: number
 }
 
@@ -83,6 +85,12 @@ function mulberry32(seed: number) {
         t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296
     }
+}
+
+function normalizeAngle(rad: number) {
+    while (rad <= -Math.PI) rad += 2 * Math.PI
+    while (rad > Math.PI) rad -= 2 * Math.PI
+    return rad
 }
 
 function cloneStage(stage: StageDefinition): StageDefinition {
@@ -287,6 +295,44 @@ function computeReachableGrid(actor: StageActorDefinition, obstacles: Rect[]) {
     }
 }
 
+function classifyCellBendCounts(actor: StageActorDefinition, obstacles: Rect[], reachable: ReturnType<typeof computeReachableGrid>) {
+    const actorRadius = actor.r ?? BOT_R
+    const bendCounts = new Array<number>(reachable.cells.length).fill(Infinity)
+    const directReachableCellIndices: number[] = []
+
+    for (let index = 0; index < reachable.cells.length; index++) {
+        if (!Number.isFinite(reachable.distances[index])) {
+            continue
+        }
+        const cell = reachable.cells[index]
+        if (!isSegmentWalkable(actor.x, actor.y, cell.x, cell.y, actorRadius, obstacles)) {
+            continue
+        }
+        bendCounts[index] = 0
+        directReachableCellIndices.push(index)
+    }
+
+    for (let index = 0; index < reachable.cells.length; index++) {
+        if (!Number.isFinite(reachable.distances[index]) || bendCounts[index] === 0) {
+            continue
+        }
+        const cell = reachable.cells[index]
+        for (const midIndex of directReachableCellIndices) {
+            const mid = reachable.cells[midIndex]
+            if (!isSegmentWalkable(mid.x, mid.y, cell.x, cell.y, actorRadius, obstacles)) {
+                continue
+            }
+            bendCounts[index] = 1
+            break
+        }
+        if (!Number.isFinite(bendCounts[index])) {
+            bendCounts[index] = 2
+        }
+    }
+
+    return bendCounts
+}
+
 export function analyzeHardStageDefinition(stage: StageDefinition): HardStageAnalysis | null {
     if (stage.actors.length === 0) {
         return null
@@ -303,14 +349,16 @@ export function analyzeHardStageDefinition(stage: StageDefinition): HardStageAna
 
     const actorRadius = actor.r ?? BOT_R
     const reachable = computeReachableGrid(actor, obstacles)
+    const bendCounts = classifyCellBendCounts(actor, obstacles, reachable)
     const solutions = new Array<HardStageTargetSolution | undefined>(targets.length).fill(undefined)
 
     for (let cellIndex = 0; cellIndex < reachable.cells.length; cellIndex++) {
         const pathDistance = reachable.distances[cellIndex]
-        if (!Number.isFinite(pathDistance) || pathDistance < HARD_STAGE_MIN_PATH_DISTANCE) {
+        if (!Number.isFinite(pathDistance)) {
             continue
         }
         const cell = reachable.cells[cellIndex]
+        const bendCount = bendCounts[cellIndex]
         for (let headingIndex = 0; headingIndex < HARD_STAGE_HEADING_SAMPLES; headingIndex++) {
             const heading = headingIndex * (2 * Math.PI / HARD_STAGE_HEADING_SAMPLES)
             const firstHit = getFirstHit(cell.x, cell.y, heading, actorRadius, obstacles, targets)
@@ -318,13 +366,18 @@ export function analyzeHardStageDefinition(stage: StageDefinition): HardStageAna
                 continue
             }
             const existing = solutions[firstHit.targetIndex]
-            if (!existing || pathDistance < existing.pathDistance) {
+            if (
+                !existing
+                || bendCount < existing.bendCount
+                || (bendCount === existing.bendCount && pathDistance < existing.pathDistance)
+            ) {
                 solutions[firstHit.targetIndex] = {
                     targetIndex: firstHit.targetIndex,
                     x: cell.x,
                     y: cell.y,
                     heading,
                     pathDistance,
+                    bendCount,
                 }
             }
         }
@@ -339,7 +392,12 @@ export function analyzeHardStageDefinition(stage: StageDefinition): HardStageAna
         spawnHasDirectTargetShot: false,
         reachableCellCount: reachable.reachableCellCount,
         targetSolutions,
-        score: targetSolutions.reduce((sum, solution) => sum + solution.pathDistance, 0) + reachable.reachableCellCount * 0.01,
+        obstacleCount: obstacles.length,
+        score:
+            obstacles.length * 2000
+            + targetSolutions.reduce((sum, solution) => sum + solution.bendCount, 0) * 40
+            + targetSolutions.reduce((sum, solution) => sum + solution.pathDistance, 0)
+            - reachable.reachableCellCount * 0.05,
     }
 }
 
@@ -348,6 +406,8 @@ function tryCreateRandomStage(seed: number, obstacleCount = DEFAULT_RANDOM_OBSTA
     const wm = LAYOUT_WALL_MARGIN
     const gap = LAYOUT_MIN_GAP
     const clearance = LAYOUT_BOT_CLEARANCE
+    const hardMode = obstacleCount > DEFAULT_RANDOM_OBSTACLE_COUNT
+    const obstacleGap = hardMode ? Math.max(18, gap - 10) : gap
 
     const targets: StageObjectDefinition[] = []
     for (let ti = 0; ti < 3; ti++) {
@@ -381,13 +441,25 @@ function tryCreateRandomStage(seed: number, obstacleCount = DEFAULT_RANDOM_OBSTA
     const obstacles: StageObjectDefinition[] = []
     for (let oi = 0; oi < obstacleCount; oi++) {
         let added = false
-        for (let attempt = 0; attempt < 90; attempt++) {
-            const rw = obstacleCount > DEFAULT_RANDOM_OBSTACLE_COUNT
-                ? 40 + Math.floor(rng() * 70)
-                : 48 + Math.floor(rng() * 78)
-            const rh = obstacleCount > DEFAULT_RANDOM_OBSTACLE_COUNT
-                ? 20 + Math.floor(rng() * 44)
-                : 22 + Math.floor(rng() * 48)
+        for (let attempt = 0; attempt < (hardMode ? 140 : 90); attempt++) {
+            let rw: number
+            let rh: number
+            if (hardMode) {
+                const shapeRoll = rng()
+                if (shapeRoll < 0.42) {
+                    rw = 82 + Math.floor(rng() * 62)
+                    rh = 18 + Math.floor(rng() * 18)
+                } else if (shapeRoll < 0.84) {
+                    rw = 18 + Math.floor(rng() * 18)
+                    rh = 82 + Math.floor(rng() * 62)
+                } else {
+                    rw = 44 + Math.floor(rng() * 42)
+                    rh = 36 + Math.floor(rng() * 32)
+                }
+            } else {
+                rw = 48 + Math.floor(rng() * 78)
+                rh = 22 + Math.floor(rng() * 48)
+            }
             const rect = {
                 kind: 'obstacle' as const,
                 x: wm + rng() * Math.max(0.1, ARENA_W - 2 * wm - rw),
@@ -404,7 +476,7 @@ function tryCreateRandomStage(seed: number, obstacleCount = DEFAULT_RANDOM_OBSTA
                 }
             }
             for (const other of obstacles) {
-                if (!rectsSeparatedByGap(rect, other, gap)) {
+                if (!rectsSeparatedByGap(rect, other, obstacleGap)) {
                     ok = false
                     break
                 }
@@ -443,6 +515,119 @@ function tryCreateRandomStage(seed: number, obstacleCount = DEFAULT_RANDOM_OBSTA
     return null
 }
 
+function tryCreateHardRandomStage(seed: number): StageDefinition | null {
+    const rng = mulberry32(seed)
+    const wm = LAYOUT_WALL_MARGIN
+    const gap = LAYOUT_MIN_GAP
+    const targetGap = gap
+    const obstacleGap = gap
+
+    const targets: StageObjectDefinition[] = []
+    for (let ti = 0; ti < 3; ti++) {
+        let added = false
+        for (let attempt = 0; attempt < 90; attempt++) {
+            const rect = {
+                kind: 'target' as const,
+                x: wm + rng() * (ARENA_W - 2 * wm - TARGET_W),
+                y: wm + rng() * (ARENA_H - 2 * wm - TARGET_H),
+                w: TARGET_W,
+                h: TARGET_H,
+                hit: false,
+            }
+            if (!rectFitsArenaInset(rect, wm)) continue
+            let ok = true
+            for (const other of targets) {
+                if (!rectsSeparatedByGap(rect, other, targetGap)) {
+                    ok = false
+                    break
+                }
+            }
+            if (ok) {
+                targets.push(rect)
+                added = true
+                break
+            }
+        }
+        if (!added) {
+            return null
+        }
+    }
+
+    const obstacles: StageObjectDefinition[] = []
+    for (let oi = 0; oi < HARD_RANDOM_MAX_OBSTACLE_COUNT; oi++) {
+        for (let attempt = 0; attempt < 180; attempt++) {
+            let rw: number
+            let rh: number
+            const shapeRoll = rng()
+            if (shapeRoll < 0.34) {
+                rw = 68 + Math.floor(rng() * 48)
+                rh = 18 + Math.floor(rng() * 18)
+            } else if (shapeRoll < 0.68) {
+                rw = 18 + Math.floor(rng() * 18)
+                rh = 68 + Math.floor(rng() * 48)
+            } else {
+                rw = 34 + Math.floor(rng() * 48)
+                rh = 28 + Math.floor(rng() * 34)
+            }
+            const rect = {
+                kind: 'obstacle' as const,
+                x: wm + rng() * Math.max(0.1, ARENA_W - 2 * wm - rw),
+                y: wm + rng() * Math.max(0.1, ARENA_H - 2 * wm - rh),
+                w: rw,
+                h: rh,
+            }
+            if (!rectFitsArenaInset(rect, wm)) continue
+            let ok = true
+            for (const target of targets) {
+                if (!rectsSeparatedByGap(rect, target, targetGap)) {
+                    ok = false
+                    break
+                }
+            }
+            for (const other of obstacles) {
+                if (!rectsSeparatedByGap(rect, other, obstacleGap)) {
+                    ok = false
+                    break
+                }
+            }
+            if (ok) {
+                obstacles.push(rect)
+                break
+            }
+        }
+    }
+
+    if (obstacles.length < HARD_RANDOM_MIN_OBSTACLE_COUNT) {
+        return null
+    }
+
+    const allRects = [...targets, ...obstacles]
+    for (let attempt = 0; attempt < 220; attempt++) {
+        const bx = BOT_R + wm + rng() * (ARENA_W - 2 * (BOT_R + wm))
+        const by = BOT_R + wm + rng() * (ARENA_H - 2 * (BOT_R + wm))
+        if (!botCenterClearOfRects(bx, by, allRects, LAYOUT_BOT_CLEARANCE)) {
+            continue
+        }
+        return {
+            actors: [
+                {
+                    kind: 'bot',
+                    x: bx,
+                    y: by,
+                    r: BOT_R,
+                    heading: -Math.PI / 2 + (rng() - 0.5) * 0.6,
+                    controllerId: PRIMARY_CONTROLLER_ID,
+                    teamId: PRIMARY_TEAM_ID,
+                    primary: true,
+                },
+            ],
+            objects: [...obstacles, ...targets],
+        }
+    }
+
+    return null
+}
+
 export function resolveStageDefinition(options?: SimOptions): StageDefinition {
     if (options?.stage) {
         return cloneStage(options.stage)
@@ -454,7 +639,7 @@ export function resolveStageDefinition(options?: SimOptions): StageDefinition {
         if (mode === 'hardRandom') {
             let best: { stage: StageDefinition, score: number } | null = null
             for (let attempt = 0; attempt < HARD_RANDOM_STAGE_ATTEMPTS; attempt++) {
-                const stage = tryCreateRandomStage((base + attempt * 0x9e3779b9) >>> 0, HARD_RANDOM_OBSTACLE_COUNT)
+                const stage = tryCreateHardRandomStage((base + attempt * 0x9e3779b9) >>> 0)
                 if (!stage) {
                     continue
                 }

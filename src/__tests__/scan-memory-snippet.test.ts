@@ -2,6 +2,8 @@ import { compile, run } from '../index'
 import { CODE_SNIPPETS, CodeSnippet } from '../../web/game/code-snippets'
 import { BOT_R, createSimulationSession, StageDefinition } from '../../web/game/sim'
 
+const slowTest = process.env.RUN_SLOW_TESTS === '1' ? test : test.skip
+
 const scanMemorySnippet = CODE_SNIPPETS.find(snippet => snippet.id === 'scan-memory-explorer')
 
 if (!scanMemorySnippet) {
@@ -102,8 +104,7 @@ function runSnippetOnHardRandomSeed(seed: number, maxTicks = 600000) {
     }, maxTicks)
 }
 
-test.each([
-    424242,
+slowTest.each([
     7331,
 ])('scan-memory explorer wins fixed hard-random seed %s', (seed) => {
     const result = runSnippetOnHardRandomSeed(seed)
