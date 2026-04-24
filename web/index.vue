@@ -680,9 +680,13 @@ export default Vue.extend({
                 const s = Math.max(0.1, Math.min(128, this.gameSpeedMultiplier))
                 return waitDurationMs / s
             }
-            // Repeated near-immediate wakes can starve the browser event loop on high-speed runs.
-            // After a short streak, force a real timer yield and restart pacing from "now".
-            const waitTick = createTickWaiter({ scaledWaitMs })
+            // Browsers clamp very short native timers, so sub-threshold waits accumulate first.
+            // We only force a real timeout as an escape hatch after too many immediate wakes.
+            const waitTick = createTickWaiter({
+                scaledWaitMs,
+                minRealTimeoutMs: MIN_TIMER_MS,
+                forcedTimeoutMs: 0,
+            })
 
             try {
                 while (<State>this.state === 'play') {
