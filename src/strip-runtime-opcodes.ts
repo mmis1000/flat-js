@@ -1,5 +1,14 @@
 import * as ts from 'typescript'
 
+const OPCODE_HANDLER_NAMES = new Set([
+    'handleBasicOpcode',
+    'handleClassOpcode',
+    'handleControlOpcode',
+    'handleFunctionOpcode',
+    'handleGeneratorOpcode',
+    'handleValueOpcode',
+])
+
 function caseClauseNumbers(clause: ts.CaseClause): number[] {
     const e = clause.expression
     if (ts.isNumericLiteral(e)) {
@@ -58,9 +67,35 @@ function stripCommandSwitch(sw: ts.SwitchStatement, keepOpcodeValues: Set<number
     )
 }
 
+function getEnclosingFunctionName(node: ts.Node): string | undefined {
+    let cur: ts.Node | undefined = node.parent
+    while (cur) {
+        if (
+            (ts.isFunctionDeclaration(cur) || ts.isFunctionExpression(cur))
+            && cur.name
+            && ts.isIdentifier(cur.name)
+        ) {
+            return cur.name.text
+        }
+        if (ts.isArrowFunction(cur)) {
+            const parent = cur.parent
+            if (
+                parent
+                && ts.isVariableDeclaration(parent)
+                && ts.isIdentifier(parent.name)
+            ) {
+                return parent.name.text
+            }
+        }
+        cur = cur.parent
+    }
+    return undefined
+}
+
 /**
- * Removes `case` arms from the compiled runtime's `command: switch` when the opcode
- * value is not in `keepOpcodeValues`. Preserves `default` and non-numeric cases.
+ * Removes dead opcode `case` arms from the compiled runtime's outer `command: switch`
+ * and the per-family handler `switch (command)` bodies. Preserves `default` and
+ * non-numeric cases.
  */
 export function stripRuntimeCommandSwitch(source: string, keepOpcodeValues: Set<number>): string {
     const sf = ts.createSourceFile('runtime.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
@@ -73,6 +108,16 @@ export function stripRuntimeCommandSwitch(source: string, keepOpcodeValues: Set<
             ) {
                 const stripped = stripCommandSwitch(node.statement, keepOpcodeValues)
                 return ts.factory.updateLabeledStatement(node, node.label, stripped)
+            }
+            if (
+                ts.isSwitchStatement(node)
+                && ts.isIdentifier(node.expression)
+                && node.expression.text === 'command'
+            ) {
+                const fnName = getEnclosingFunctionName(node)
+                if (fnName && OPCODE_HANDLER_NAMES.has(fnName)) {
+                    return stripCommandSwitch(node, keepOpcodeValues)
+                }
             }
             return ts.visitEachChild(node, visitor, context)
         }
