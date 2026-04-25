@@ -12,7 +12,7 @@ export const enum LiteralPoolKind {
 }
 
 /** XOR mask for each pool word at absolute program index `i` (position-dependent). MUST SYNC with runtime `literalPoolWordMask`. */
-export function literalPoolWordMask(i: number): number {
+export const literalPoolWordMask = (i: number): number => {
     const x = (i * 0x9e3779b9 | 0) ^ (i >>> 1) ^ (i << 3)
     return (x ^ (x >>> 15) ^ (x << 15)) | 0
 }

@@ -117,6 +117,7 @@ dist
 
 .temp_cache
 
+src/runtime-inline.ts
 lib/
 dist-web/
 example/*.json

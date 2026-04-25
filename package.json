@@ -4,8 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc --project ./src/tsconfig.json",
-    "watch": "tsc --project ./src/tsconfig.json --watch",
+    "build": "node ./scripts/build-runtime-inline.js",
+    "build:tsc": "tsc --project ./src/tsconfig.json",
+    "watch": "node ./scripts/build-runtime-inline.js --watch",
     "serve-coverage": "npx serve ./coverage/lcov-report",
     "test": "jest --runInBand",
     "test:slow": "node ./scripts/run-jest-with-env.js RUN_SLOW_TESTS=1",
@@ -15,7 +16,7 @@
     "test262:smoke": "npm run build && test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 \"./node_modules/test262/test/language/literals/numeric/S7.8.3_A1.1_T1.js\"",
     "dev-web": "webpack serve --config webpack.config-dev.js",
     "build-web": "webpack --config webpack.config.js",
-    "build-example": "node ./lib/cli.js --strip-runtime --merge-opcodes-from ./src/__tests__/fixures/jquery.js --merge-opcodes-from ./src/__tests__/fixures/bad-code.js ./src/__tests__/fixures/loader.js > ./example/loader.js && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/bad-code.js > ./example/bad-code.bin.gz && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/jquery.js > ./example/jquery.bin.gz",
+    "build-example": "npm run build && node ./lib/cli.js --strip-runtime --merge-opcodes-from ./src/__tests__/fixures/jquery.js --merge-opcodes-from ./src/__tests__/fixures/bad-code.js ./src/__tests__/fixures/loader.js > ./example/loader.js && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/bad-code.js > ./example/bad-code.bin.gz && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/jquery.js > ./example/jquery.bin.gz",
     "serve-web": "npx serve dist-web"
   },
   "author": "",

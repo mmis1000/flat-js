@@ -69,7 +69,7 @@ async function minifyInput(source: string): Promise<string> {
 }
 
 async function main () {
-    const runtimeFull = await fs.readFile(path.resolve(__dirname, './runtime.js'),{ encoding: 'utf-8' })
+    const runtimeFull = await fs.readFile(path.resolve(__dirname, './runtime-inline.js'),{ encoding: 'utf-8' })
     const startPos = runtimeFull.indexOf(START_FLAG)
     const endPos = runtimeFull.indexOf(END_FLAG)
     let runtime = runtimeFull.slice(startPos, endPos)
