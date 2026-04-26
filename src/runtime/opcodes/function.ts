@@ -196,10 +196,11 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
         }
             break
         case OpCode.DefineFunction: {
+            const encKey = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const type = ctx[OpcodeContextField.popCurrentFrameStack]<FunctionTypes>()
             const offset = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
-            ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.defineFunction](ctx[OpcodeContextField.currentFrame][Fields.globalThis], ctx[OpcodeContextField.currentFrame][Fields.scopes], name, type, offset))
+            ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.defineFunction](ctx[OpcodeContextField.currentFrame][Fields.globalThis], ctx[OpcodeContextField.currentFrame][Fields.scopes], name, type, offset, encKey))
         }
             break
         case OpCode.CallValue:
@@ -328,6 +329,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         state.started = true
 
                         ;(state.stack[0] as any)[Fields.return] = ctx[OpcodeContextField.ptr]
+                        ;(state.stack[0] as any)[Fields.savedSeed] = ctx[OpcodeContextField.blockSeed]
                         ctx[OpcodeContextField.stack].push(...state.stack)
                         state.stack = []
 
@@ -336,6 +338,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         }
 
                         ctx[OpcodeContextField.ptr] = state.ptr
+                        ctx[OpcodeContextField.blockSeed] = state.blockSeed
                         ctx[OpcodeContextField.currentProgram] = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])[Fields.programSection]
                         return { [Fields.done]: false }
                     }
@@ -355,7 +358,8 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         [Fields.name]: descriptor[Fields.name],
                         [Fields.self]: self,
                     },
-                    parameters
+                    parameters,
+                    descriptor[Fields.encKey]
                 )
                 ctx[OpcodeContextField.pushCurrentFrameStack](iterator)
             } else {
@@ -364,6 +368,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],
                     [Fields.return]: ctx[OpcodeContextField.ptr],
+                    [Fields.savedSeed]: ctx[OpcodeContextField.blockSeed],
                     [Fields.valueStack]: [
                         self,
                         fnTarget,
@@ -382,6 +387,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 ctx[OpcodeContextField.stack].push(newFrame)
                 ctx[OpcodeContextField.ptr] = descriptor[Fields.offset]
                 ctx[OpcodeContextField.currentProgram] = descriptor[Fields.programSection]
+                ctx[OpcodeContextField.blockSeed] = descriptor[Fields.encKey]
             }
         }
             break
@@ -404,6 +410,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],
                     [Fields.return]: ctx[OpcodeContextField.ptr],
+                    [Fields.savedSeed]: ctx[OpcodeContextField.blockSeed],
                     [Fields.valueStack]: [
                         newTarget,
                         fn,
@@ -422,6 +429,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 ctx[OpcodeContextField.stack].push(newFrame)
                 ctx[OpcodeContextField.ptr] = descriptor[Fields.offset]
                 ctx[OpcodeContextField.currentProgram] = descriptor[Fields.programSection]
+                ctx[OpcodeContextField.blockSeed] = descriptor[Fields.encKey]
             }
         }
             break
@@ -457,6 +465,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],
                     [Fields.return]: ctx[OpcodeContextField.ptr],
+                    [Fields.savedSeed]: ctx[OpcodeContextField.blockSeed],
                     [Fields.valueStack]: [
                         fn,
                         fn,
@@ -475,6 +484,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 ctx[OpcodeContextField.stack].push(newFrame)
                 ctx[OpcodeContextField.ptr] = descriptor[Fields.offset]
                 ctx[OpcodeContextField.currentProgram] = descriptor[Fields.programSection]
+                ctx[OpcodeContextField.blockSeed] = descriptor[Fields.encKey]
             }
         }
             break

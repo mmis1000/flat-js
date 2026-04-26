@@ -3,7 +3,7 @@ import * as ts from 'typescript'
 import type { Functions, ParentMap, Scopes, VariableRoot } from '../analysis'
 import { FunctionTypes, OpCode, StatementFlag } from '../shared'
 import { createCodegenContext } from './context'
-import { generateVariableList, getScopeDebugNames, markInternal, markInternals, op } from './helpers'
+import { createNodeFunctionTypeDefinePair, generateVariableList, getScopeDebugNames, markInternal, markInternals, op } from './helpers'
 import type { Op, Segment, SegmentOptions } from './types'
 
 export type { Op, Segment, SegmentOptions, StaticAccess } from './types'
@@ -40,16 +40,19 @@ export function generateSegment(
         ]
     }
 
-    const functionDeclarationNodes = ctx.functionDeclarations.map((declaration) => [
-        op(OpCode.GetRecord),
-        op(OpCode.Literal, 2, [declaration.name?.text]),
-        op(OpCode.Literal, 2, [declaration.name?.text]),
-        op(OpCode.NodeOffset, 2, [declaration]),
-        op(OpCode.NodeFunctionType, 2, [declaration]),
-        op(OpCode.DefineFunction),
-        op(OpCode.Set),
-        op(OpCode.Pop)
-    ]).flat()
+    const functionDeclarationNodes = ctx.functionDeclarations.map((declaration) => {
+        const [functionType, defineFunction] = createNodeFunctionTypeDefinePair(declaration)
+        return [
+            op(OpCode.GetRecord),
+            op(OpCode.Literal, 2, [declaration.name?.text]),
+            op(OpCode.Literal, 2, [declaration.name?.text]),
+            op(OpCode.NodeOffset, 2, [declaration]),
+            functionType,
+            defineFunction,
+            op(OpCode.Set),
+            op(OpCode.Pop)
+        ]
+    }).flat()
 
     const entry: Op[] = []
 

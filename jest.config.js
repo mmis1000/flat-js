@@ -2,7 +2,7 @@
 module.exports = {
   coverageDirectory: "coverage",
   testEnvironment: 'node',
-  testRegex: 'src/__tests__/.+\\.test\\.ts',
+  testRegex: '(src|web)/__tests__/.+\\.test\\.ts',
   collectCoverageFrom: ["src/**/*.{ts,js}", "!src/__tests__/**/*.{ts,js}"],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {

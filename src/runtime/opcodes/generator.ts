@@ -20,6 +20,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
             }
 
             state.ptr = ctx[OpcodeContextField.ptr]
+            state.blockSeed = ctx[OpcodeContextField.blockSeed]
 
             let genStart = ctx[OpcodeContextField.stack].length
             while (genStart > 0 && ctx[OpcodeContextField.stack][genStart - 1][Fields.generator] === state) {
@@ -30,6 +31,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
 
             if (ctx[OpcodeContextField.stack].length > 0) {
                 ctx[OpcodeContextField.ptr] = (genFrames[0] as any)[Fields.return]
+                ctx[OpcodeContextField.blockSeed] = (genFrames[0] as any)[Fields.savedSeed]
                 const callerFrame = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])
                 ctx[OpcodeContextField.currentProgram] = callerFrame[Fields.programSection]
                 callerFrame[Fields.valueStack].push({ value, done: false })
@@ -72,6 +74,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 }
 
                 outerState.ptr = ctx[OpcodeContextField.commandPtr]
+                outerState.blockSeed = ctx[OpcodeContextField.blockSeed]
                 let genStart = ctx[OpcodeContextField.stack].length
                 while (genStart > 0 && ctx[OpcodeContextField.stack][genStart - 1][Fields.generator] === outerState) {
                     genStart--
@@ -80,6 +83,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 outerState.stack = genFrames
                 if (ctx[OpcodeContextField.stack].length > 0) {
                     ctx[OpcodeContextField.ptr] = (genFrames[0] as any)[Fields.return]
+                    ctx[OpcodeContextField.blockSeed] = (genFrames[0] as any)[Fields.savedSeed]
                     const callerFrame = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])
                     ctx[OpcodeContextField.currentProgram] = callerFrame[Fields.programSection]
                     callerFrame[Fields.valueStack].push({ value, done: false })
@@ -174,6 +178,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 subState.started = true
 
                 ;(subState.stack[0] as any)[Fields.return] = ctx[OpcodeContextField.commandPtr]
+                ;(subState.stack[0] as any)[Fields.savedSeed] = ctx[OpcodeContextField.blockSeed]
                 ctx[OpcodeContextField.stack].push(...subState.stack)
                 subState.stack = []
 
@@ -184,6 +189,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 delegate.phase = 1
                 delegate.pendingMode = mode
                 ctx[OpcodeContextField.ptr] = subState.ptr
+                ctx[OpcodeContextField.blockSeed] = subState.blockSeed
                 ctx[OpcodeContextField.currentProgram] = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])[Fields.programSection]
                 return { [Fields.done]: false }
             }

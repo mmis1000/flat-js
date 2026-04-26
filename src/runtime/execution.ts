@@ -53,6 +53,100 @@ import { handleGeneratorOpcode } from "./opcodes/generator"
 import { BREAK_COMMAND, OpcodeContextField, type RuntimeOpcodeContext } from "./opcodes/types"
 import { handleValueOpcode } from "./opcodes/value"
 
+const OPCODE_SEED_MASK = 0x5A3C96E1
+
+const inverseModMul = (c: number): number => {
+    c = c | 0
+    let x = 1
+    for (let i = 0; i < 5; i++) {
+        x = Math.imul(x, 2 - Math.imul(c, x))
+    }
+    return x >>> 0
+}
+
+const INV_MUL_B_RT = inverseModMul(0xc2b2ae35)
+const INV_MUL_A_RT = inverseModMul(0x85ebca6b)
+
+const blockInverseTransform = (word: number, key: number): number => {
+    let x = word | 0
+    x ^= x >>> 16
+    x = Math.imul(x, INV_MUL_B_RT)
+    x ^= x >>> 13
+    x ^= x >>> 26
+    x = Math.imul(x, INV_MUL_A_RT)
+    x ^= x >>> 16
+    return (x ^ key) >>> 0
+}
+
+const opcodeStreamMask = (pos: number, seed: number): number => {
+    let x = (pos * 0x9e3779b9 + seed) | 0
+    x = (((x >>> 16) ^ x) * 0x45d9f3b) | 0
+    x = (((x >>> 16) ^ x) * 0x45d9f3b) | 0
+    return ((x >>> 16) ^ x) | 0
+}
+
+const getDerivedKey = (activeSeed: number, pos: number, globalSeed: number): number =>
+    (activeSeed ^ opcodeStreamMask(pos, globalSeed)) >>> 0
+
+const opcodeShufflePrng = (seed: number) => {
+    let s = seed | 0
+    return () => {
+        s = (Math.imul(s, 1664525) + 1013904223) | 0
+        return s >>> 0
+    }
+}
+
+const generateOpcodePermutation = (seed: number): number[] => {
+    const n = OpCode._COUNT
+    const perm = Array.from({ length: n }, (_unused, index) => index)
+    const next = opcodeShufflePrng(seed)
+    for (let index = n - 1; index > 0; index--) {
+        const other = next() % (index + 1)
+        const tmp = perm[index]!
+        perm[index] = perm[other]!
+        perm[other] = tmp
+    }
+    return perm
+}
+
+const inversePermCache = new WeakMap<number[], number[]>()
+
+const getInversePerm = (program: number[]): number[] => {
+    let cached = inversePermCache.get(program)
+    if (!cached) {
+        const seed = program[program.length - 1]! >>> 0
+        const perm = generateOpcodePermutation(seed)
+        cached = new Array(perm.length)
+        for (let index = 0; index < perm.length; index++) {
+            cached[perm[index]!] = index
+        }
+        inversePermCache.set(program, cached)
+    }
+    return cached
+}
+
+const decodeOpcodeAt = (program: number[], pos: number, blockSeed: number): number => {
+    const globalSeed = (program[program.length - 1]! ^ OPCODE_SEED_MASK) >>> 0
+    const inversePerm = getInversePerm(program)
+    const decoded = blockInverseTransform(program[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) >>> 0
+    return inversePerm[decoded] ?? decoded
+}
+
+const normalizeFunctionEntryOffset = (program: number[], offset: number, encKey: number): number => {
+    if (offset < 0 || offset + 1 >= program.length) {
+        return offset
+    }
+
+    if (
+        decodeOpcodeAt(program, offset, encKey) === OpCode.UndefinedLiteral
+        && decodeOpcodeAt(program, offset + 1, encKey) === OpCode.Return
+    ) {
+        return offset + 2
+    }
+
+    return offset
+}
+
 export const getExecution = (
     program: number[],
     entryPoint: number = 0,
@@ -67,9 +161,22 @@ export const getExecution = (
     args: any[] = [],
     getDebugFunction: () => null | (() => void) = () => null,
     compileFunction: typeof import('../compiler').compile = (...args: any[]) => { throw new Error('not supported') },
-    functionRedirects: WeakMap<Function, Function> = new WeakMap()
+    functionRedirects: WeakMap<Function, Function> = new WeakMap(),
+    onInstruction: ((ptr: number, opcode: number, blockSeed: number) => void) | null = null,
+    initialBlockSeed: number = 0
 ) => {
     let currentProgram = program
+    let globalSeed = 0
+    let inversePerm: number[] = []
+    let blockSeed = initialBlockSeed >>> 0
+
+    const setCurrentProgram = (nextProgram: number[]) => {
+        currentProgram = nextProgram
+        globalSeed = (nextProgram[nextProgram.length - 1]! ^ OPCODE_SEED_MASK) >>> 0
+        inversePerm = getInversePerm(nextProgram)
+    }
+
+    setCurrentProgram(program)
 
     const initialFrame: Frame = {
         [Fields.type]: FrameType.Function,
@@ -85,6 +192,7 @@ export const getExecution = (
         ],
         [Fields.invokeType]: invokeData[Fields.type],
         [Fields.return]: -1,
+        [Fields.savedSeed]: 0,
         [Fields.programSection]: currentProgram,
         [Fields.globalThis]: globalThis
     }
@@ -94,7 +202,15 @@ export const getExecution = (
     const stack: Stack = [initialFrame]
     let ptr: number = entryPoint
 
-    const read = () => currentProgram[ptr++]
+    const read = () => {
+        const pos = ptr++
+        return blockInverseTransform(currentProgram[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) | 0
+    }
+    const decodeOp = (): OpCode => {
+        const pos = ptr++
+        const decoded = blockInverseTransform(currentProgram[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) >>> 0
+        return (inversePerm[decoded] ?? decoded) as OpCode
+    }
     const getCurrentFrame = () => stack[stack.length - 1]
     const peak = <T>(arr: T[], offset = 1): T => arr[arr.length - offset]
     const setScopeDebugPtr = (scopePtr: number, scope: Scope) => {
@@ -322,16 +438,18 @@ export const getExecution = (
 
     const createGeneratorFromExecution = (
         pr: number[], offset: number, gt: object,
-        scopes: Scope[], invokeData: InvokeParam, args: unknown[]
+        scopes: Scope[], invokeData: InvokeParam, args: unknown[],
+        encKey: number
     ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
         // Build an initial frame via a throwaway execution; do NOT run it. The generator
         // always executes inside the caller's VM via handover (OpCode.Call & OpCode.Yield).
-        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, encKey)
         const baseFrames: Stack = scratchExecution[Fields.stack].slice()
 
         const state: GeneratorState = {
             stack: baseFrames,
             ptr: offset,
+            blockSeed: encKey,
             completed: false,
             started: false,
             pendingAction: null,
@@ -375,6 +493,7 @@ export const getExecution = (
             stk.length = 0
             stk.push(...state.stack)
             exec[Fields.ptr] = state.ptr
+            exec[Fields.blockSeed] = state.blockSeed
 
             const wasStarted = state.started
             state.started = true
@@ -427,9 +546,10 @@ export const getExecution = (
 
     const createAsyncFromExecution = (
         pr: number[], offset: number, gt: object,
-        scopes: Scope[], invokeData: InvokeParam, args: unknown[]
+        scopes: Scope[], invokeData: InvokeParam, args: unknown[],
+        encKey: number
     ): Promise<unknown> => {
-        const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, encKey)
 
         return new Promise<unknown>((resolve, reject) => {
             const continueExecution = (value: unknown, isFirst: boolean) => {
@@ -475,19 +595,21 @@ export const getExecution = (
         })
     }
 
-    const defineFunction = (globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number) => {
+    const defineFunction = (globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number, encKey: number) => {
         // TODO: types
         const scopeClone = [...scopes]
 
         const pr = currentProgram
+        const entryOffset = normalizeFunctionEntryOffset(pr, offset, encKey)
 
         const des: FunctionDescriptor = {
             [Fields.name]: name,
             [Fields.type]: type,
-            [Fields.offset]: offset,
+            [Fields.offset]: entryOffset,
             [Fields.scopes]: scopeClone,
             [Fields.programSection]: pr,
-            [Fields.globalThis]: globalThis
+            [Fields.globalThis]: globalThis,
+            [Fields.encKey]: encKey,
         }
 
         const fn = function (this: any, ...args: any[]) {
@@ -507,27 +629,27 @@ export const getExecution = (
 
             if (isGeneratorType(type)) {
                 return createGeneratorFromExecution(
-                    pr, offset, des[Fields.globalThis],
-                    [...scopeClone], invokeData, args
+                    pr, entryOffset, des[Fields.globalThis],
+                    [...scopeClone], invokeData, args, encKey
                 )
             }
 
             if (isAsyncType(type)) {
                 return createAsyncFromExecution(
-                    pr, offset, des[Fields.globalThis],
-                    [...scopeClone], invokeData, args
+                    pr, entryOffset, des[Fields.globalThis],
+                    [...scopeClone], invokeData, args, encKey
                 )
             }
 
             return run_(
-                pr, offset, des[Fields.globalThis],
-                [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects
+                pr, entryOffset, des[Fields.globalThis],
+                [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects, null, encKey
             )
         }
 
         Object.defineProperty(fn, 'name', { value: name, configurable: true })
 
-        ;(fn as any).__pos__ = offset
+        ;(fn as any).__pos__ = entryOffset
 
         functionDescriptors.set(fn, des)
 
@@ -716,8 +838,9 @@ export const getExecution = (
                         returnValue = { value, done: true }
                         return value
                     }
+                    blockSeed = frame[Fields.savedSeed]
                     ptr = returnAddr
-                    currentProgram = peak(stack)[Fields.programSection]
+                    setCurrentProgram(peak(stack)[Fields.programSection])
                     peak(stack)[Fields.valueStack].push({ value, done: true })
                     return value
                 }
@@ -729,8 +852,9 @@ export const getExecution = (
                     return value
                 } else {
                     stack.pop()
+                    blockSeed = frame[Fields.savedSeed]
                     ptr = returnAddr
-                    currentProgram = peak(stack)[Fields.programSection]
+                    setCurrentProgram(peak(stack)[Fields.programSection])
 
                     if (
                         frame[Fields.invokeType] === InvokeType.Apply
@@ -771,6 +895,7 @@ export const getExecution = (
                     frame[Fields.state] = TryCatchFinallyState.Finally
                     frame[Fields.resolveType] = ResolveType.return
                     frame[Fields.value] = value
+                    blockSeed = frame[Fields.finallyEncKey]
                     ptr = finallyAddr
                 } else {
                     stack.pop()
@@ -852,15 +977,18 @@ export const getExecution = (
                         addCatchScope(frame, frame[Fields.variable], value)
                     }
 
+                    blockSeed = frame[Fields.catchEncKey]
                     ptr = catchAddr
-                    currentProgram = frame[Fields.programSection]
+                    setCurrentProgram(frame[Fields.programSection])
                 } else if (finallyAddr >= 0) {
                     frame[Fields.state] = TryCatchFinallyState.Finally
+                    blockSeed = frame[Fields.finallyEncKey]
                     ptr = finallyAddr
-                    currentProgram = frame[Fields.programSection]
+                    setCurrentProgram(frame[Fields.programSection])
                 } else {
+                    blockSeed = frame[Fields.exitEncKey]
                     ptr = exitAddr
-                    currentProgram = frame[Fields.programSection]
+                    setCurrentProgram(frame[Fields.programSection])
                 }
             }
                 break;
@@ -870,8 +998,9 @@ export const getExecution = (
                 frame[Fields.value] = value
 
                 if (finallyAddr >= 0) {
+                    blockSeed = frame[Fields.finallyEncKey]
                     ptr = finallyAddr
-                    currentProgram = frame[Fields.programSection]
+                    setCurrentProgram(frame[Fields.programSection])
                 } else {
                     stack.pop()
                     executeThrow(value)
@@ -901,6 +1030,7 @@ export const getExecution = (
             } if (depth === 0) {
                 // actually break
                 // break always happens within the same vm
+                blockSeed = frame[Fields.breakEncKey]
                 ptr = frame[Fields.break]
                 break loop
             } else {
@@ -916,6 +1046,8 @@ export const getExecution = (
                             nextFrame[Fields.resolveType] = ResolveType.break
                             nextFrame[Fields.depth] = depth
                             nextFrame[Fields.break] = frame[Fields.break]
+                            nextFrame[Fields.breakEncKey] = frame[Fields.breakEncKey]
+                            blockSeed = nextFrame[Fields.finallyEncKey]
                             ptr = finallyAddr
                             break loop
                         }
@@ -929,11 +1061,13 @@ export const getExecution = (
 
     const initiateBreak = () => {
         const frame = peak(stack) as TryFrame
+        const breakEncKey: number = frame[Fields.valueStack].pop()
         const breakAddr: number = frame[Fields.valueStack].pop()
         const depth: number = frame[Fields.valueStack].pop()
         const finallyAddr = frame[Fields.finally]
 
         frame[Fields.break] = breakAddr
+        frame[Fields.breakEncKey] = breakEncKey
         frame[Fields.depth] = depth
 
         // restore scopes
@@ -947,8 +1081,9 @@ export const getExecution = (
                     frame[Fields.state] = TryCatchFinallyState.Finally
                     frame[Fields.resolveType] = ResolveType.break
                     // frame[Fields.value] = value
+                    blockSeed = frame[Fields.finallyEncKey]
                     ptr = finallyAddr
-                    currentProgram = frame[Fields.programSection]
+                    setCurrentProgram(frame[Fields.programSection])
                 } else {
                     // stack.pop()
                     executeBreak()
@@ -981,13 +1116,19 @@ export const getExecution = (
         [OpcodeContextField.currentProgram]: {
             get: () => currentProgram,
             set: (value: number[]) => {
-                currentProgram = value
+                setCurrentProgram(value)
             }
         },
         [OpcodeContextField.ptr]: {
             get: () => ptr,
             set: (value: number) => {
                 ptr = value
+            }
+        },
+        [OpcodeContextField.blockSeed]: {
+            get: () => blockSeed,
+            set: (value: number) => {
+                blockSeed = value >>> 0
             }
         },
         [OpcodeContextField.commandPtr]: {
@@ -1073,7 +1214,7 @@ export const getExecution = (
 
     const step = (debug: boolean = false): Result => {
         if (stack.length > 0) {
-            currentProgram = peak(stack)[Fields.programSection]
+            setCurrentProgram(peak(stack)[Fields.programSection])
         }
         if (ptr >= currentProgram.length) {
              return { [Fields.done]: true, [Fields.value]: undefined, [Fields.evalResult]: undefined }
@@ -1091,26 +1232,34 @@ export const getExecution = (
 
             // console.log(ptr)
             const currentPtr = commandPtr = ptr
-            const command: OpCode = read()
+            const command = decodeOp()
             currentFrame = getCurrentFrame()
             currentFrameStack = currentFrame[Fields.valueStack]
+            onInstruction?.(currentPtr, command, blockSeed)
 
             if (debug && currentFrame[Fields.programSection].length !== currentProgram.length) {
                 debugger
             }
 
             command: switch (command) {
+                case OpCode.Nop:
                 case OpCode.Literal:
+                case OpCode.LiteralAlias1:
+                case OpCode.LiteralAlias2:
                 case OpCode.Pop:
+                case OpCode.PopAlias1:
                 case OpCode.SetEvalResult:
                 case OpCode.Duplicate:
+                case OpCode.DuplicateAlias1:
                 case OpCode.GetRecord:
+                case OpCode.GetRecordAlias1:
                 case OpCode.GetStatic:
                 case OpCode.GetStaticUnchecked:
                 case OpCode.NullLiteral:
                 case OpCode.UndefinedLiteral:
                 case OpCode.RegexpLiteral:
                 case OpCode.Set:
+                case OpCode.SetAlias1:
                 case OpCode.SetKeepCtx:
                 case OpCode.SetStatic:
                 case OpCode.SetStaticUnchecked:
@@ -1130,9 +1279,12 @@ export const getExecution = (
                 case OpCode.BAsteriskEqualStaticUnchecked:
                 case OpCode.DefineKeepCtx:
                 case OpCode.Get:
+                case OpCode.GetAlias1:
                 case OpCode.SetMultiple:
                 case OpCode.Jump:
+                case OpCode.JumpAlias1:
                 case OpCode.JumpIfNot:
+                case OpCode.JumpIfNotAlias1:
                 case OpCode.JumpIf:
                 case OpCode.JumpIfAndKeep:
                 case OpCode.JumpIfNotAndKeep:
@@ -1142,6 +1294,7 @@ export const getExecution = (
                 case OpCode.DeTDZStatic:
                 case OpCode.FreezeVariable:
                 case OpCode.FreezeVariableStatic:
+                case OpCode.Reseed:
                     handleBasicOpcode(command, opcodeContext)
                     break
                 case OpCode.EnterFunction:
@@ -1256,9 +1409,8 @@ export const getExecution = (
                 }
                     break
                 default:
-                    type NonRuntimeCommands = OpCode.NodeFunctionType | OpCode.NodeOffset | OpCode.Nop
-                    const nothing: NonRuntimeCommands = command
-                    throw new Error('Um?')
+                    // Layer-1 garbage injection may emit out-of-domain opcodes; treat them as 1-word NOPs.
+                    break
             }
 
             if (returnsExternal) {
@@ -1299,6 +1451,12 @@ export const getExecution = (
             commandPtr = v
             ptr = v
         },
+        get [Fields.blockSeed] () {
+            return blockSeed
+        },
+        set [Fields.blockSeed] (v: number) {
+            blockSeed = v >>> 0
+        },
         get [Fields.stack] () {
             return stack
         },
@@ -1326,9 +1484,11 @@ const run_ = (
     getDebugFunction: () => null | (() => void),
     evalResultInstead = false,
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
-    functionRedirects: WeakMap<Function, Function> = new WeakMap()
+    functionRedirects: WeakMap<Function, Function> = new WeakMap(),
+    onInstruction: ((ptr: number, opcode: number, blockSeed: number) => void) | null = null,
+    initialBlockSeed: number = 0
 ) => {
-    const execution = getExecution(program, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+    const execution = getExecution(program, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, onInstruction, initialBlockSeed)
 
     let res
 

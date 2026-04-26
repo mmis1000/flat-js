@@ -16,6 +16,7 @@ export type OpcodeHandlerResult = Result | typeof BREAK_COMMAND | void
 export const enum OpcodeContextField {
     currentProgram,
     ptr,
+    blockSeed,
     commandPtr,
     currentFrame,
     currentFrameStack,
@@ -69,6 +70,7 @@ export const enum OpcodeContextField {
 export interface RuntimeOpcodeContext {
     [OpcodeContextField.currentProgram]: number[]
     [OpcodeContextField.ptr]: number
+    [OpcodeContextField.blockSeed]: number
     [OpcodeContextField.commandPtr]: number
     [OpcodeContextField.currentFrame]: Frame
     [OpcodeContextField.currentFrameStack]: any[]
@@ -108,14 +110,15 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.setStaticVariableValueChecked](frame: Frame, depth: number, index: number, value: any): any
 
     [OpcodeContextField.createArgumentObject](): Record<string, any>
-    [OpcodeContextField.defineFunction](globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number): any
+    [OpcodeContextField.defineFunction](globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number, encKey: number): any
     [OpcodeContextField.createGeneratorFromExecution](
         program: number[],
         offset: number,
         globalThis: object,
         scopes: Scope[],
         invokeData: any,
-        args: unknown[]
+        args: unknown[],
+        encKey: number
     ): IterableIterator<unknown> & {
         return(value?: unknown): IteratorResult<unknown>
         throw(error?: unknown): IteratorResult<unknown>

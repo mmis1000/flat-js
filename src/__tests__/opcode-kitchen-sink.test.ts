@@ -14,10 +14,9 @@ function getOpcodeNames(): string[] {
     }
     return match[1]
         .split('\n')
-        .map(line => line.replace(/\/\/.*$/, '').trim())
-        .filter(Boolean)
-        .map(line => line.replace(/,$/, '').trim())
-        .filter(Boolean)
+        .map((line) => line.replace(/\/\/.*$/, '').trim())
+        .map((line) => line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*(?:,|=|$)/)?.[1] ?? '')
+        .filter((name) => name !== '' && name !== '_COUNT')
 }
 
 test('opcode kitchen sink fixture keeps broad opcode coverage', () => {

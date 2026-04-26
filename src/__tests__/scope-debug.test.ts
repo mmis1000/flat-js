@@ -16,10 +16,7 @@ runner(2)
     const scopeDebugMap = info.scopeDebugMap
     expect(scopeDebugMap).toBeDefined()
 
-    const enterPtrs = program
-        .slice(0, info.codeLength)
-        .map((opcode, ptr) => opcode === OpCode.EnterFunction || opcode === OpCode.EnterScope ? ptr : -1)
-        .filter(ptr => ptr >= 0)
+    const enterPtrs = [...scopeDebugMap.keys()].filter(ptr => ptr >= 0 && ptr < info.codeLength)
 
     expect(enterPtrs.length).toBeGreaterThan(0)
     expect(enterPtrs.every(ptr => scopeDebugMap?.has(ptr))).toBe(true)

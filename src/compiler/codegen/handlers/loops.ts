@@ -1,7 +1,7 @@
 import * as ts from 'typescript'
 
 import { OpCode, SetFlag, SpecialVariable, VariableType } from '../../shared'
-import { abort, headOf, markInternals, op, generateEnterScope, generateLeaveScope } from '../helpers'
+import { abort, attachJumpConsumer, headOf, markInternals, op, generateEnterScope, generateLeaveScope } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -35,11 +35,13 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             ? generateLeaveScope()
             : [op(OpCode.Nop, 0)]
 
+        const conditionJumpIfNot = op(OpCode.JumpIfNot)
+
         const conditionS = condition
             ? [
-                op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(exit)]), conditionJumpIfNot),
                 ...ctx.generate(condition, flag),
-                op(OpCode.JumpIfNot)
+                conditionJumpIfNot
             ]
             : [
                 op(OpCode.Nop, 0)
@@ -77,16 +79,18 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             }
         }
 
+        const updateJump = op(OpCode.Jump)
+
         const update1 = incrementor
             ? [
                 ...ctx.generate(incrementor, flag),
                 op(OpCode.Pop),
-                op(OpCode.NodeOffset, 2, [headOf(conditionS)]),
-                op(OpCode.Jump)
+                attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(conditionS)]), updateJump),
+                updateJump
             ]
             : [
-                op(OpCode.NodeOffset, 2, [headOf(conditionS)]),
-                op(OpCode.Jump)
+                attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(conditionS)]), updateJump),
+                updateJump
             ]
 
         const body = ctx.generate(node.statement, flag)
@@ -114,15 +118,17 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         const exit = [
             op(OpCode.Nop, 0)
         ]
+        const headJumpIfNot = op(OpCode.JumpIfNot)
         const head = [
-            op(OpCode.NodeOffset, 2, [exit[0]]),
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [exit[0]]), headJumpIfNot),
             ...ctx.generate(node.expression, flag),
-            op(OpCode.JumpIfNot)
+            headJumpIfNot
         ]
+        const bodyJump = op(OpCode.Jump)
         const body = [
             ...ctx.generate(node.statement, flag),
-            op(OpCode.NodeOffset, 2, [head[0]]),
-            op(OpCode.Jump)
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [head[0]]), bodyJump),
+            bodyJump
         ]
 
         return [
@@ -143,10 +149,11 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
         const bodyOps = ctx.generate(node.statement, flag)
         const body = bodyOps.length === 0 ? [op(OpCode.Nop, 0)] : bodyOps
+        const tailJumpIf = op(OpCode.JumpIf)
         const tail = [
-            op(OpCode.NodeOffset, 2, [body[0]]),
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [body[0]]), tailJumpIf),
             ...ctx.generate(node.expression, flag),
-            op(OpCode.JumpIf)
+            tailJumpIf
         ]
 
         return [
@@ -197,8 +204,10 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.Pop)
         ]
 
+        const conditionJumpIf = op(OpCode.JumpIf)
+
         const condition = [
-            op(OpCode.NodeOffset, 2, [leave[0]]),
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [leave[0]]), conditionJumpIf),
             ...[
                 ...[
                     op(OpCode.GetRecord),
@@ -213,7 +222,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 ],
                 op(OpCode.EntryIsDone),
             ],
-            op(OpCode.JumpIf),
+            conditionJumpIf,
 
             ...getLhs(),
 
@@ -239,6 +248,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         ]
 
         const body = ctx.generate(node.statement, flag)
+        const continueJump = op(OpCode.Jump)
 
         const continueOrLeave = hasVariable ? [
             op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
@@ -261,8 +271,8 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 
-            op(OpCode.NodeOffset, 2, [headOf(condition)]),
-            op(OpCode.Jump)
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(condition)]), continueJump),
+            continueJump
         ] : [
             op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
             op(OpCode.GetRecord),
@@ -276,8 +286,8 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 
-            op(OpCode.NodeOffset, 2, [headOf(condition)]),
-            op(OpCode.Jump)
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(condition)]), continueJump),
+            continueJump
         ]
 
         return [
@@ -338,8 +348,10 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.Pop)
         ]
 
+        const conditionJumpIf = op(OpCode.JumpIf)
+
         const condition = [
-            op(OpCode.NodeOffset, 2, [leave[0]]),
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [leave[0]]), conditionJumpIf),
             ...[
                 ...[
                     op(OpCode.GetRecord),
@@ -357,7 +369,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 op(OpCode.Literal, 2, ['done']),
                 op(OpCode.Get),
             ],
-            op(OpCode.JumpIf),
+            conditionJumpIf,
 
             ...getLhs(),
             ...[
@@ -382,6 +394,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         ]
 
         const body = ctx.generate(node.statement, flag)
+        const continueJump = op(OpCode.Jump)
 
         const continueOrLeave = hasVariable ? [
             op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
@@ -402,8 +415,8 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 
-            op(OpCode.NodeOffset, 2, [headOf(condition)]),
-            op(OpCode.Jump)
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(condition)]), continueJump),
+            continueJump
         ] : [
             op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
             op(OpCode.GetRecord),
@@ -417,8 +430,8 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 
-            op(OpCode.NodeOffset, 2, [headOf(condition)]),
-            op(OpCode.Jump)
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(condition)]), continueJump),
+            continueJump
         ]
 
         return [

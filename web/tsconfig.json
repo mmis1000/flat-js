@@ -73,6 +73,9 @@
     "./**/*.vue",
     "../src/**/*.ts"
   ],
+  "exclude": [
+    "../src/__tests__/**/*.ts"
+  ],
   "references": [
     { "path": "../src" }
   ]

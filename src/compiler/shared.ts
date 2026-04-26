@@ -204,6 +204,23 @@ export const enum OpCode {
 
     SuperCall,
     ArraySpread,
+
+    /** Pops a number from the value stack and sets it as the current blockSeed. 1-word. MUST SYNC with runtime. */
+    Reseed,
+
+    // Aliases — same handler as their base opcode, for frequency-analysis resistance
+    LiteralAlias1,
+    LiteralAlias2,
+    GetAlias1,
+    SetAlias1,
+    PopAlias1,
+    JumpAlias1,
+    JumpIfNotAlias1,
+    GetRecordAlias1,
+    DuplicateAlias1,
+
+    /** Sentinel — must remain last. Domain size for Fisher-Yates shuffle. */
+    _COUNT,
 }
 
 export const enum ResolveType {
