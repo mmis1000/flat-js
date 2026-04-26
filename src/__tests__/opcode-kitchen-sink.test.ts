@@ -1,5 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
+import * as ts from 'typescript'
 
 import { collectUsedOpcodes, compile, OpCode } from '../compiler'
 
@@ -8,16 +9,22 @@ const SHARED_PATH = path.join(__dirname, '..', 'compiler', 'shared.ts')
 
 function getOpcodeNames(): string[] {
     const shared = fs.readFileSync(SHARED_PATH, 'utf8')
-    const match = shared.match(/export const enum OpCode \{([\s\S]*?)\n\}/m)
-    if (!match) {
+    const sourceFile = ts.createSourceFile(SHARED_PATH, shared, ts.ScriptTarget.Latest, true)
+    const opCodeEnum = sourceFile.statements.find(
+        (statement): statement is ts.EnumDeclaration => ts.isEnumDeclaration(statement) && statement.name.text === 'OpCode'
+    )
+
+    if (!opCodeEnum) {
         throw new Error('OpCode enum not found in compiler/shared.ts')
     }
-    return match[1]
-        .split('\n')
-        .map(line => line.replace(/\/\/.*$/, '').trim())
-        .filter(Boolean)
-        .map(line => line.replace(/,$/, '').trim())
-        .filter(Boolean)
+
+    return opCodeEnum.members.map((member) => {
+        if (!ts.isIdentifier(member.name)) {
+            throw new Error('Unexpected non-identifier OpCode member name')
+        }
+
+        return member.name.text
+    })
 }
 
 test('opcode kitchen sink fixture keeps broad opcode coverage', () => {
