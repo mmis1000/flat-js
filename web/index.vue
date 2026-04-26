@@ -621,6 +621,7 @@ export default Vue.extend({
 
                         if (sim?.vmBarrierBlocksExecution()) {
                             drainVmBarrier()
+                            // @ts-expect-error TypeScript does not model drainVmBarrier() mutating this.state.
                             if (this.state === 'idle') {
                                 break
                             }
