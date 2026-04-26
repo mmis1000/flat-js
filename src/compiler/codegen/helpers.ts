@@ -1,8 +1,8 @@
 import * as ts from 'typescript'
 
-import { isScopeRoot, type Scopes } from '../analysis'
+import { isScopeRoot, type Scopes, type VariableRoot } from '../analysis'
 import { OpCode, SpecialVariable } from '../shared'
-import type { Op } from './types'
+import type { JumpLabel, JumpTarget, JumpTargetInput, Op, Segment } from './types'
 
 export function abort(msg: string): never {
     throw new Error(msg)
@@ -29,18 +29,78 @@ export function getNameOfKind(kind: ts.SyntaxKind): string {
     return name
 }
 
+export function isJumpLabel(target: JumpTargetInput | undefined): target is JumpLabel {
+    return target !== undefined && (target as JumpLabel).jumpLabel === true
+}
+
+function isAstJumpTarget(target: JumpTargetInput | undefined): target is ts.Node {
+    return target !== undefined && !isJumpLabel(target) && typeof (target as ts.Node).kind === 'number'
+}
+
+export function toJumpTarget(target: JumpTargetInput): JumpTarget {
+    if (isJumpLabel(target) || isAstJumpTarget(target)) {
+        return target
+    }
+
+    return { jumpLabel: true, anchor: target }
+}
+
+export function getJumpTargetAnchor(target: JumpTarget | undefined): Op | undefined {
+    if (target === undefined || !isJumpLabel(target)) {
+        return undefined
+    }
+
+    return target.anchor
+}
+
+export function resolveJumpTargetOffset(target: JumpTarget, fnRootToSegment: Map<ts.Node, Segment>): number {
+    if (isJumpLabel(target)) {
+        return (target.entryOp ?? target.anchor).offset
+    }
+
+    return headOf(fnRootToSegment.get(target)!).offset
+}
+
 export function op(op: OpCode.Nop, length: 0, preData?: never[]): Op<OpCode>
-export function op(op: OpCode.NodeOffset, length?: number, preData?: (Op | ts.Node)[]): Op<OpCode>
+export function op(op: OpCode.NodeOffset, length?: number, preData?: JumpTargetInput[]): Op<OpCode>
 export function op(op: Exclude<OpCode, OpCode.NodeOffset | OpCode.Nop>, length?: number, preData?: any[]): Op<OpCode>
 export function op(op: OpCode, length: number = 1, preData: any[] = []): Op<OpCode> {
+    const normalizedPreData = op === OpCode.NodeOffset
+        ? preData.map((target) => toJumpTarget(target as JumpTargetInput))
+        : preData
+
     return {
         op,
         length,
-        preData,
+        preData: normalizedPreData,
         data: [],
         internal: false,
         offset: -1
     }
+}
+
+export function createNodeFunctionTypeDefinePair(func: VariableRoot): [Op, Op] {
+    const nodeFunctionType = op(OpCode.NodeFunctionType, 4, [func])
+    const defineFunction = op(OpCode.DefineFunction)
+    nodeFunctionType.defineConsumerRef = defineFunction
+    return [nodeFunctionType, defineFunction]
+}
+
+export function createNodeOffsetEncKeyPlaceholder(nodeOffsetOp: Op): Op {
+    return {
+        op: OpCode.Literal,
+        length: 2,
+        preData: [0],
+        data: [],
+        internal: true,
+        offset: -1,
+        nodeOffsetRef: nodeOffsetOp
+    }
+}
+
+export function attachJumpConsumer(nodeOffsetOp: Op, jumpOp: Op): Op {
+    nodeOffsetOp.jumpConsumerRef = jumpOp
+    return nodeOffsetOp
 }
 
 export function markInternals(ops: Op<OpCode>[]): Op<OpCode>[] {

@@ -19,7 +19,11 @@ import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
 export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): void => {
     switch (command) {
-        case OpCode.Literal: {
+        case OpCode.Nop:
+            break
+        case OpCode.Literal:
+        case OpCode.LiteralAlias1:
+        case OpCode.LiteralAlias2: {
             const value = ctx[OpcodeContextField.read]()
             if (isSmallNumber(value)) {
                 ctx[OpcodeContextField.pushCurrentFrameStack](value)
@@ -30,16 +34,22 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         }
             break
         case OpCode.Pop:
+        case OpCode.PopAlias1:
             ctx[OpcodeContextField.popCurrentFrameStack]()
             break
         case OpCode.SetEvalResult:
             ctx[OpcodeContextField.evalResult] = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.valueStack])
             break
         case OpCode.Duplicate:
+        case OpCode.DuplicateAlias1:
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.valueStack]))
             break
         case OpCode.GetRecord:
+        case OpCode.GetRecordAlias1:
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.currentFrame])
+            break
+        case OpCode.Reseed:
+            ctx[OpcodeContextField.blockSeed] = ctx[OpcodeContextField.popCurrentFrameStack]<number>() >>> 0
             break
         case OpCode.GetStatic: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
@@ -66,6 +76,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         }
             break
         case OpCode.Set:
+        case OpCode.SetAlias1:
         case OpCode.SetKeepCtx: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
@@ -73,10 +84,10 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
 
             ctx[OpcodeContextField.setValue](target, name, value)
 
-            if (command === OpCode.Set) {
-                ctx[OpcodeContextField.pushCurrentFrameStack](value)
-            } else {
+            if (command === OpCode.SetKeepCtx) {
                 ctx[OpcodeContextField.pushCurrentFrameStack](target)
+            } else {
+                ctx[OpcodeContextField.pushCurrentFrameStack](value)
             }
         }
             break
@@ -187,7 +198,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             ctx[OpcodeContextField.pushCurrentFrameStack](target)
         }
             break
-        case OpCode.Get: {
+        case OpCode.Get:
+        case OpCode.GetAlias1: {
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.getValue](target, name))
@@ -226,12 +238,14 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             }
         }
             break
-        case OpCode.Jump: {
+        case OpCode.Jump:
+        case OpCode.JumpAlias1: {
             const pos = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             ctx[OpcodeContextField.ptr] = pos
         }
             break
-        case OpCode.JumpIfNot: {
+        case OpCode.JumpIfNot:
+        case OpCode.JumpIfNotAlias1: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
             const pos = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             if (!value) {

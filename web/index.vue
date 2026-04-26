@@ -217,7 +217,10 @@ function emptyDebugInfo(): DebugInfo {
         sourceMap: [],
         internals: [],
         scopeDebugMap: new Map(),
-        codeLength: 0
+        codeLength: 0,
+        usedOpcodes: [],
+        globalSeed: 0,
+        activeSeedAtPos: new Map()
     }
 }
 import { resetVmMathRandom } from './vm-deterministic-math'
@@ -485,6 +488,15 @@ export default Vue.extend({
                 this.highlightRafId = 0
             }
         },
+        simNeedsTicks(sim: Sim | null) {
+            if (!sim) {
+                return false
+            }
+            return sim.vmBarrierBlocksExecution()
+                || sim.view.activeIntent !== null
+                || Boolean(sim.view.currentScanRays?.length)
+                || sim.view.discs.some(d => d.alive)
+        },
         releaseVmExecution() {
             this.cancelDebugHighlightRaf()
             this.execution = null
@@ -529,6 +541,18 @@ export default Vue.extend({
             const s = execution[Fields.stack]
             this.stackContainer = { get stack () { return s } }
         },
+        advancePausedWorldIfNeeded() {
+            const sim = this.sim
+            const runner = this.simRunner
+            if (!sim || !runner) {
+                return false
+            }
+            if (!this.simNeedsTicks(sim)) {
+                return false
+            }
+            runner.stepOneTick()
+            return true
+        },
         stepExecution(stepIn = false) {
             const execution = this.execution
             if (!execution) return
@@ -540,14 +564,20 @@ export default Vue.extend({
                 }
             }
 
-            let result: Result
+            let result: Result = { [Fields.done]: false } as Result
 
             try {
                 const sim = this.sim
                 const runner = this.simRunner
-                if (!sim || !runner) return
+
+                if (this.advancePausedWorldIfNeeded() && sim?.view.won) {
+                    this.state = 'idle'
+                }
 
                 const drainVmBarrier = () => {
+                    if (!sim || !runner) {
+                        return
+                    }
                     let barrierTicks = 0
                     while (sim.vmBarrierBlocksExecution()) {
                         runner.stepOneTick()
@@ -562,7 +592,7 @@ export default Vue.extend({
                     }
                 }
 
-                if (sim.vmBarrierBlocksExecution()) {
+                if (sim?.vmBarrierBlocksExecution()) {
                     drainVmBarrier()
                     if (this.state === 'idle') {
                         this.cancelDebugHighlightRaf()
@@ -585,57 +615,64 @@ export default Vue.extend({
                 let skipping = false
                 let firstIgnored = false
 
-                do {
-                    result = execution[Fields.step](true)
+                if (!(sim && sim.vmBarrierBlocksExecution()) && this.state !== 'idle') {
+                    do {
+                        result = execution[Fields.step](true)
 
-                    if (sim.vmBarrierBlocksExecution()) {
-                        drainVmBarrier()
-                        if (this.state === 'idle') {
-                            break
+                        if (sim?.vmBarrierBlocksExecution()) {
+                            drainVmBarrier()
+                            if (this.state === 'idle') {
+                                break
+                            }
+                            if (sim.vmBarrierBlocksExecution()) {
+                                this.flushDebugHighlightSync()
+                                return
+                            }
                         }
-                        if (sim.vmBarrierBlocksExecution()) {
-                            this.flushDebugHighlightSync()
-                            return
-                        }
-                    }
 
-                    if (!skipping) {
-                        skipping = stepIn ? false : getCurrentStackLength() > maxStack
-                    } else /** if (skipping) */ {
-                        if (!firstIgnored && getCurrentStackLength() <= maxStack) {
-                            firstIgnored = true
-                        } else if (firstIgnored) {
-                            firstIgnored = false
-                            skipping = false
+                        if (!skipping) {
+                            skipping = stepIn ? false : getCurrentStackLength() > maxStack
+                        } else {
+                            if (!firstIgnored && getCurrentStackLength() <= maxStack) {
+                                firstIgnored = true
+                            } else if (firstIgnored) {
+                                firstIgnored = false
+                                skipping = false
+                            }
                         }
-                    }
 
-                    maxStack = Math.min(maxStack, getCurrentStackLength())
-                } while (
-                    (
-                        sameSourceMapPos(getPos(), originalPos) ||
-                        this.getInternalsAtPtr(execution) ||
-                        skipping
+                        maxStack = Math.min(maxStack, getCurrentStackLength())
+                    } while (
+                        (
+                            sameSourceMapPos(getPos(), originalPos) ||
+                            this.getInternalsAtPtr(execution) ||
+                            skipping
+                        )
+                        && !result[Fields.done]
                     )
-                    && !result[Fields.done]
-                )
+                }
 
                 if (!result[Fields.done]) {
                     this.scheduleDebugHighlight()
                 }
-                if (result[Fields.done] || sim.view.won) {
+                if (sim?.view.won || (result[Fields.done] && !this.simNeedsTicks(sim))) {
                     this.state = 'idle'
                 }
                 if (this.state === 'idle') {
+                    if (sim && (result[Fields.done] || sim.view.won)) {
+                        this.scoreHistory.push(sim.view.tick)
+                    }
                     this.cancelDebugHighlightRaf()
                     this.highlights = []
+                    this.releaseVmExecution()
+                } else {
+                    this.flushDebugHighlightSync()
                 }
 
             } catch (err) {
                 this.printError(err)
                 this.state = 'idle'
-                this.cancelDebugHighlightRaf()
-                this.highlights = []
+                this.releaseVmExecution()
             }
         },
         async runExecution() {
@@ -690,10 +727,10 @@ export default Vue.extend({
 
             try {
                 while (<State>this.state === 'play') {
-                    if (result[Fields.done]) break
+                    if (result[Fields.done] && !this.simNeedsTicks(sim)) break
 
                     await waitTick()
-                    if (result[Fields.done]) break
+                    if (result[Fields.done] && !this.simNeedsTicks(sim)) break
 
                     // One timer wake may advance several sim ticks when TICK_MS < MIN_TIMER_MS.
                     // After each world tick, run VM until debug line changes, read barrier, or guard.
@@ -756,7 +793,7 @@ export default Vue.extend({
                     this.flushDebugHighlightSync()
                 }
 
-                if (result[Fields.done] || sim.view.won) {
+                if (sim.view.won || (result[Fields.done] && !this.simNeedsTicks(sim))) {
                     this.state = 'idle'
                     this.scoreHistory.push(sim.view.tick)
                 }

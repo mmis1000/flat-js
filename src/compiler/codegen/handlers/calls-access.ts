@@ -1,7 +1,7 @@
 import * as ts from 'typescript'
 
 import { FunctionTypes, OpCode, SpecialVariable } from '../../shared'
-import { op } from '../helpers'
+import { createNodeFunctionTypeDefinePair, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -163,10 +163,11 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
             }
 
             if (ts.isMethodDeclaration(item)) {
+                const [functionType, defineFunction] = createNodeFunctionTypeDefinePair(item)
                 res.push(op(OpCode.Duplicate))
                 res.push(op(OpCode.NodeOffset, 2, [item]))
-                res.push(op(OpCode.NodeFunctionType, 2, [item]))
-                res.push(op(OpCode.DefineFunction))
+                res.push(functionType)
+                res.push(defineFunction)
                 res.push(op(OpCode.DefineKeepCtx))
             } else if (ts.isPropertyAssignment(item)) {
                 res.push(...ctx.generate(item.initializer, flag))

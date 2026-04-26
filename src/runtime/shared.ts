@@ -89,6 +89,7 @@ export const enum Fields {
     evalResult,
     newTarget,
     break,
+    breakEncKey,
     depth,
 
     globalThis,
@@ -100,6 +101,12 @@ export const enum Fields {
     setPendingThrow,
     error,
     generator,
+    savedSeed,
+    encKey,
+    blockSeed,
+    catchEncKey,
+    finallyEncKey,
+    exitEncKey,
 }
 
 interface BaseFrame {
@@ -115,6 +122,7 @@ interface FunctionFrame extends BaseFrame {
     [Fields.type]: FrameType.Function
     [Fields.return]: number,
     [Fields.invokeType]: InvokeType
+    [Fields.savedSeed]: number
 }
 
 interface TryFrame extends BaseFrame {
@@ -131,15 +139,19 @@ interface TryFrame extends BaseFrame {
 
     /** address */
     [Fields.catch]: number,
+    [Fields.catchEncKey]: number,
 
     /** address */
     [Fields.finally]: number,
+    [Fields.finallyEncKey]: number,
 
     /** address */
     [Fields.exit]: number,
+    [Fields.exitEncKey]: number,
 
     /** address */
     [Fields.break]: number,
+    [Fields.breakEncKey]: number,
     /** how deep did it break out, jump to the break address on reach 0 */
     [Fields.depth]: number,
 
@@ -270,6 +282,7 @@ export type ScopeDebugEntry = [string, unknown, boolean]
 
 type Execution = {
     [Fields.ptr]: number
+    [Fields.blockSeed]: number
     readonly [Fields.stack]: Stack
     readonly [Fields.scopes]: Scope[]
     [Fields.step]: (debug?: boolean) => Result
@@ -284,6 +297,7 @@ type FunctionDescriptor = {
     [Fields.scopes]: Scope[],
     [Fields.programSection]: number[],
     [Fields.globalThis]: any
+    [Fields.encKey]: number,
 }
 
 const isGeneratorType = (t: FunctionTypes) =>
@@ -306,6 +320,7 @@ const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, 
 type GeneratorState = {
     stack: Stack,
     ptr: number,
+    blockSeed: number,
     completed: boolean,
     started: boolean,
     pendingAction: null | { type: 'throw' | 'return', value: any },

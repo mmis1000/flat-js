@@ -14,6 +14,21 @@ test('gzip roundtrip matches raw VM program bytes', () => {
     expect(gunzipSync(gzipSync(raw)).equals(raw)).toBe(true)
 })
 
+test('compile with range: synthetic ops inherit nearby source spans', () => {
+    const [, info] = compile(`
+        class Derived extends Array {
+            constructor() {
+                super()
+            }
+        }
+
+        new Derived()
+    `, { range: true })
+
+    expect(info.sourceMap.length).toBeGreaterThan(0)
+    expect(info.sourceMap.every(Boolean)).toBe(true)
+})
+
 test('compileAndRun: ', () => {
     expect(compileAndRun('42')).toBe(42)
 })

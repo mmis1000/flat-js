@@ -1,7 +1,7 @@
 import { promises as fs } from "fs"
 import * as path from "path"
 import { gzipSync } from "zlib"
-import { collectUsedOpcodes, compile } from "./compiler"
+import { compile } from "./compiler"
 import { stripRuntimeCommandSwitch } from "./strip-runtime-opcodes"
 import * as uglify from 'terser'
 
@@ -101,15 +101,15 @@ async function main () {
     }
 
     if (stripRuntime) {
-        const opcodeSet = new Set(collectUsedOpcodes(programDataRaw, compileInfo.codeLength))
+        const opcodeSet = new Set(compileInfo.usedOpcodes)
         for (const extra of mergeOpcodePaths) {
             const extraSrc = await fs.readFile(extra, { encoding: 'utf-8' })
             const extraMin = await minifyInput(extraSrc)
             if (!extraMin) {
                 throw new Error('fail to minimize')
             }
-            const [extraProg, extraInfo] = compile(extraMin, compileOpts)
-            for (const n of collectUsedOpcodes(extraProg, extraInfo.codeLength)) {
+            const [, extraInfo] = compile(extraMin, compileOpts)
+            for (const n of extraInfo.usedOpcodes) {
                 opcodeSet.add(n)
             }
         }

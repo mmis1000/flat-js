@@ -42,6 +42,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
 
                 const prevFrame = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])
                 prevFrame[Fields.valueStack].push({ value: result, done: true })
+                ctx[OpcodeContextField.blockSeed] = functionFrame[Fields.savedSeed]
                 ctx[OpcodeContextField.ptr] = returnAddr
                 ctx[OpcodeContextField.currentProgram] = prevFrame[Fields.programSection]
                 return BREAK_COMMAND
@@ -76,6 +77,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                 prevFrame[Fields.valueStack].push(ctx[OpcodeContextField.getValue](functionFrame, SpecialVariable.This))
             }
 
+            ctx[OpcodeContextField.blockSeed] = functionFrame[Fields.savedSeed]
             ctx[OpcodeContextField.ptr] = returnAddr
             ctx[OpcodeContextField.currentProgram] = prevFrame[Fields.programSection]
         }
@@ -89,8 +91,11 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
         }
         case OpCode.InitTryCatch: {
             const catchName = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const finallyEncKey = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const finallyAddr = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const catchEncKey = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const catchAddr = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const exitEncKey = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const exitAddr = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
 
             const frame: TryFrame = {
@@ -102,11 +107,15 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                 [Fields.resolveType]: ResolveType.normal,
                 [Fields.value]: undefined,
                 [Fields.catch]: catchAddr,
+                [Fields.catchEncKey]: catchEncKey,
                 [Fields.finally]: finallyAddr,
+                [Fields.finallyEncKey]: finallyEncKey,
                 [Fields.break]: 0,
+                [Fields.breakEncKey]: 0,
                 [Fields.depth]: 0,
                 [Fields.variable]: catchName,
                 [Fields.exit]: exitAddr,
+                [Fields.exitEncKey]: exitEncKey,
                 [Fields.programSection]: ctx[OpcodeContextField.currentProgram],
                 [Fields.globalThis]: ctx[OpcodeContextField.currentFrame][Fields.globalThis],
                 [Fields.generator]: ctx[OpcodeContextField.currentFrame][Fields.generator],
@@ -139,6 +148,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                 case TryCatchFinallyState.Finally:
                     switch (prevResolveType) {
                         case ResolveType.normal:
+                            ctx[OpcodeContextField.blockSeed] = frame[Fields.exitEncKey]
                             ctx[OpcodeContextField.ptr] = exit
                             return BREAK_COMMAND
                         case ResolveType.throw:
@@ -158,10 +168,12 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                         frame[Fields.state] = TryCatchFinallyState.Finally
                         frame[Fields.resolveType] = ResolveType.normal
                         frame[Fields.value] = undefined
+                        ctx[OpcodeContextField.blockSeed] = frame[Fields.finallyEncKey]
                         ctx[OpcodeContextField.ptr] = finallyPtr
                         return BREAK_COMMAND
                     }
 
+                    ctx[OpcodeContextField.blockSeed] = frame[Fields.exitEncKey]
                     ctx[OpcodeContextField.ptr] = exit
                     return BREAK_COMMAND
                 default:

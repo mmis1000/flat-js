@@ -70,10 +70,10 @@ export type ProgramScopeDebugMap = Map<number, readonly string[]>
 
 export const enum OpCode {
     /**
-     * Compile-time placeholder used to anchor branches and empty segments.
+     * Acts as a no-op placeholder or padding instruction.
      * Stack (bottom to top): <empty>
-     * Result: not executed directly.
-     * Notes: Codegen emits this with length 0, so it normally produces no runtime word.
+     * Result: no stack result.
+     * Notes: Codegen often emits this with length 0 to anchor branches, but obfuscation may also materialize it as a 1-word runtime no-op.
      */
     Nop,
     /**
@@ -107,7 +107,7 @@ export const enum OpCode {
      * Compile-time pseudo-op that resolves a function-like node to a `FunctionTypes` value.
      * Stack (bottom to top): <empty>
      * Result: not executed directly.
-     * Notes: The encoder rewrites this into a `Literal` that pushes the resolved function type.
+     * Notes: The encoder rewrites this into a `Literal` that pushes the resolved function type. When paired with `DefineFunction`, codegen may append a second literal carrying that function entry's decode seed.
      */
     NodeFunctionType,
     /**
@@ -283,8 +283,9 @@ export const enum OpCode {
 
     /**
      * Creates a VM function object from encoded metadata.
-     * Stack (bottom to top): name, nodeOffset, nodeFunctionType
+     * Stack (bottom to top): name, functionOffset, functionType, entryEncKey
      * Result: fn
+     * Notes: `entryEncKey` seeds opcode decoding at the callee entry point.
      */
     DefineFunction,
     /**
@@ -316,8 +317,9 @@ export const enum OpCode {
     ThrowInTryCatchFinally,
     /**
      * Initiates a `break` that may need to cross try/finally frames.
-     * Stack (bottom to top): depth, breakAddr
+     * Stack (bottom to top): depth, breakAddr, breakEncKey
      * Result: no direct stack result.
+     * Notes: `breakEncKey` restores the decode seed that should be active at `breakAddr`.
      */
     BreakInTryCatchFinally,
     /**
@@ -329,8 +331,9 @@ export const enum OpCode {
     ExitTryCatchFinally,
     /**
      * Creates a try-control frame for upcoming try/catch/finally handling.
-     * Stack (bottom to top): exitAddr, catchAddr, finallyAddr, catchClauseName
+     * Stack (bottom to top): exitAddr, exitEncKey, catchAddr, catchEncKey, finallyAddr, finallyEncKey, catchClauseName
      * Result: no stack result.
+     * Notes: Each encoded branch target carries the decode seed that must be restored before entering that block.
      */
     InitTryCatch,
 
@@ -821,6 +824,86 @@ export const enum OpCode {
      * Result: array
      */
     ArraySpread,
+
+    /**
+     * Replaces the active opcode-decode seed.
+     * Stack (bottom to top): nextBlockSeed
+     * Result: no stack result.
+     * Notes: The popped seed becomes the active block seed for subsequent instruction decoding. MUST SYNC with runtime.
+     */
+    Reseed,
+
+    /**
+     * Alias of `Literal` with identical stack behavior.
+     * Stack (bottom to top): <empty>
+     * Result: literalValue
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    LiteralAlias1,
+    /**
+     * Alias of `Literal` with identical stack behavior.
+     * Stack (bottom to top): <empty>
+     * Result: literalValue
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    LiteralAlias2,
+    /**
+     * Alias of `Get` with identical stack behavior.
+     * Stack (bottom to top): target, name
+     * Result: value
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    GetAlias1,
+    /**
+     * Alias of `Set` with identical stack behavior.
+     * Stack (bottom to top): target, name, value
+     * Result: value
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    SetAlias1,
+    /**
+     * Alias of `Pop` with identical stack behavior.
+     * Stack (bottom to top): value
+     * Result: no stack result.
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    PopAlias1,
+    /**
+     * Alias of `Jump` with identical stack behavior.
+     * Stack (bottom to top): offset
+     * Result: no stack result.
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    JumpAlias1,
+    /**
+     * Alias of `JumpIfNot` with identical stack behavior.
+     * Stack (bottom to top): offset, condition
+     * Result: no stack result.
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    JumpIfNotAlias1,
+    /**
+     * Alias of `GetRecord` with identical stack behavior.
+     * Stack (bottom to top): <empty>
+     * Result: currentRecord
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    GetRecordAlias1,
+    /**
+     * Alias of `Duplicate` with identical stack behavior.
+     * Stack (bottom to top): value
+     * Result: value, value
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    DuplicateAlias1,
+
+    /**
+     * Sentinel marking the opcode-domain size.
+     * Stack (bottom to top): <empty>
+     * Result: not executed directly.
+     * Notes: Must remain last so the Fisher-Yates permutation covers every real opcode.
+     */
+    _COUNT,
 }
 
 export const enum ResolveType {

@@ -17,14 +17,15 @@ function getOpcodeNames(): string[] {
     if (!opCodeEnum) {
         throw new Error('OpCode enum not found in compiler/shared.ts')
     }
+    return opCodeEnum.members
+        .map((member) => {
+            if (!ts.isIdentifier(member.name)) {
+                throw new Error('Unexpected non-identifier OpCode member name')
+            }
 
-    return opCodeEnum.members.map((member) => {
-        if (!ts.isIdentifier(member.name)) {
-            throw new Error('Unexpected non-identifier OpCode member name')
-        }
-
-        return member.name.text
-    })
+            return member.name.text
+        })
+        .filter((name) => name !== '_COUNT')
 }
 
 test('opcode kitchen sink fixture keeps broad opcode coverage', () => {

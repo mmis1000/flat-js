@@ -1,7 +1,7 @@
 import * as ts from 'typescript'
 
 import { FunctionTypes, OpCode, SpecialVariable, VariableType } from '../../shared'
-import { markInternals, op } from '../helpers'
+import { createNodeFunctionTypeDefinePair, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -40,11 +40,12 @@ export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext
     }
 
     if (ctorMember) {
+        const [functionType, defineFunction] = createNodeFunctionTypeDefinePair(ctorMember)
         res.push(
             op(OpCode.Literal, 2, [className]),
             op(OpCode.NodeOffset, 2, [ctorMember]),
-            op(OpCode.Literal, 2, [hasSuper ? FunctionTypes.DerivedConstructor : FunctionTypes.Constructor]),
-            op(OpCode.DefineFunction)
+            functionType,
+            defineFunction
         )
     } else {
         res.push(op(OpCode.UndefinedLiteral))
@@ -71,6 +72,7 @@ export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext
         ) : false
 
         if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+            const [functionType, defineFunction] = createNodeFunctionTypeDefinePair(member)
             res.push(op(OpCode.Duplicate))
             if (!isStatic) {
                 res.push(
@@ -91,8 +93,8 @@ export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext
 
             res.push(op(OpCode.Duplicate))
             res.push(op(OpCode.NodeOffset, 2, [member]))
-            res.push(op(OpCode.NodeFunctionType, 2, [member]))
-            res.push(op(OpCode.DefineFunction))
+            res.push(functionType)
+            res.push(defineFunction)
 
             if (ts.isGetAccessorDeclaration(member)) {
                 res.push(op(OpCode.DefineGetter))

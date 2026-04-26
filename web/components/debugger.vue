@@ -51,7 +51,10 @@ export default Vue.extend({
                     sourceMap: [],
                     internals: [],
                     scopeDebugMap: new Map(),
-                    codeLength: 0
+                    codeLength: 0,
+                    usedOpcodes: [],
+                    globalSeed: 0,
+                    activeSeedAtPos: new Map()
                 }
             }
         }

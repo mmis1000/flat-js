@@ -2,27 +2,31 @@ import * as ts from 'typescript'
 
 import { findAncient } from '../../analysis'
 import { OpCode, SpecialVariable, StatementFlag, VariableType } from '../../shared'
-import { abort, headOf, op, generateEnterScope, generateLeaveScope } from '../helpers'
+import { abort, attachJumpConsumer, createNodeOffsetEncKeyPlaceholder, headOf, op, generateEnterScope, generateLeaveScope } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Op, Segment } from '../types'
 
 export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isIfStatement(node)) {
         const exit = [op(OpCode.Nop, 0)]
+        const whenTrueJump = op(OpCode.Jump)
+        const whenTrueTarget = attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(exit)]), whenTrueJump)
         const whenTrue = [
             op(OpCode.Nop, 0),
             ...ctx.generate(node.thenStatement, flag),
-            op(OpCode.NodeOffset, 2, [headOf(exit)]),
-            op(OpCode.Jump),
+            whenTrueTarget,
+            whenTrueJump,
         ]
         const whenFalsy = [
             op(OpCode.Nop, 0),
             ...(node.elseStatement !== undefined ? ctx.generate(node.elseStatement, flag) : [])
         ]
+        const conditionJump = op(OpCode.JumpIfNot)
+        const conditionTarget = attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(whenFalsy)]), conditionJump)
         const condition = [
-            op(OpCode.NodeOffset, 2, [headOf(whenFalsy)]),
+            conditionTarget,
             ...ctx.generate(node.expression, flag),
-            op(OpCode.JumpIfNot)
+            conditionJump
         ]
 
         return [...condition, ...whenTrue, ...whenFalsy, ...exit]
@@ -68,14 +72,21 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
             throw new Error('not support non identifier binding')
         }
 
+        const exitAllNodeOffset = op(OpCode.NodeOffset, 2, [headOf(exitAll)])
+        const catchNodeOffset = node.catchClause
+            ? op(OpCode.NodeOffset, 2, [headOf(catchStatement)])
+            : op(OpCode.Literal, 2, [-1])
+        const finallyNodeOffset = node.finallyBlock
+            ? op(OpCode.NodeOffset, 2, [headOf(finallyStatement)])
+            : op(OpCode.Literal, 2, [-1])
+
         const init = [
-            op(OpCode.NodeOffset, 2, [headOf(exitAll)]),
-            node.catchClause
-                ? op(OpCode.NodeOffset, 2, [headOf(catchStatement)])
-                : op(OpCode.Literal, 2, [-1]),
-            node.finallyBlock
-                ? op(OpCode.NodeOffset, 2, [headOf(finallyStatement)])
-                : op(OpCode.Literal, 2, [-1]),
+            exitAllNodeOffset,
+            createNodeOffsetEncKeyPlaceholder(exitAllNodeOffset),
+            catchNodeOffset,
+            node.catchClause ? createNodeOffsetEncKeyPlaceholder(catchNodeOffset) : op(OpCode.Literal, 2, [-1]),
+            finallyNodeOffset,
+            node.finallyBlock ? createNodeOffsetEncKeyPlaceholder(finallyNodeOffset) : op(OpCode.Literal, 2, [-1]),
             node.catchClause?.variableDeclaration
                 ? op(OpCode.Literal, 2, [catchIdentifier?.text])
                 : op(OpCode.UndefinedLiteral),
@@ -167,20 +178,21 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
         for (const [index, item] of bodies.entries()) {
             const nextSegment = bodies[index].body[0]
-            connectedBodyRules.push(op(OpCode.NodeOffset, 2, [nextSegment]))
-
+            const jump = item.rule != null ? op(OpCode.JumpIf) : op(OpCode.Jump)
+            connectedBodyRules.push(attachJumpConsumer(op(OpCode.NodeOffset, 2, [nextSegment]), jump))
             if (item.rule != null) {
                 connectedBodyRules.push(...item.rule)
-                connectedBodyRules.push(op(OpCode.JumpIf))
+                connectedBodyRules.push(jump)
             } else {
-                connectedBodyRules.push(op(OpCode.Jump))
+                connectedBodyRules.push(jump)
             }
 
             connectedBody.push(...item.body)
         }
 
-        connectedBodyRules.push(op(OpCode.NodeOffset, 2, [connectedBodyExit]))
-        connectedBodyRules.push(op(OpCode.Jump))
+        const exitJump = op(OpCode.Jump)
+        connectedBodyRules.push(attachJumpConsumer(op(OpCode.NodeOffset, 2, [connectedBodyExit]), exitJump))
+        connectedBodyRules.push(exitJump)
 
         const switchTail = [
             op(OpCode.LeaveScope)
@@ -231,22 +243,26 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         }
 
         if (crossedTryCatch === 0) {
+            const breakJump = op(OpCode.Jump)
             return [
                 ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
-                op(OpCode.NodeOffset, 2, [nextNode]),
-                op(OpCode.Jump)
+                attachJumpConsumer(op(OpCode.NodeOffset, 2, [nextNode]), breakJump),
+                breakJump
             ]
         }
 
+        const exitStubJump = op(OpCode.Jump)
         const exitStub: Op[] = [
             op(OpCode.Nop, 0),
             ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
-            op(OpCode.NodeOffset, 2, [nextNode]),
-            op(OpCode.Jump)
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [nextNode]), exitStubJump),
+            exitStubJump
         ]
+        const exitStubNodeOffset = op(OpCode.NodeOffset, 2, [exitStub[0]])
         const breakCommand: Op[] = [
             op(OpCode.Literal, 2, [crossedTryCatch]),
-            op(OpCode.NodeOffset, 2, [exitStub[0]]),
+            exitStubNodeOffset,
+            createNodeOffsetEncKeyPlaceholder(exitStubNodeOffset),
             op(OpCode.BreakInTryCatchFinally)
         ]
         return [
@@ -281,11 +297,12 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         }
 
         const forHasScope = (ctx.scopes.get(target)?.size ?? 0) !== 0
+        const continueJump = op(OpCode.Jump)
 
         return [
             ...new Array(forHasScope ? scopeCount - 1 : scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
-            op(OpCode.NodeOffset, 2, [nextNode]),
-            op(OpCode.Jump)
+            attachJumpConsumer(op(OpCode.NodeOffset, 2, [nextNode]), continueJump),
+            continueJump
         ]
     }
 }

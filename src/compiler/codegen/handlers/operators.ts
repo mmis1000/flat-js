@@ -1,7 +1,7 @@
 import * as ts from 'typescript'
 
 import { OpCode } from '../../shared'
-import { abort, getNameOfKind, headOf, op } from '../helpers'
+import { abort, attachJumpConsumer, getNameOfKind, headOf, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -11,15 +11,19 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
         const positive = [op(OpCode.Nop, 0), ...ctx.generate(node.whenTrue, flag)]
         const negative = [op(OpCode.Nop, 0), ...ctx.generate(node.whenFalse, flag)]
         const end = [op(OpCode.Nop, 0)]
+        const jumpIfNot = op(OpCode.JumpIfNot)
+        const jumpToEnd = op(OpCode.Jump)
+        const negativeTarget = attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(negative)]), jumpIfNot)
+        const endTarget = attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(end)]), jumpToEnd)
 
         return [
-            op(OpCode.NodeOffset, 2, [headOf(negative)]),
+            negativeTarget,
             ...condition,
-            op(OpCode.JumpIfNot),
+            jumpIfNot,
 
             ...positive,
-            op(OpCode.NodeOffset, 2, [headOf(end)]),
-            op(OpCode.Jump),
+            endTarget,
+            jumpToEnd,
 
             ...negative,
 
@@ -93,11 +97,13 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 const left = ctx.generate(node.left, flag)
                 const right = ctx.generate(node.right, flag)
                 const exit = [op(OpCode.Nop, 0)]
+                const jumpIfNotAndKeep = op(OpCode.JumpIfNotAndKeep)
+                const exitTarget = attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(exit)]), jumpIfNotAndKeep)
 
                 return [
-                    op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                    exitTarget,
                     ...left,
-                    op(OpCode.JumpIfNotAndKeep),
+                    jumpIfNotAndKeep,
 
                     op(OpCode.Pop),
                     ...right,
@@ -114,11 +120,13 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 const left = ctx.generate(node.left, flag)
                 const right = ctx.generate(node.right, flag)
                 const exit = [op(OpCode.Nop, 0)]
+                const jumpIfAndKeep = op(OpCode.JumpIfAndKeep)
+                const exitTarget = attachJumpConsumer(op(OpCode.NodeOffset, 2, [headOf(exit)]), jumpIfAndKeep)
 
                 return [
-                    op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                    exitTarget,
                     ...left,
-                    op(OpCode.JumpIfAndKeep),
+                    jumpIfAndKeep,
 
                     op(OpCode.Pop),
                     ...right,
