@@ -4,7 +4,8 @@ import { collectEvalTaintedFunctions, linkScopes, markParent, resolveScopes, sea
 import { generateSegment, type Segment } from './codegen'
 import { headOf, resolveJumpTargetOffset } from './codegen/helpers'
 import { OPCODE_SEED_MASK, applyEncodingLayers, blockTransform, collectUsedOpcodes, expandReseeds, finalizeLiteralPool, genOffset, generateData, generateOpcodePermutation, getDerivedKey, injectGarbage, injectReseedTags } from './encoding'
-import { OpCode, type ProgramScopeDebugMap } from './shared'
+import { getProjectedRuntimeOpcodeKeepSet } from './opcode-families'
+import { OpCode, PROGRAM_PROTECTED_MODE_TRAILER, type ProgramScopeDebugMap } from './shared'
 
 export type CompileOptions = {
     /** prints debug info to stdout */
@@ -15,6 +16,8 @@ export type CompileOptions = {
     evalMode?: boolean
     /** seed for Layer 4 Fisher-Yates opcode shuffle; random if omitted */
     shuffleSeed?: number
+    /** enable protected-build runtime behavior such as projected opcode fallback */
+    protectedMode?: boolean
 }
 
 export type DebugInfo = {
@@ -24,8 +27,10 @@ export type DebugInfo = {
     /** Byte length of executable code (words before literal pool tail). */
     codeLength: number
     usedOpcodes: number[]
+    projectedOpcodes: number[]
     globalSeed: number
     activeSeedAtPos: Map<number, number>
+    protectedMode: boolean
 }
 
 function createLocationMap(src: string) {
@@ -114,7 +119,7 @@ function backfillMissingSources(flattened: Segment, sourceNode: ts.SourceFile) {
     }
 }
 
-export function compile(src: string, { debug = false, range = false, evalMode = false, shuffleSeed }: CompileOptions = {}): [number[], DebugInfo] {
+export function compile(src: string, { debug = false, range = false, evalMode = false, shuffleSeed, protectedMode = false }: CompileOptions = {}): [number[], DebugInfo] {
     const isJestRun = typeof process !== 'undefined' && process.env?.JEST_WORKER_ID !== undefined
     const envTestSeed = typeof process !== 'undefined' && process.env?.FLATJS_TEST_SEED !== undefined
         ? Number(process.env.FLATJS_TEST_SEED) >>> 0
@@ -222,6 +227,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
 
     const codeLength = programData.length
     const usedOpcodes = collectUsedOpcodes(programData, codeLength)
+    const projectedOpcodes = [...getProjectedRuntimeOpcodeKeepSet()]
 
     finalizeLiteralPool(programData, literalValues)
 
@@ -253,6 +259,10 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     }
 
     programData.push((globalSeed ^ OPCODE_SEED_MASK) | 0)
+    if (protectedMode) {
+        programData.push(codeLength | 0)
+        programData.push(PROGRAM_PROTECTED_MODE_TRAILER | 0)
+    }
 
-    return [programData, { sourceMap, internals, scopeDebugMap, codeLength, usedOpcodes, globalSeed, activeSeedAtPos }]
+    return [programData, { sourceMap, internals, scopeDebugMap, codeLength, usedOpcodes, projectedOpcodes, globalSeed, activeSeedAtPos, protectedMode }]
 }

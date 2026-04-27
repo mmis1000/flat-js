@@ -36,10 +36,21 @@ jobs:
           ${{ runner.os }}-build-
           ${{ runner.os }}-
     - run: npm ci
-    - run: npm run build --if-present
-    - run: npm test
+    - name: Build runtime + library
+      run: npm run build
+    - name: Type-check web app
+      run: npm run check:web
+    - name: Build web app
+      run: npm run build-web
+    - name: Build example artifacts
+      run: npm run build-example
+    - name: Build opcode kitchen sink example
+      run: npm run build-example:opcode-kitchen-sink
+    - name: Run test suite
+      run: npm test
   publish:
     needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
 
     strategy:

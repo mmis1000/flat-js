@@ -219,8 +219,10 @@ function emptyDebugInfo(): DebugInfo {
         scopeDebugMap: new Map(),
         codeLength: 0,
         usedOpcodes: [],
+        projectedOpcodes: [],
         globalSeed: 0,
-        activeSeedAtPos: new Map()
+        activeSeedAtPos: new Map(),
+        protectedMode: false,
     }
 }
 import { resetVmMathRandom } from './vm-deterministic-math'

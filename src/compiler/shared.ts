@@ -1,4 +1,6 @@
 export const TEXT_DADA_MASK = 0x80000000
+export const PROGRAM_PROTECTED_MODE_TRAILER = 0x50524f54
+export const PROGRAM_PROTECTED_MODE_METADATA_WORDS = 3
 
 export const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
@@ -16,6 +18,23 @@ export const literalPoolWordMask = (i: number): number => {
     const x = (i * 0x9e3779b9 | 0) ^ (i >>> 1) ^ (i << 3)
     return (x ^ (x >>> 15) ^ (x << 15)) | 0
 }
+
+export const isProtectedModeProgram = (program: readonly number[]): boolean =>
+    program.length >= PROGRAM_PROTECTED_MODE_METADATA_WORDS
+    && program[program.length - 1] === (PROGRAM_PROTECTED_MODE_TRAILER | 0)
+
+export const getProgramSeedWord = (program: readonly number[]): number =>
+    program[isProtectedModeProgram(program) ? program.length - PROGRAM_PROTECTED_MODE_METADATA_WORDS : program.length - 1]! >>> 0
+
+export const getProtectedProgramCodeLength = (program: readonly number[]): number | null =>
+    isProtectedModeProgram(program)
+        ? (program[program.length - 2]! >>> 0)
+        : null
+
+export const getProgramMetadataStart = (program: readonly number[]): number =>
+    isProtectedModeProgram(program)
+        ? program.length - PROGRAM_PROTECTED_MODE_METADATA_WORDS
+        : program.length - 1
 
 export const enum SpecialVariable {
     This = '[this]',

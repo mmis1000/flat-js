@@ -1,4 +1,5 @@
-import { FunctionTypes, InvokeType, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "../compiler"
+import { FunctionTypes, InvokeType, LiteralPoolKind, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType, getProgramMetadataStart, getProgramSeedWord, getProtectedProgramCodeLength, isProtectedModeProgram } from "../compiler"
+import { getProjectedLiteralOperand, getProjectedRuntimeOpcode } from "../compiler/opcode-families"
 import {
     APPLY,
     assertIteratorResult,
@@ -30,6 +31,7 @@ import {
     isResultYield,
     iteratorComplete,
     iteratorNext,
+    literalPoolWordMask,
     Result,
     ResultAwait,
     ResultDone,
@@ -111,10 +113,64 @@ const generateOpcodePermutation = (seed: number): number[] => {
 
 const inversePermCache = new WeakMap<number[], number[]>()
 
+type PendingProjectedRead =
+    | {
+        kind: 'literal'
+        decodedOpcodeWord: number
+        projectionSalt: number
+    }
+    | null
+
+const protectedLiteralPoolPositionCache = new WeakMap<number[], number[]>()
+
+const getProtectedLiteralPoolPositions = (program: number[]): readonly number[] => {
+    let cached = protectedLiteralPoolPositionCache.get(program)
+    if (cached) {
+        return cached
+    }
+
+    const codeLength = getProtectedProgramCodeLength(program)
+    if (codeLength === null) {
+        cached = []
+        protectedLiteralPoolPositionCache.set(program, cached)
+        return cached
+    }
+
+    const positions: number[] = []
+    const metadataStart = getProgramMetadataStart(program)
+    let index = codeLength
+
+    while (index + 1 < metadataStart) {
+        const label = (program[index]! ^ literalPoolWordMask(index)) | 0
+        const length = (program[index + 1]! ^ literalPoolWordMask(index + 1)) | 0
+        if (
+            length < 0
+            || (
+                label !== LiteralPoolKind.Boolean
+                && label !== LiteralPoolKind.Number
+                && label !== LiteralPoolKind.String
+            )
+        ) {
+            break
+        }
+
+        const entryWordLength = 2 + length
+        if (index + entryWordLength > metadataStart) {
+            break
+        }
+
+        positions.push(index)
+        index += entryWordLength
+    }
+
+    protectedLiteralPoolPositionCache.set(program, positions)
+    return positions
+}
+
 const getInversePerm = (program: number[]): number[] => {
     let cached = inversePermCache.get(program)
     if (!cached) {
-        const seed = program[program.length - 1]! >>> 0
+        const seed = getProgramSeedWord(program)
         const perm = generateOpcodePermutation(seed)
         cached = new Array(perm.length)
         for (let index = 0; index < perm.length; index++) {
@@ -126,7 +182,7 @@ const getInversePerm = (program: number[]): number[] => {
 }
 
 const decodeOpcodeAt = (program: number[], pos: number, blockSeed: number): number => {
-    const globalSeed = (program[program.length - 1]! ^ OPCODE_SEED_MASK) >>> 0
+    const globalSeed = (getProgramSeedWord(program) ^ OPCODE_SEED_MASK) >>> 0
     const inversePerm = getInversePerm(program)
     const decoded = blockInverseTransform(program[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) >>> 0
     return inversePerm[decoded] ?? decoded
@@ -162,18 +218,22 @@ export const getExecution = (
     getDebugFunction: () => null | (() => void) = () => null,
     compileFunction: typeof import('../compiler').compile = (...args: any[]) => { throw new Error('not supported') },
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
-    onInstruction: ((ptr: number, opcode: number, blockSeed: number) => void) | null = null,
+    onInstruction: ((ptr: number, opcode: number, blockSeed: number, projected: boolean) => void) | null = null,
     initialBlockSeed: number = 0
 ) => {
     let currentProgram = program
     let globalSeed = 0
     let inversePerm: number[] = []
     let blockSeed = initialBlockSeed >>> 0
+    let projectionEnabled = false
+    let pendingProjectedRead: PendingProjectedRead = null
 
     const setCurrentProgram = (nextProgram: number[]) => {
         currentProgram = nextProgram
-        globalSeed = (nextProgram[nextProgram.length - 1]! ^ OPCODE_SEED_MASK) >>> 0
+        globalSeed = (getProgramSeedWord(nextProgram) ^ OPCODE_SEED_MASK) >>> 0
         inversePerm = getInversePerm(nextProgram)
+        projectionEnabled = isProtectedModeProgram(nextProgram)
+        pendingProjectedRead = null
     }
 
     setCurrentProgram(program)
@@ -204,12 +264,42 @@ export const getExecution = (
 
     const read = () => {
         const pos = ptr++
-        return blockInverseTransform(currentProgram[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) | 0
+        const decoded = blockInverseTransform(currentProgram[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) | 0
+        if (pendingProjectedRead?.kind === 'literal') {
+            const shaped = getProjectedLiteralOperand(
+                pendingProjectedRead.decodedOpcodeWord,
+                pendingProjectedRead.projectionSalt,
+                decoded >>> 0,
+                pos,
+                getProtectedLiteralPoolPositions(currentProgram)
+            )
+            pendingProjectedRead = null
+            return shaped | 0
+        }
+        return decoded
     }
-    const decodeOp = (): OpCode => {
+    const decodeOp = (stackDepth: number): { opcode: OpCode, projected: boolean } => {
         const pos = ptr++
-        const decoded = blockInverseTransform(currentProgram[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) >>> 0
-        return (inversePerm[decoded] ?? decoded) as OpCode
+        const projectionSalt = getDerivedKey(blockSeed, pos, globalSeed)
+        const decoded = blockInverseTransform(currentProgram[pos]! >>> 0, projectionSalt) >>> 0
+        const exact = inversePerm[decoded]
+        if (exact !== undefined) {
+            pendingProjectedRead = null
+            return { opcode: exact as OpCode, projected: false }
+        }
+        if (!projectionEnabled) {
+            pendingProjectedRead = null
+            return { opcode: decoded as OpCode, projected: false }
+        }
+        const opcode = getProjectedRuntimeOpcode(decoded, projectionSalt, stackDepth)
+        pendingProjectedRead = opcode === OpCode.Literal
+            ? {
+                kind: 'literal',
+                decodedOpcodeWord: decoded,
+                projectionSalt,
+            }
+            : null
+        return { opcode, projected: true }
     }
     const getCurrentFrame = () => stack[stack.length - 1]
     const peak = <T>(arr: T[], offset = 1): T => arr[arr.length - offset]
@@ -1231,11 +1321,11 @@ export const getExecution = (
             }
 
             // console.log(ptr)
-            const currentPtr = commandPtr = ptr
-            const command = decodeOp()
             currentFrame = getCurrentFrame()
             currentFrameStack = currentFrame[Fields.valueStack]
-            onInstruction?.(currentPtr, command, blockSeed)
+            const currentPtr = commandPtr = ptr
+            const { opcode: command, projected } = decodeOp(currentFrameStack.length)
+            onInstruction?.(currentPtr, command, blockSeed, projected)
 
             if (debug && currentFrame[Fields.programSection].length !== currentProgram.length) {
                 debugger
@@ -1409,7 +1499,6 @@ export const getExecution = (
                 }
                     break
                 default:
-                    // Layer-1 garbage injection may emit out-of-domain opcodes; treat them as 1-word NOPs.
                     break
             }
 
@@ -1485,7 +1574,7 @@ const run_ = (
     evalResultInstead = false,
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
-    onInstruction: ((ptr: number, opcode: number, blockSeed: number) => void) | null = null,
+    onInstruction: ((ptr: number, opcode: number, blockSeed: number, projected: boolean) => void) | null = null,
     initialBlockSeed: number = 0
 ) => {
     const execution = getExecution(program, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, onInstruction, initialBlockSeed)

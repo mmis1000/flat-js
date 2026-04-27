@@ -89,7 +89,7 @@ async function main () {
         throw new Error('fail to minimize')
     }
 
-    const compileOpts = { debug: debugMode, range: debugMode }
+    const compileOpts = { debug: debugMode, range: debugMode, protectedMode: !debugMode }
     const [programDataRaw, compileInfo] = compile(contentMinimized, compileOpts)
     const programBytes = Buffer.from(new Uint32Array(programDataRaw).buffer)
     const programData = programBytes.toString('base64')
@@ -101,7 +101,7 @@ async function main () {
     }
 
     if (stripRuntime) {
-        const opcodeSet = new Set(compileInfo.usedOpcodes)
+        const opcodeSet = new Set([...compileInfo.usedOpcodes, ...compileInfo.projectedOpcodes])
         for (const extra of mergeOpcodePaths) {
             const extraSrc = await fs.readFile(extra, { encoding: 'utf-8' })
             const extraMin = await minifyInput(extraSrc)
@@ -110,6 +110,9 @@ async function main () {
             }
             const [, extraInfo] = compile(extraMin, compileOpts)
             for (const n of extraInfo.usedOpcodes) {
+                opcodeSet.add(n)
+            }
+            for (const n of extraInfo.projectedOpcodes) {
                 opcodeSet.add(n)
             }
         }

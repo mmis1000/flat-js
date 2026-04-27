@@ -53,8 +53,10 @@ export default Vue.extend({
                     scopeDebugMap: new Map(),
                     codeLength: 0,
                     usedOpcodes: [],
+                    projectedOpcodes: [],
                     globalSeed: 0,
-                    activeSeedAtPos: new Map()
+                    activeSeedAtPos: new Map(),
+                    protectedMode: false,
                 }
             }
         }

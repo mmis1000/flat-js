@@ -1,6 +1,7 @@
 import * as ts from 'typescript'
 
-import { TEXT_DADA_MASK, FunctionTypes, LiteralPoolKind, OpCode, isSmallNumber, literalPoolWordMask } from './shared'
+import { INLINE_EXECUTED_NOISE_FAMILIES, getOpcodeFamilyMembers, getOpcodeWordArity } from './opcode-families'
+import { TEXT_DADA_MASK, FunctionTypes, LiteralPoolKind, OpCode, getProgramSeedWord, isSmallNumber, literalPoolWordMask } from './shared'
 import type { VariableRoot } from './analysis'
 import { getJumpTargetAnchor, headOf, isJumpLabel, op, resolveJumpTargetOffset } from './codegen/helpers'
 import type { JumpTarget, Op, Segment } from './codegen/types'
@@ -18,23 +19,8 @@ export function isLiteralFamily(op: number): boolean {
     return op === OpCode.Literal || op === OpCode.LiteralAlias1 || op === OpCode.LiteralAlias2
 }
 
-const OPCODE_ALIASES: Partial<Record<OpCode, OpCode[]>> = {
-    [OpCode.Literal]: [OpCode.LiteralAlias1, OpCode.LiteralAlias2],
-    [OpCode.Get]: [OpCode.GetAlias1],
-    [OpCode.Set]: [OpCode.SetAlias1],
-    [OpCode.Pop]: [OpCode.PopAlias1],
-    [OpCode.Jump]: [OpCode.JumpAlias1],
-    [OpCode.JumpIfNot]: [OpCode.JumpIfNotAlias1],
-    [OpCode.GetRecord]: [OpCode.GetRecordAlias1],
-    [OpCode.Duplicate]: [OpCode.DuplicateAlias1],
-}
-
 function maybeAlias(baseOp: OpCode, rng: () => number): OpCode {
-    const aliases = OPCODE_ALIASES[baseOp]
-    if (!aliases) {
-        return baseOp
-    }
-    const pool = [baseOp, ...aliases]
+    const pool = getOpcodeFamilyMembers(baseOp)
     return pool[Math.floor(rng() * pool.length)]!
 }
 
@@ -124,6 +110,24 @@ function generateInvalidOp(rng: () => number): Op {
     }
 }
 
+function generateInlineNoiseOp(rng: () => number): Op {
+    const family = INLINE_EXECUTED_NOISE_FAMILIES[Math.floor(rng() * INLINE_EXECUTED_NOISE_FAMILIES.length)]!
+    const length = getOpcodeWordArity(family)
+    if (length !== 1) {
+        throw new Error(`Inline executed noise must stay 1-word safe, got family ${family}`)
+    }
+
+    return {
+        op: maybeAlias(family, rng),
+        length,
+        preData: [],
+        data: [],
+        internal: true,
+        raw: false,
+        offset: -1
+    }
+}
+
 function generateJunkOps(count: number, rng: () => number): Op[] {
     const result: Op[] = []
     for (let index = 0; index < count; index++) {
@@ -166,7 +170,7 @@ export function injectGarbage(segment: Segment, rng: () => number): Segment {
         const followsTransparentLabel = index > 0 && segment[index - 1]!.length === 0
         const isJumpTarget = jumpTargetAnchors.has(op)
         if (!op.internal && op.length > 0 && !followsTransparentLabel && !isJumpTarget && rng() < 0.05) {
-            out.push(generateInvalidOp(rng))
+            out.push(generateInlineNoiseOp(rng))
         }
         if (!op.internal && op.length > 0 && !followsTransparentLabel && !isJumpTarget && rng() < 0.2) {
             out.push(...generateDeadBranch(rng))
@@ -346,12 +350,40 @@ export function expandReseeds(segments: Segment[], rng: () => number): void {
         segment.push(...newSegment)
     }
 
+    const getInsertedLiteralForJumpTarget = (targetOp: Op): Op | undefined => {
+        const direct = insertedLiterals.get(targetOp)
+        if (direct !== undefined) {
+            return direct
+        }
+        if (targetOp.length !== 0) {
+            return undefined
+        }
+        for (const segment of segments) {
+            const index = segment.indexOf(targetOp)
+            if (index < 0) {
+                continue
+            }
+            for (let lookahead = index + 1; lookahead < segment.length; lookahead++) {
+                const candidate = segment[lookahead]!
+                const inserted = insertedLiterals.get(candidate)
+                if (inserted !== undefined) {
+                    return inserted
+                }
+                if (candidate.length > 0) {
+                    break
+                }
+            }
+            break
+        }
+        return undefined
+    }
+
     for (const segment of segments) {
         for (const op of segment) {
             if (op.op === OpCode.NodeOffset && op.preData.length > 0) {
                 const target = op.preData[0] as JumpTarget | undefined
                 if (isJumpLabel(target)) {
-                    const literal = insertedLiterals.get(target.anchor)
+                    const literal = getInsertedLiteralForJumpTarget(target.anchor)
                     if (literal) {
                         target.entryOp = literal
                     }
@@ -366,6 +398,14 @@ export type EncKeyPlaceholder = {
     operandPos: number
     /** Offset of the target segment's first word (its encKey = activeSeed there). */
     segmentStartOffset: number
+}
+
+function resolveJumpConsumerTargetOffset(target: JumpTarget, fnRootToSegment: Map<ts.Node, Segment>): number {
+    if (isJumpLabel(target)) {
+        return target.anchor.offset
+    }
+
+    return headOf(fnRootToSegment.get(target)!).offset
 }
 
 function encodeLiteralPoolWords(value: any): number[] {
@@ -449,7 +489,11 @@ export function generateData(
         if (op.op === OpCode.NodeOffset) {
             const ptr = op.preData[0] as JumpTarget
             programData.push(maybeAlias(OpCode.Literal, rng))
-            programData.push(resolveJumpTargetOffset(ptr, fnRootToSegment))
+            programData.push(
+                op.jumpConsumerRef !== undefined
+                    ? resolveJumpConsumerTargetOffset(ptr, fnRootToSegment)
+                    : resolveJumpTargetOffset(ptr, fnRootToSegment)
+            )
             continue
         }
 
@@ -623,7 +667,7 @@ export function collectUsedOpcodes(programData: number[], codeLength: number): n
         return Array.from(used)
     }
 
-    const permSeed = programData[programData.length - 1]! >>> 0
+    const permSeed = getProgramSeedWord(programData)
     const globalSeed = (permSeed ^ OPCODE_SEED_MASK) >>> 0
     const perm = generateOpcodePermutation(permSeed)
     const inversePerm = new Array(perm.length)
