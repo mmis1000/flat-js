@@ -24,6 +24,30 @@ import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type Runti
 
 const EVAL_FUNCTION = eval
 
+const bindFunctionSelfName = (
+    functionType: FunctionTypes,
+    scope: Scope,
+    name: string,
+    fn: any,
+    ctx: RuntimeOpcodeContext
+) => {
+    switch (functionType) {
+        case FunctionTypes.FunctionExpression:
+        case FunctionTypes.MethodDeclaration:
+        case FunctionTypes.GeneratorExpression:
+        case FunctionTypes.GeneratorMethod:
+        case FunctionTypes.AsyncFunctionExpression:
+        case FunctionTypes.AsyncMethod:
+            if (name !== '') {
+                if (ctx[OpcodeContextField.hasBinding](scope, name)) {
+                    ctx[OpcodeContextField.initializeBindingValue](scope, name, fn)
+                } else {
+                    ctx[OpcodeContextField.writeScopeDebugProperty](scope, name, fn)
+                }
+            }
+    }
+}
+
 export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): OpcodeHandlerResult => {
     switch (command) {
         case OpCode.EnterFunction: {
@@ -120,25 +144,11 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         ctx[OpcodeContextField.writeScopeDebugProperty](scope, 'arguments', getArgumentObject(scope, fn))
                 }
 
-                switch (functionType) {
-                    case FunctionTypes.FunctionExpression:
-                    case FunctionTypes.MethodDeclaration:
-                    case FunctionTypes.GeneratorExpression:
-                    case FunctionTypes.GeneratorMethod:
-                    case FunctionTypes.AsyncFunctionExpression:
-                    case FunctionTypes.AsyncMethod:
-                        if (name !== '') {
-                            if (ctx[OpcodeContextField.hasBinding](scope, name)) {
-                                ctx[OpcodeContextField.initializeBindingValue](scope, name, fn)
-                            } else {
-                                ctx[OpcodeContextField.writeScopeDebugProperty](scope, name, fn)
-                            }
-                        }
-                }
-
                 for (const variable of variables) {
                     ctx[OpcodeContextField.defineVariable](scope, variable[Fields.name], variable[Fields.type])
                 }
+
+                bindFunctionSelfName(functionType, scope, name, fn, ctx)
 
                 for (const [index, name] of argumentNames.entries()) {
                     ctx[OpcodeContextField.initializeBindingValue](scope, name, parameters[index])
@@ -176,18 +186,11 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         break
                 }
 
-                switch (functionType) {
-                    case FunctionTypes.FunctionExpression:
-                        if (ctx[OpcodeContextField.hasBinding](scope, name)) {
-                            ctx[OpcodeContextField.initializeBindingValue](scope, name, fn)
-                        } else {
-                            ctx[OpcodeContextField.writeScopeDebugProperty](scope, name, fn)
-                        }
-                }
-
                 for (const variable of variables) {
                     ctx[OpcodeContextField.defineVariable](scope, variable[Fields.name], variable[Fields.type])
                 }
+
+                bindFunctionSelfName(functionType, scope, name, fn, ctx)
 
                 for (const [index, name] of argumentNames.entries()) {
                     ctx[OpcodeContextField.initializeBindingValue](scope, name, parameters[index])

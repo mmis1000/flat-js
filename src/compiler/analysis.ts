@@ -204,6 +204,19 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
             })
         }
 
+        if (ts.isFunctionExpression(current) && current.name) {
+            const scope = scopes.get(current)
+            if (scope === undefined) {
+                throw new Error('unresolvable variable')
+            }
+            if (!scope.has(current.name.text)) {
+                scope.set(current.name.text, {
+                    type: VariableType.Function,
+                    node: current
+                })
+            }
+        }
+
         if (ts.isFunctionLike(current)) {
             for (const parameter of current.parameters) {
                 const variables = extractVariable(parameter.name)
