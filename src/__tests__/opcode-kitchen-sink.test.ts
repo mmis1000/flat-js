@@ -31,14 +31,16 @@ function getOpcodeNames(): string[] {
 test('opcode kitchen sink fixture keeps broad opcode coverage', () => {
     const source = fs.readFileSync(FIXTURE_PATH, 'utf8')
 
-    const collect = (evalMode: boolean) => {
-        const [program, info] = compile(source, { evalMode })
+    const collect = (evalMode: boolean, protectedMode = false) => {
+        const [program, info] = compile(source, { evalMode, protectedMode })
         return new Set(collectUsedOpcodes(program, info.codeLength))
     }
 
     const used = new Set<number>([
         ...collect(false),
         ...collect(true),
+        ...collect(false, true),
+        ...collect(true, true),
     ])
 
     const allowMissing = new Set<number>([
