@@ -1,7 +1,7 @@
 import * as ts from 'typescript'
 
 import { INLINE_EXECUTED_NOISE_FAMILIES, getOpcodeFamilyMembers, getOpcodeWordArity } from './opcode-families'
-import { TEXT_DADA_MASK, FunctionTypes, LiteralPoolKind, OpCode, getProgramSeedWord, isSmallNumber, literalPoolWordMask } from './shared'
+import { TEXT_DADA_MASK, FunctionTypes, LiteralPoolKind, OpCode, getProgramSeedWord, isSmallNumber, literalPoolWordMask, protectedLiteralCheck, protectedLiteralWordMask } from './shared'
 import type { VariableRoot } from './analysis'
 import { getJumpTargetAnchor, headOf, isJumpLabel, op, resolveJumpTargetOffset } from './codegen/helpers'
 import type { JumpTarget, Op, Segment } from './codegen/types'
@@ -14,9 +14,14 @@ export function genOffset(nodes: Segment) {
     }
 }
 
-/** True for all 2-word Literal-family opcodes (base + aliases). MUST SYNC with runtime. */
+/** True for all 2-word inline Literal-family opcodes (base + aliases). MUST SYNC with runtime. */
 export function isLiteralFamily(op: number): boolean {
     return op === OpCode.Literal || op === OpCode.LiteralAlias1 || op === OpCode.LiteralAlias2
+}
+
+/** True for all 3-word protected pooled-literal opcodes (base + aliases). MUST SYNC with runtime. */
+export function isProtectedLiteralFamily(op: number): boolean {
+    return op === OpCode.ProtectedLiteral || op === OpCode.ProtectedLiteralAlias1 || op === OpCode.ProtectedLiteralAlias2
 }
 
 function maybeAlias(baseOp: OpCode, rng: () => number): OpCode {
@@ -369,6 +374,14 @@ export function expandReseeds(segments: Segment[], rng: () => number): void {
                 if (inserted !== undefined) {
                     return inserted
                 }
+                if (
+                    candidate.internal
+                    && candidate.op === OpCode.Literal
+                    && segment[lookahead + 1]?.op === OpCode.Reseed
+                ) {
+                    lookahead++
+                    continue
+                }
                 if (candidate.length > 0) {
                     break
                 }
@@ -393,6 +406,16 @@ export function expandReseeds(segments: Segment[], rng: () => number): void {
     }
 }
 
+export function widenProtectedLiteralOps(segments: Segment[]): void {
+    for (const segment of segments) {
+        for (const op of segment) {
+            if (op.op === OpCode.Literal && op.length === 2 && !isSmallNumber(op.preData[0])) {
+                op.length = 3
+            }
+        }
+    }
+}
+
 export type EncKeyPlaceholder = {
     /** Index in programData of the operand word (the 0 placeholder). */
     operandPos: number
@@ -400,12 +423,72 @@ export type EncKeyPlaceholder = {
     segmentStartOffset: number
 }
 
-function resolveJumpConsumerTargetOffset(target: JumpTarget, fnRootToSegment: Map<ts.Node, Segment>): number {
-    if (isJumpLabel(target)) {
+export type ProtectedLiteralPlaceholder = {
+    /** Opcode position for looking up the active block seed at this site. */
+    opcodePos: number
+    /** Operand word that will later hold the absolute pool-entry address. */
+    poolPosOperandPos: number
+    /** Operand word that will later hold the site-specific seed delta. */
+    seedDeltaOperandPos: number
+    /** Temporary literal-pool slot before finalization remaps it to an absolute tail position. */
+    slot: number
+}
+
+export type LiteralPoolEntryInfo = {
+    position: number
+    literalSeed: number
+}
+
+function resolveJumpConsumerTargetOffset(
+    target: JumpTarget,
+    jumpConsumer: Op | undefined,
+    fnRootToSegment: Map<ts.Node, Segment>,
+    seg: Segment
+): number {
+    if (!isJumpLabel(target)) {
+        return headOf(fnRootToSegment.get(target)!).offset
+    }
+
+    if (target.anchor.length > 0) {
         return target.anchor.offset
     }
 
-    return headOf(fnRootToSegment.get(target)!).offset
+    const anchorIndex = seg.indexOf(target.anchor)
+    if (anchorIndex < 0) {
+        return target.anchor.offset
+    }
+
+    let index = anchorIndex + 1
+    while (index < seg.length && seg[index]!.length === 0) {
+        index++
+    }
+
+    const firstMaterialized = seg[index]
+    if (!firstMaterialized) {
+        return target.anchor.offset
+    }
+
+    const maybeReseed = seg[index + 1]
+    if (
+        firstMaterialized.internal
+        && firstMaterialized.op === OpCode.Literal
+        && maybeReseed?.op === OpCode.Reseed
+    ) {
+        let afterReseedIndex = index + 2
+        while (afterReseedIndex < seg.length && seg[afterReseedIndex]!.length === 0) {
+            afterReseedIndex++
+        }
+        const postReseedTarget = seg[afterReseedIndex]
+        if (
+            postReseedTarget
+            && jumpConsumer?.seedId !== undefined
+            && jumpConsumer.seedId === postReseedTarget.seedId
+        ) {
+            return postReseedTarget.offset
+        }
+    }
+
+    return firstMaterialized.offset
 }
 
 function encodeLiteralPoolWords(value: any): number[] {
@@ -428,34 +511,63 @@ function encodeLiteralPoolWords(value: any): number[] {
     throw new Error('unsupported literal pool value')
 }
 
+function encodeProtectedLiteralPoolWords(value: any, literalSeed: number, cursor: number): number[] {
+    const decoded = encodeLiteralPoolWords(value)
+    const payload = [decoded[0]!, decoded[1]!, protectedLiteralCheck(literalSeed, decoded), ...decoded.slice(2)]
+    const encoded: number[] = []
+    for (let index = 0; index < payload.length; index++) {
+        encoded.push((payload[index]! ^ protectedLiteralWordMask(literalSeed, cursor + index, index)) | 0)
+    }
+    return encoded
+}
+
 /** Append encoded literals to the tail of `programData` and map temp slot indices to absolute positions. Only scans the code prefix `codeLen`. */
-export function finalizeLiteralPool(programData: number[], literalValues: any[]) {
+export function finalizeLiteralPool(
+    programData: number[],
+    literalValues: any[],
+    protectedMode = false,
+    rng: (() => number) | undefined = undefined,
+    protectedLiteralPlaceholders: ProtectedLiteralPlaceholder[] = [],
+) {
     const codeLen = programData.length
     let cursor = codeLen
-    const slotPositions: number[] = []
+    const entryInfo: LiteralPoolEntryInfo[] = []
     const poolWords: number[] = []
     for (let slot = 0; slot < literalValues.length; slot++) {
-        slotPositions[slot] = cursor
-        const encoded = encodeLiteralPoolWords(literalValues[slot])
+        const literalSeed = protectedMode
+            ? ((rng?.() ?? 0) * 0x100000000) >>> 0
+            : 0
+        entryInfo[slot] = { position: cursor, literalSeed }
+        const encoded = protectedMode
+            ? encodeProtectedLiteralPoolWords(literalValues[slot], literalSeed, cursor)
+            : encodeLiteralPoolWords(literalValues[slot])
         for (let index = 0; index < encoded.length; index++) {
-            poolWords.push((encoded[index] ^ literalPoolWordMask(cursor + index)) | 0)
+            poolWords.push(protectedMode ? encoded[index]! : ((encoded[index]! ^ literalPoolWordMask(cursor + index)) | 0))
         }
         cursor += encoded.length
     }
-    for (let index = 0; index < codeLen - 1; index++) {
-        if (isLiteralFamily(programData[index]!)) {
-            const op = programData[index + 1]
-            if (isSmallNumber(op)) {
-                continue
+    if (protectedMode) {
+        for (const placeholder of protectedLiteralPlaceholders) {
+            const info = entryInfo[placeholder.slot]!
+            programData[placeholder.poolPosOperandPos] = TEXT_DADA_MASK | info.position
+        }
+    } else {
+        for (let index = 0; index < codeLen - 1; index++) {
+            if (isLiteralFamily(programData[index]!)) {
+                const op = programData[index + 1]
+                if (isSmallNumber(op)) {
+                    continue
+                }
+                if ((op & TEXT_DADA_MASK) === 0) {
+                    continue
+                }
+                const slot = op ^ TEXT_DADA_MASK
+                programData[index + 1] = TEXT_DADA_MASK | entryInfo[slot]!.position
             }
-            if ((op & TEXT_DADA_MASK) === 0) {
-                continue
-            }
-            const slot = op ^ TEXT_DADA_MASK
-            programData[index + 1] = TEXT_DADA_MASK | slotPositions[slot]
         }
     }
     programData.push(...poolWords)
+    return entryInfo
 }
 
 export function generateData(
@@ -464,7 +576,9 @@ export function generateData(
     programData: number[],
     literalValues: any[],
     rng: () => number,
-    encKeyPlaceholders: EncKeyPlaceholder[] = []
+    encKeyPlaceholders: EncKeyPlaceholder[] = [],
+    protectedLiteralPlaceholders: ProtectedLiteralPlaceholder[] = [],
+    protectedMode = false
 ) {
     for (const op of seg) {
         if (op.length === 0) {
@@ -489,9 +603,9 @@ export function generateData(
         if (op.op === OpCode.NodeOffset) {
             const ptr = op.preData[0] as JumpTarget
             programData.push(maybeAlias(OpCode.Literal, rng))
-            programData.push(
-                op.jumpConsumerRef !== undefined
-                    ? resolveJumpConsumerTargetOffset(ptr, fnRootToSegment)
+                programData.push(
+                    op.jumpConsumerRef !== undefined
+                    ? resolveJumpConsumerTargetOffset(ptr, op.jumpConsumerRef, fnRootToSegment, seg)
                     : resolveJumpTargetOffset(ptr, fnRootToSegment)
             )
             continue
@@ -573,7 +687,11 @@ export function generateData(
             continue
         }
 
-        programData.push(maybeAlias(op.op, rng))
+        if (op.op === OpCode.Literal && protectedMode && !isSmallNumber(op.preData[0])) {
+            programData.push(maybeAlias(OpCode.ProtectedLiteral, rng))
+        } else {
+            programData.push(maybeAlias(op.op, rng))
+        }
         switch (op.op) {
             case OpCode.Literal:
                 if (isSmallNumber(op.preData[0])) {
@@ -584,7 +702,18 @@ export function generateData(
                         slot = literalValues.length
                         literalValues.push(op.preData[0])
                     }
-                    programData.push(TEXT_DADA_MASK | slot)
+                    if (protectedMode) {
+                        protectedLiteralPlaceholders.push({
+                            opcodePos: programData.length - 1,
+                            poolPosOperandPos: programData.length,
+                            seedDeltaOperandPos: programData.length + 1,
+                            slot,
+                        })
+                        programData.push(TEXT_DADA_MASK | slot)
+                        programData.push(0)
+                    } else {
+                        programData.push(TEXT_DADA_MASK | slot)
+                    }
                 }
                 break
             default:
@@ -639,6 +768,11 @@ export function applyEncodingLayers(
             programData[index + 1] = blockTransform(rawOperand >>> 0, getDerivedKey(activeSeed, index + 1, globalSeed))
             pendingSeed = rawOperand
             index += 2
+        } else if (isProtectedLiteralFamily(rawOp)) {
+            programData[index + 1] = blockTransform(programData[index + 1]! >>> 0, getDerivedKey(activeSeed, index + 1, globalSeed))
+            programData[index + 2] = blockTransform(programData[index + 2]! >>> 0, getDerivedKey(activeSeed, index + 2, globalSeed))
+            pendingSeed = null
+            index += 3
         } else {
             pendingSeed = null
             index += 1
@@ -656,13 +790,8 @@ export function collectUsedOpcodes(programData: number[], codeLength: number): n
         let index = 0
         while (index < codeLength) {
             const word = programData[index]!
-            if (isLiteralFamily(word)) {
-                used.add(word)
-                index += 2
-            } else {
-                used.add(word)
-                index += 1
-            }
+            used.add(word)
+            index += getOpcodeWordArity(word)
         }
         return Array.from(used)
     }
@@ -699,6 +828,12 @@ export function collectUsedOpcodes(programData: number[], codeLength: number): n
                 getDerivedKey(activeSeed, index + 1, globalSeed)
             ) >>> 0
             index += 2
+            continue
+        }
+
+        if (isProtectedLiteralFamily(word)) {
+            pendingSeed = null
+            index += 3
             continue
         }
 

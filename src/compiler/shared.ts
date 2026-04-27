@@ -1,6 +1,17 @@
 export const TEXT_DADA_MASK = 0x80000000
 export const PROGRAM_PROTECTED_MODE_TRAILER = 0x50524f54
 export const PROGRAM_PROTECTED_MODE_METADATA_WORDS = 3
+const PROTECTED_LITERAL_CHECK_TAG = 0x504c4954
+
+const mixWord = (x: number): number => {
+    x |= 0
+    x ^= x >>> 16
+    x = Math.imul(x, 0x7feb352d)
+    x ^= x >>> 15
+    x = Math.imul(x, 0x846ca68b)
+    x ^= x >>> 16
+    return x >>> 0
+}
 
 export const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)
@@ -17,6 +28,23 @@ export const enum LiteralPoolKind {
 export const literalPoolWordMask = (i: number): number => {
     const x = (i * 0x9e3779b9 | 0) ^ (i >>> 1) ^ (i << 3)
     return (x ^ (x >>> 15) ^ (x << 15)) | 0
+}
+
+/** Site-specific salt mixed into protected pooled-literal seed deltas. MUST SYNC with runtime `protectedLiteralSiteMix`. */
+export const protectedLiteralSiteMix = (operandPos: number, globalSeed: number): number =>
+    mixWord((globalSeed ^ Math.imul(operandPos + 1, 0x9e3779b9) ^ 0x51ed270b) | 0) >>> 0
+
+/** Per-word XOR mask for protected pooled-literal entries. MUST SYNC with runtime `protectedLiteralWordMask`. */
+export const protectedLiteralWordMask = (literalSeed: number, absolutePos: number, wordOffset: number): number =>
+    mixWord((literalSeed ^ Math.imul(absolutePos + 1, 0x9e3779b9) ^ Math.imul(wordOffset + 1, 0x85ebca6b)) | 0) | 0
+
+/** Lightweight keyed checksum for protected pooled-literal entries. MUST SYNC with runtime `protectedLiteralCheck`. */
+export const protectedLiteralCheck = (literalSeed: number, words: readonly number[]): number => {
+    let acc = (literalSeed ^ PROTECTED_LITERAL_CHECK_TAG ^ Math.imul(words.length, 0x9e3779b9)) >>> 0
+    for (let index = 0; index < words.length; index++) {
+        acc = mixWord((acc ^ (words[index]! >>> 0) ^ Math.imul(index + 1, 0x85ebca6b)) >>> 0)
+    }
+    return acc | 0
 }
 
 export const isProtectedModeProgram = (program: readonly number[]): boolean =>
@@ -915,6 +943,27 @@ export const enum OpCode {
      * Notes: Used only for opcode-frequency obfuscation.
      */
     DuplicateAlias1,
+    /**
+     * Pushes a pooled literal that is protected by the current block seed and a site-specific delta.
+     * Stack (bottom to top): <empty>
+     * Result: literalValue
+     * Notes: Reads a pool-entry address plus a seed delta; protected builds use this for deduped non-inline literals.
+     */
+    ProtectedLiteral,
+    /**
+     * Alias of `ProtectedLiteral` with identical stack behavior.
+     * Stack (bottom to top): <empty>
+     * Result: literalValue
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    ProtectedLiteralAlias1,
+    /**
+     * Alias of `ProtectedLiteral` with identical stack behavior.
+     * Stack (bottom to top): <empty>
+     * Result: literalValue
+     * Notes: Used only for opcode-frequency obfuscation.
+     */
+    ProtectedLiteralAlias2,
 
     /**
      * Sentinel marking the opcode-domain size.

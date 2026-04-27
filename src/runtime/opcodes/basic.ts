@@ -11,9 +11,11 @@ import {
     VariableRecord,
     getEmptyObject,
     getLiteralFromPool,
+    getProtectedLiteralFromPool,
     isSmallNumber,
     is_a_constant,
     is_not_defined,
+    recoverProtectedLiteralSeed,
 } from "../shared"
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
@@ -31,6 +33,23 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 const pos = value ^ TEXT_DADA_MASK
                 ctx[OpcodeContextField.pushCurrentFrameStack](getLiteralFromPool(ctx[OpcodeContextField.currentProgram], pos))
             }
+        }
+            break
+        case OpCode.ProtectedLiteral:
+        case OpCode.ProtectedLiteralAlias1:
+        case OpCode.ProtectedLiteralAlias2: {
+            const encodedPos = ctx[OpcodeContextField.read]()
+            const poolPos = encodedPos ^ TEXT_DADA_MASK
+            const seedDelta = ctx[OpcodeContextField.read]() >>> 0
+            const literalSeed = recoverProtectedLiteralSeed(
+                seedDelta,
+                ctx[OpcodeContextField.blockSeed],
+                ctx[OpcodeContextField.lastReadPos],
+                ctx[OpcodeContextField.globalSeed],
+            )
+            ctx[OpcodeContextField.pushCurrentFrameStack](
+                getProtectedLiteralFromPool(ctx[OpcodeContextField.currentProgram], poolPos, literalSeed)
+            )
         }
             break
         case OpCode.Pop:

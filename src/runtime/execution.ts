@@ -1,5 +1,5 @@
-import { FunctionTypes, InvokeType, LiteralPoolKind, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType, getProgramMetadataStart, getProgramSeedWord, getProtectedProgramCodeLength, isProtectedModeProgram } from "../compiler"
-import { getProjectedLiteralOperand, getProjectedRuntimeOpcode } from "../compiler/opcode-families"
+import { FunctionTypes, InvokeType, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "../compiler"
+import { getProgramSeedWord, getProjectedLiteralOperand, getProjectedRuntimeOpcode, isProtectedModeProgram } from "./inline-compiler-helpers"
 import {
     APPLY,
     assertIteratorResult,
@@ -31,7 +31,6 @@ import {
     isResultYield,
     iteratorComplete,
     iteratorNext,
-    literalPoolWordMask,
     Result,
     ResultAwait,
     ResultDone,
@@ -113,58 +112,10 @@ const generateOpcodePermutation = (seed: number): number[] => {
 
 const inversePermCache = new WeakMap<number[], number[]>()
 
-type PendingProjectedRead =
-    | {
-        kind: 'literal'
-        decodedOpcodeWord: number
-        projectionSalt: number
-    }
-    | null
+type PendingProjectedRead = readonly [decodedOpcodeWord: number, projectionSalt: number] | null
 
-const protectedLiteralPoolPositionCache = new WeakMap<number[], number[]>()
-
-const getProtectedLiteralPoolPositions = (program: number[]): readonly number[] => {
-    let cached = protectedLiteralPoolPositionCache.get(program)
-    if (cached) {
-        return cached
-    }
-
-    const codeLength = getProtectedProgramCodeLength(program)
-    if (codeLength === null) {
-        cached = []
-        protectedLiteralPoolPositionCache.set(program, cached)
-        return cached
-    }
-
-    const positions: number[] = []
-    const metadataStart = getProgramMetadataStart(program)
-    let index = codeLength
-
-    while (index + 1 < metadataStart) {
-        const label = (program[index]! ^ literalPoolWordMask(index)) | 0
-        const length = (program[index + 1]! ^ literalPoolWordMask(index + 1)) | 0
-        if (
-            length < 0
-            || (
-                label !== LiteralPoolKind.Boolean
-                && label !== LiteralPoolKind.Number
-                && label !== LiteralPoolKind.String
-            )
-        ) {
-            break
-        }
-
-        const entryWordLength = 2 + length
-        if (index + entryWordLength > metadataStart) {
-            break
-        }
-
-        positions.push(index)
-        index += entryWordLength
-    }
-
-    protectedLiteralPoolPositionCache.set(program, positions)
-    return positions
+const UNSUPPORTED_COMPILE: typeof import('../compiler').compile = (..._args: any[]) => {
+    throw new Error('not supported')
 }
 
 const getInversePerm = (program: number[]): number[] => {
@@ -216,7 +167,7 @@ export const getExecution = (
     },
     args: any[] = [],
     getDebugFunction: () => null | (() => void) = () => null,
-    compileFunction: typeof import('../compiler').compile = (...args: any[]) => { throw new Error('not supported') },
+    compileFunction: typeof import('../compiler').compile = UNSUPPORTED_COMPILE,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
     onInstruction: ((ptr: number, opcode: number, blockSeed: number, projected: boolean) => void) | null = null,
     initialBlockSeed: number = 0
@@ -261,17 +212,18 @@ export const getExecution = (
 
     const stack: Stack = [initialFrame]
     let ptr: number = entryPoint
+    let lastReadPos = -1
 
     const read = () => {
         const pos = ptr++
+        lastReadPos = pos
         const decoded = blockInverseTransform(currentProgram[pos]! >>> 0, getDerivedKey(blockSeed, pos, globalSeed)) | 0
-        if (pendingProjectedRead?.kind === 'literal') {
+        if (pendingProjectedRead !== null) {
             const shaped = getProjectedLiteralOperand(
-                pendingProjectedRead.decodedOpcodeWord,
-                pendingProjectedRead.projectionSalt,
+                pendingProjectedRead[0],
+                pendingProjectedRead[1],
                 decoded >>> 0,
-                pos,
-                getProtectedLiteralPoolPositions(currentProgram)
+                pos
             )
             pendingProjectedRead = null
             return shaped | 0
@@ -292,13 +244,7 @@ export const getExecution = (
             return { opcode: decoded as OpCode, projected: false }
         }
         const opcode = getProjectedRuntimeOpcode(decoded, projectionSalt, stackDepth)
-        pendingProjectedRead = opcode === OpCode.Literal
-            ? {
-                kind: 'literal',
-                decodedOpcodeWord: decoded,
-                projectionSalt,
-            }
-            : null
+        pendingProjectedRead = opcode === OpCode.Literal ? [decoded, projectionSalt] : null
         return { opcode, projected: true }
     }
     const getCurrentFrame = () => stack[stack.length - 1]
@@ -848,22 +794,41 @@ export const getExecution = (
     // })
 
     const EVAL_FUNCTION = eval
+    const FUNCTION_CONSTRUCTOR = Object.getPrototypeOf(function () { }).constructor
+
+    const runCompiledProgram = (programData: number[], scopes: Scope[]) => run_(
+        programData,
+        0,
+        getCurrentFrame()[Fields.globalThis],
+        scopes,
+        {
+            [Fields.type]: InvokeType.Apply,
+            [Fields.function]: undefined,
+            [Fields.name]: '',
+            [Fields.self]: undefined
+        },
+        [],
+        getDebugFunction,
+        true,
+        compileFunction,
+        functionRedirects
+    )
 
     const emulateEval = (str: string, includesLocalScope: boolean) => {
         str = String(str)
 
+        if (compileFunction === UNSUPPORTED_COMPILE) {
+            // Stripped standalone runtimes do not embed the compiler. Fall back to
+            // host eval so browser examples can still execute library code that
+            // reaches eval/Function at runtime.
+            return EVAL_FUNCTION(str)
+        }
+
         const [programData] = compileFunction(str, { evalMode: true })
 
-        const result = run(
+        const result = runCompiledProgram(
             programData,
-            0,
-            getCurrentFrame()[Fields.globalThis],
             includesLocalScope ? [...getCurrentFrame()[Fields.scopes]] : [],
-            undefined,
-            [],
-            compileFunction,
-            functionRedirects,
-            getDebugFunction
         )
 
         return result
@@ -874,6 +839,13 @@ export const getExecution = (
         if (parameterStrings.length === 0) {
             parameterStrings.push('')
         }
+
+        if (compileFunction === UNSUPPORTED_COMPILE) {
+            const hostFunction = Reflect.get(getCurrentFrame()[Fields.globalThis], 'Function')
+            const FunctionCtor = typeof hostFunction === 'function' ? hostFunction : FUNCTION_CONSTRUCTOR
+            return FunctionCtor(...parameterStrings)
+        }
+
         const body = parameterStrings[parameterStrings.length - 1]
         const paramNames = parameterStrings.slice(0, -1)
         const src =
@@ -881,17 +853,7 @@ export const getExecution = (
                 ? `(function(){${body}})`
                 : `(function(${paramNames.join(',')}){${body}})`
         const [programData] = compileFunction(src, { evalMode: true })
-        return run(
-            programData,
-            0,
-            getCurrentFrame()[Fields.globalThis],
-            [],
-            undefined,
-            [],
-            compileFunction,
-            functionRedirects,
-            getDebugFunction
-        )
+        return runCompiledProgram(programData, [])
     }
 
     let returnsExternal = false
@@ -1221,6 +1183,12 @@ export const getExecution = (
                 blockSeed = value >>> 0
             }
         },
+        [OpcodeContextField.globalSeed]: {
+            get: () => globalSeed,
+        },
+        [OpcodeContextField.lastReadPos]: {
+            get: () => lastReadPos,
+        },
         [OpcodeContextField.commandPtr]: {
             get: () => commandPtr,
             set: (value: number) => {
@@ -1336,6 +1304,9 @@ export const getExecution = (
                 case OpCode.Literal:
                 case OpCode.LiteralAlias1:
                 case OpCode.LiteralAlias2:
+                case OpCode.ProtectedLiteral:
+                case OpCode.ProtectedLiteralAlias1:
+                case OpCode.ProtectedLiteralAlias2:
                 case OpCode.Pop:
                 case OpCode.PopAlias1:
                 case OpCode.SetEvalResult:

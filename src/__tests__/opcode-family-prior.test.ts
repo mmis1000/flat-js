@@ -15,7 +15,7 @@ import {
 } from '../compiler/analysis'
 import { generateSegment } from '../compiler/codegen'
 import { genOffset, generateData, isLiteralFamily } from '../compiler/encoding'
-import { HOT_OPCODE_FAMILIES, getCanonicalOpcodeFamily, getOpcodeFamilyMembers, getOpcodeSafetyClass, getProjectedRuntimeOpcodeKeepSet, isPrivilegedOpcodeFamily } from '../compiler/opcode-families'
+import { HOT_OPCODE_FAMILIES, getCanonicalOpcodeFamily, getOpcodeFamilyMembers, getOpcodeSafetyClass, getOpcodeWordArity, getProjectedRuntimeOpcodeKeepSet, isPrivilegedOpcodeFamily } from '../compiler/opcode-families'
 import { OpCode } from '../compiler/shared'
 
 const FIXTURES_DIR = path.join(__dirname, 'fixures')
@@ -222,13 +222,17 @@ function analyzeFixture(fixtureName: string): FixtureHistogram {
 
 test('opcode family helpers collapse aliases onto canonical base opcodes', () => {
     expect(getCanonicalOpcodeFamily(OpCode.LiteralAlias1)).toBe(OpCode.Literal)
+    expect(getCanonicalOpcodeFamily(OpCode.ProtectedLiteralAlias1)).toBe(OpCode.ProtectedLiteral)
     expect(getCanonicalOpcodeFamily(OpCode.GetAlias1)).toBe(OpCode.Get)
     expect(getCanonicalOpcodeFamily(OpCode.PopAlias1)).toBe(OpCode.Pop)
     expect(getOpcodeFamilyMembers(OpCode.Jump)).toEqual([OpCode.Jump, OpCode.JumpAlias1])
     expect(getOpcodeSafetyClass(OpCode.Literal)).toBe('hot')
+    expect(getOpcodeSafetyClass(OpCode.ProtectedLiteral)).toBe('hot')
+    expect(getOpcodeWordArity(OpCode.ProtectedLiteral)).toBe(3)
     expect(getOpcodeSafetyClass(OpCode.ReturnInTryCatchFinally)).toBe('privileged')
     expect(isPrivilegedOpcodeFamily(OpCode.Reseed)).toBe(true)
     expect(getProjectedRuntimeOpcodeKeepSet().includes(OpCode.UndefinedLiteral)).toBe(true)
+    expect(getProjectedRuntimeOpcodeKeepSet().includes(OpCode.ProtectedLiteral)).toBe(false)
 })
 
 test('fixture corpus prior helper analyzes the initial baseline set', () => {

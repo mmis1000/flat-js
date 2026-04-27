@@ -3,9 +3,9 @@ import * as ts from 'typescript'
 import { collectEvalTaintedFunctions, linkScopes, markParent, resolveScopes, searchFunctionAndScope, type Functions, type ParentMap, type ScopeChild, type Scopes } from './analysis'
 import { generateSegment, type Segment } from './codegen'
 import { headOf, resolveJumpTargetOffset } from './codegen/helpers'
-import { OPCODE_SEED_MASK, applyEncodingLayers, blockTransform, collectUsedOpcodes, expandReseeds, finalizeLiteralPool, genOffset, generateData, generateOpcodePermutation, getDerivedKey, injectGarbage, injectReseedTags } from './encoding'
+import { OPCODE_SEED_MASK, applyEncodingLayers, blockTransform, collectUsedOpcodes, expandReseeds, finalizeLiteralPool, genOffset, generateData, generateOpcodePermutation, getDerivedKey, injectGarbage, injectReseedTags, widenProtectedLiteralOps, type ProtectedLiteralPlaceholder } from './encoding'
 import { getProjectedRuntimeOpcodeKeepSet } from './opcode-families'
-import { OpCode, PROGRAM_PROTECTED_MODE_TRAILER, type ProgramScopeDebugMap } from './shared'
+import { OpCode, PROGRAM_PROTECTED_MODE_TRAILER, protectedLiteralSiteMix, type ProgramScopeDebugMap } from './shared'
 
 export type CompileOptions = {
     /** prints debug info to stdout */
@@ -170,6 +170,9 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
 
     injectReseedTags(program)
     expandReseeds(program, rng)
+    if (protectedMode) {
+        widenProtectedLiteralOps(program)
+    }
 
     const flattened = program.flat()
 
@@ -223,13 +226,14 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
 
     const segmentStartOffsets = program.map((segment) => headOf(segment).offset)
     const encKeyPlaceholders: { operandPos: number, segmentStartOffset: number }[] = []
-    generateData(flattened, functionToSegment, programData, literalValues, rng, encKeyPlaceholders)
+    const protectedLiteralPlaceholders: ProtectedLiteralPlaceholder[] = []
+    generateData(flattened, functionToSegment, programData, literalValues, rng, encKeyPlaceholders, protectedLiteralPlaceholders, protectedMode)
 
     const codeLength = programData.length
     const usedOpcodes = collectUsedOpcodes(programData, codeLength)
     const projectedOpcodes = [...getProjectedRuntimeOpcodeKeepSet()]
 
-    finalizeLiteralPool(programData, literalValues)
+    const literalPoolEntryInfo = finalizeLiteralPool(programData, literalValues, protectedMode, rng, protectedLiteralPlaceholders)
 
     const globalSeed = (shuffleSeed !== undefined ? shuffleSeed : (rng() * 0x100000000) | 0) >>> 0
     const perm = generateOpcodePermutation((globalSeed ^ OPCODE_SEED_MASK) >>> 0)
@@ -256,6 +260,16 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
         const activeSeed = placeholderActiveSeed.get(placeholder.operandPos) ?? 0
         const encKey = segmentEncKeys.get(placeholder.segmentStartOffset) ?? 0
         programData[placeholder.operandPos] = blockTransform(encKey >>> 0, getDerivedKey(activeSeed, placeholder.operandPos, globalSeed))
+    }
+
+    for (const placeholder of protectedLiteralPlaceholders) {
+        const activeSeed = activeSeedAtPos.get(placeholder.opcodePos) ?? 0
+        const literalSeed = literalPoolEntryInfo[placeholder.slot]!.literalSeed >>> 0
+        const seedDelta = (literalSeed ^ activeSeed ^ protectedLiteralSiteMix(placeholder.seedDeltaOperandPos, globalSeed)) >>> 0
+        programData[placeholder.seedDeltaOperandPos] = blockTransform(
+            seedDelta,
+            getDerivedKey(activeSeed, placeholder.seedDeltaOperandPos, globalSeed)
+        )
     }
 
     programData.push((globalSeed ^ OPCODE_SEED_MASK) | 0)

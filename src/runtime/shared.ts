@@ -1,5 +1,5 @@
 import { FunctionTypes, InvokeType, LiteralPoolKind, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "../compiler"
-import { TEXT_DADA_MASK, isSmallNumber, literalPoolWordMask } from "../compiler/shared"
+import { TEXT_DADA_MASK, getProgramMetadataStart, isSmallNumber, literalPoolWordMask, protectedLiteralCheck, protectedLiteralSiteMix, protectedLiteralWordMask } from "./inline-compiler-helpers"
 
 const decodeLiteralFromProgram = (program: number[], pos: number): any => {
     const label = (program[pos] ^ literalPoolWordMask(pos)) | 0
@@ -42,6 +42,78 @@ const getLiteralFromPool = (program: number[], pos: number): any => {
     byPos[pos] = value
     return value
 }
+
+type ProtectedLiteralCacheEntry = readonly [literalSeed: number, value: any]
+
+const decodeProtectedLiteralFromProgram = (program: number[], pos: number, literalSeed: number): any => {
+    const metadataStart = getProgramMetadataStart(program)
+    if (pos < 0 || pos + 3 > metadataStart) {
+        throw new Error('bad protected literal entry')
+    }
+
+    const kind = (program[pos] ^ protectedLiteralWordMask(literalSeed, pos, 0)) | 0
+    const length = (program[pos + 1] ^ protectedLiteralWordMask(literalSeed, pos + 1, 1)) | 0
+    const check = (program[pos + 2] ^ protectedLiteralWordMask(literalSeed, pos + 2, 2)) | 0
+    if (length < 0 || pos + 3 + length > metadataStart) {
+        throw new Error('bad protected literal entry')
+    }
+
+    const payload: number[] = []
+    for (let index = 0; index < length; index++) {
+        payload.push((program[pos + 3 + index] ^ protectedLiteralWordMask(literalSeed, pos + 3 + index, index + 3)) | 0)
+    }
+
+    const decoded = [kind, length, ...payload]
+    if (check !== protectedLiteralCheck(literalSeed, decoded)) {
+        throw new Error('bad protected literal entry')
+    }
+
+    if (kind === LiteralPoolKind.Boolean && length === 1) {
+        return payload[0] !== 0
+    }
+    if (kind === LiteralPoolKind.Number && length === 2) {
+        const buf = new ArrayBuffer(8)
+        const u = new Uint32Array(buf)
+        u[0] = payload[0]! >>> 0
+        u[1] = payload[1]! >>> 0
+        return new Float64Array(buf)[0]
+    }
+    if (kind === LiteralPoolKind.String) {
+        let s = ''
+        for (let index = 0; index < payload.length; index++) {
+            s += String.fromCharCode(payload[index]! & 0xffff)
+        }
+        return s
+    }
+    throw new Error('bad protected literal entry')
+}
+
+const protectedLiteralPoolCache = new WeakMap<number[], Array<ProtectedLiteralCacheEntry | undefined>>()
+
+const getProtectedLiteralFromPool = (program: number[], pos: number, literalSeed: number): any => {
+    let byPos = protectedLiteralPoolCache.get(program)
+    if (!byPos) {
+        byPos = []
+        protectedLiteralPoolCache.set(program, byPos)
+    }
+    const cached = byPos[pos]
+    if (cached !== undefined) {
+        if (cached[0] !== literalSeed) {
+            throw new Error('bad protected literal entry')
+        }
+        return cached[1]
+    }
+    const value = decodeProtectedLiteralFromProgram(program, pos, literalSeed)
+    byPos[pos] = [literalSeed, value]
+    return value
+}
+
+const recoverProtectedLiteralSeed = (
+    seedDelta: number,
+    blockSeed: number,
+    operandPos: number,
+    globalSeed: number,
+): number => (seedDelta ^ blockSeed ^ protectedLiteralSiteMix(operandPos, globalSeed)) >>> 0
 
 const CALL = Function.prototype.call
 const APPLY = Function.prototype.apply
@@ -354,12 +426,14 @@ export {
     bindInfo,
     CALL,
     decodeLiteralFromProgram,
+    decodeProtectedLiteralFromProgram,
     environments,
     functionDescriptors,
     generatorStates,
     getEmptyObject,
     getIterator,
     getLiteralFromPool,
+    getProtectedLiteralFromPool,
     HOST_FUNCTION,
     isAsyncType,
     is_a_constant,
@@ -373,7 +447,9 @@ export {
     iteratorNext,
     literalPoolCache,
     literalPoolWordMask,
+    protectedLiteralPoolCache,
     REGEXP,
+    recoverProtectedLiteralSeed,
     SCOPE_DEBUG_PTR,
     SCOPE_FLAGS,
     SCOPE_STATIC_SLOTS,

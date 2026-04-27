@@ -17,6 +17,8 @@ export const enum OpcodeContextField {
     currentProgram,
     ptr,
     blockSeed,
+    globalSeed,
+    lastReadPos,
     commandPtr,
     currentFrame,
     currentFrameStack,
@@ -71,6 +73,8 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.currentProgram]: number[]
     [OpcodeContextField.ptr]: number
     [OpcodeContextField.blockSeed]: number
+    [OpcodeContextField.globalSeed]: number
+    [OpcodeContextField.lastReadPos]: number
     [OpcodeContextField.commandPtr]: number
     [OpcodeContextField.currentFrame]: Frame
     [OpcodeContextField.currentFrameStack]: any[]

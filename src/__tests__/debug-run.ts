@@ -5,7 +5,7 @@ import * as compiler from '../compiler'
 import { getExecution, Fields } from '../runtime'
 import { InvokeType } from '../compiler'
 
-// Correct opcode names from the actual enum (0-indexed, Reseed=93, aliases=94-102)
+// Correct opcode names from the actual enum (0-indexed, Reseed=93, aliases=94-105)
 const OPCODE_NAMES: Record<number, string> = {
     0:'Nop', 1:'Literal', 2:'NullLiteral', 3:'UndefinedLiteral',
     4:'NodeOffset', 5:'NodeFunctionType',
@@ -36,6 +36,7 @@ const OPCODE_NAMES: Record<number, string> = {
     94:'LiteralAlias1', 95:'LiteralAlias2',
     96:'GetAlias1', 97:'SetAlias1', 98:'PopAlias1', 99:'JumpAlias1',
     100:'JumpIfNotAlias1', 101:'GetRecordAlias1', 102:'DuplicateAlias1',
+    103:'ProtectedLiteral', 104:'ProtectedLiteralAlias1', 105:'ProtectedLiteralAlias2',
 }
 
 function opName(code: number): string {

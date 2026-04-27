@@ -9,6 +9,7 @@ type RuntimeProjectionCandidate = {
 
 const OPCODE_ALIAS_FAMILIES: Partial<Record<OpCode, readonly OpCode[]>> = {
     [OpCode.Literal]: [OpCode.Literal, OpCode.LiteralAlias1, OpCode.LiteralAlias2],
+    [OpCode.ProtectedLiteral]: [OpCode.ProtectedLiteral, OpCode.ProtectedLiteralAlias1, OpCode.ProtectedLiteralAlias2],
     [OpCode.Get]: [OpCode.Get, OpCode.GetAlias1],
     [OpCode.Set]: [OpCode.Set, OpCode.SetAlias1],
     [OpCode.Pop]: [OpCode.Pop, OpCode.PopAlias1],
@@ -49,6 +50,7 @@ export const PRIVILEGED_OPCODE_FAMILIES: readonly OpCode[] = [
 
 export const HOT_OPCODE_FAMILIES: readonly OpCode[] = [
     OpCode.Literal,
+    OpCode.ProtectedLiteral,
     OpCode.GetStaticUnchecked,
     OpCode.Pop,
     OpCode.Get,
@@ -144,8 +146,15 @@ export function getOpcodeFamilyMembers(op: number): readonly OpCode[] {
     return opcodeFamilyMembers[family] ?? [family]
 }
 
-export function getOpcodeWordArity(op: number): 1 | 2 {
-    return getCanonicalOpcodeFamily(op) === OpCode.Literal ? 2 : 1
+export function getOpcodeWordArity(op: number): 1 | 2 | 3 {
+    const family = getCanonicalOpcodeFamily(op)
+    if (family === OpCode.Literal) {
+        return 2
+    }
+    if (family === OpCode.ProtectedLiteral) {
+        return 3
+    }
+    return 1
 }
 
 export function isPrivilegedOpcodeFamily(op: number): boolean {
@@ -203,17 +212,12 @@ export function getProjectedLiteralOperand(
     decodedOpcodeWord: number,
     projectionSalt: number,
     decodedOperandWord: number,
-    operandPos: number,
-    literalPoolPositions: readonly number[]
+    operandPos: number
 ): number {
     const mixed = mixProjectionWord(
         (decodedOperandWord ^ Math.imul(operandPos + 1, 0x9e3779b9)) >>> 0,
         (projectionSalt ^ Math.imul(decodedOpcodeWord, 0x85ebca6b)) >>> 0
     )
-
-    if (literalPoolPositions.length > 0 && (mixed & 0x7) < 3) {
-        return (TEXT_DADA_MASK | literalPoolPositions[mixed % literalPoolPositions.length]!) | 0
-    }
 
     return PROJECTED_SMALL_LITERAL_VALUES[mixed % PROJECTED_SMALL_LITERAL_VALUES.length]!
 }

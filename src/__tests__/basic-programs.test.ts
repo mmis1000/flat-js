@@ -1168,3 +1168,29 @@ const fn = () => {
 }
 fn()
 `, ReferenceError, printProvider)
+
+test('Runtime: standalone fallback eval without compiler', () => {
+    const code = `
+print(eval('40 + 2'))
+`
+    const [program] = compiler.compile(code, { protectedMode: true })
+    const results: any[] = []
+    const context = printProvider(results)
+
+    runtime.run(program, 0, fakeGlobalThis, [context])
+
+    expect(results).toEqual([42])
+})
+
+test('Runtime: standalone fallback Function constructor without compiler', () => {
+    const code = `
+print(Function('return 40 + 2')())
+`
+    const [program] = compiler.compile(code, { protectedMode: true })
+    const results: any[] = []
+    const context = printProvider(results)
+
+    runtime.run(program, 0, fakeGlobalThis, [context])
+
+    expect(results).toEqual([42])
+})
