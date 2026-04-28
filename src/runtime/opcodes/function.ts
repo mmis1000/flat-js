@@ -24,6 +24,23 @@ import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type Runti
 
 const EVAL_FUNCTION = eval
 
+const isVmConstructible = (fn: any) => {
+    const descriptor = functionDescriptors.get(fn)
+    if (!descriptor) {
+        return true
+    }
+
+    switch (descriptor[Fields.type]) {
+        case FunctionTypes.FunctionDeclaration:
+        case FunctionTypes.FunctionExpression:
+        case FunctionTypes.Constructor:
+        case FunctionTypes.DerivedConstructor:
+            return true
+        default:
+            return false
+    }
+}
+
 const bindFunctionSelfName = (
     functionType: FunctionTypes,
     scope: Scope,
@@ -60,6 +77,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     [Fields.name]: ctx[OpcodeContextField.popCurrentFrameStack](),
                 })
             }
+            const restParameterIndex = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const argumentNameCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const argumentNames: string[] = []
             for (let i = 0; i < argumentNameCount; i++) {
@@ -72,13 +90,14 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             }
 
             const invokeType = ctx[OpcodeContextField.popCurrentFrameStack]<InvokeType>()
+            const hasRestParameter = restParameterIndex >= 0
 
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                 const obj = ctx[OpcodeContextField.createArgumentObject]()
                 const bindingLength = Math.min(argumentNameCount, parameterCount)
 
                 for (let i = 0; i < parameterCount; i++) {
-                    if (i < bindingLength) {
+                    if (!hasRestParameter && i < bindingLength) {
                         Object.defineProperty(obj, i, {
                             enumerable: true,
                             configurable: true,
@@ -150,8 +169,15 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
                 bindFunctionSelfName(functionType, scope, name, fn, ctx)
 
+                const restValues = hasRestParameter ? parameters.slice(restParameterIndex) : null
                 for (const [index, name] of argumentNames.entries()) {
-                    ctx[OpcodeContextField.initializeBindingValue](scope, name, parameters[index])
+                    ctx[OpcodeContextField.initializeBindingValue](
+                        scope,
+                        name,
+                        hasRestParameter && index === restParameterIndex
+                            ? restValues
+                            : parameters[index]
+                    )
                 }
             } else if (invokeType === InvokeType.Construct) {
                 const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
@@ -192,8 +218,15 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
                 bindFunctionSelfName(functionType, scope, name, fn, ctx)
 
+                const restValues = hasRestParameter ? parameters.slice(restParameterIndex) : null
                 for (const [index, name] of argumentNames.entries()) {
-                    ctx[OpcodeContextField.initializeBindingValue](scope, name, parameters[index])
+                    ctx[OpcodeContextField.initializeBindingValue](
+                        scope,
+                        name,
+                        hasRestParameter && index === restParameterIndex
+                            ? restValues
+                            : parameters[index]
+                    )
                 }
             }
         }
@@ -203,6 +236,18 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             const offset = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.defineFunction](ctx[OpcodeContextField.currentFrame][Fields.globalThis], ctx[OpcodeContextField.currentFrame][Fields.scopes], name, type, offset))
+        }
+            break
+        case OpCode.ExpandArgumentArray: {
+            const argArray = ctx[OpcodeContextField.popCurrentFrameStack]<any[]>()
+            if (!Array.isArray(argArray)) {
+                throw new TypeError('ExpandArgumentArray expects an array')
+            }
+
+            for (let i = 0; i < argArray.length; i++) {
+                ctx[OpcodeContextField.pushCurrentFrameStack](argArray[i])
+            }
+            ctx[OpcodeContextField.pushCurrentFrameStack](argArray.length)
         }
             break
         case OpCode.CallValue:
@@ -267,13 +312,23 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
             const fnTarget = ctx[OpcodeContextField.functionRedirects].has(fn) ? ctx[OpcodeContextField.functionRedirects].get(fn) : fn
             const vmGlobal = ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+            const descriptor = functionDescriptors.get(fnTarget)
+
+            if (
+                self == null
+                && descriptor
+                && descriptor[Fields.type] !== FunctionTypes.ArrowFunction
+                && descriptor[Fields.type] !== FunctionTypes.AsyncArrowFunction
+            ) {
+                self = descriptor[Fields.globalThis]
+            }
 
             if (fn === BIND) {
                 const bound = ctx[OpcodeContextField.bindInternal](self, parameters[0], parameters.slice(1))
                 ctx[OpcodeContextField.pushCurrentFrameStack](bound)
             } else if (
-                !functionDescriptors.has(fnTarget) ||
-                isAsyncType(functionDescriptors.get(fnTarget)![Fields.type])
+                !descriptor ||
+                isAsyncType(descriptor[Fields.type])
             ) {
                 if (typeof fnTarget !== 'function') {
                     if (command === OpCode.Call || command === OpCode.CallAsEval) {
@@ -288,6 +343,15 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     } else {
                         ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.emulateEval](String(parameters[0]), false))
                     }
+                } else if (self === Reflect.get(vmGlobal, 'Reflect') && name === 'construct') {
+                    const target = parameters[0]
+                    const newTarget = parameters[2] === undefined ? target : parameters[2]
+
+                    if (!isVmConstructible(target) || !isVmConstructible(newTarget)) {
+                        throw new TypeError('target is not a constructor')
+                    }
+
+                    ctx[OpcodeContextField.pushCurrentFrameStack](Reflect.construct(target, parameters[1], newTarget))
                 } else if (
                     fnTarget === Reflect.get(vmGlobal, 'Function') || fnTarget === HOST_FUNCTION
                 ) {
@@ -345,8 +409,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
                     ctx[OpcodeContextField.pushCurrentFrameStack](Reflect.apply(fnTarget, self, parameters))
                 }
-            } else if (isGeneratorType(functionDescriptors.get(fnTarget)![Fields.type])) {
-                const descriptor = functionDescriptors.get(fnTarget)!
+            } else if (isGeneratorType(descriptor[Fields.type])) {
                 const iterator = ctx[OpcodeContextField.createGeneratorFromExecution](
                     descriptor[Fields.programSection],
                     descriptor[Fields.offset],
@@ -362,7 +425,6 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 )
                 ctx[OpcodeContextField.pushCurrentFrameStack](iterator)
             } else {
-                const descriptor = functionDescriptors.get(fnTarget)!
                 const newFrame: Frame = {
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],

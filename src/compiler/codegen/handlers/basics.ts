@@ -119,6 +119,10 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
         return [op(OpCode.Literal, 2, [Number(node.text)])]
     }
 
+    if (ts.isBigIntLiteral(node)) {
+        return [op(OpCode.Literal, 2, [BigInt(node.text.slice(0, -1))])]
+    }
+
     if (ts.isBlock(node)) {
         const variableCount = ctx.scopes.get(node)?.size ?? 0
         if (variableCount > 0) {

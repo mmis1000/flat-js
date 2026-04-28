@@ -1,4 +1,5 @@
 import { gzipSync, gunzipSync } from 'zlib'
+import * as vm from 'vm'
 import { compile, collectUsedOpcodes } from '../compiler'
 import { compileAndRun } from '../index'
 
@@ -32,4 +33,54 @@ test('compileAndRun: finally does not affects result ', () => {
 
 test('compileAndRun: finally does not affects result ', () => {
     expect(compileAndRun('try { 42 } catch (err) {} finally { 43 }')).toBe(42)
+})
+
+test('compileAndRun: global object assignment updates source-file binding', () => {
+    const logs: string[] = []
+    const vmGlobal = Object.create(globalThis) as typeof globalThis & { print(...args: any[]): void }
+    Reflect.defineProperty(vmGlobal, 'globalThis', {
+        value: vmGlobal,
+        configurable: true,
+        writable: true,
+    })
+    vmGlobal.print = (...args: any[]) => logs.push(...args.map(String))
+
+    compileAndRun(`
+function $DONE() {
+    print('old')
+}
+globalThis.$DONE = function () {
+    print('new')
+}
+$DONE()
+`, vmGlobal)
+
+    expect(logs).toEqual(['new'])
+})
+
+test('compileAndRun: cross-context errors use the provided global constructors', () => {
+    const context = vm.createContext({
+        console,
+        require,
+        result: [] as boolean[],
+    })
+
+    vm.runInContext(`
+        const { compileAndRun } = require(${JSON.stringify(require.resolve('../index', { paths: [__dirname] }))});
+        const vmGlobal = Object.create(globalThis);
+        vmGlobal.globalThis = vmGlobal;
+        vmGlobal.print = function (value) {
+            result.push(value);
+        };
+        compileAndRun(\`
+            'use strict';
+            try {
+                missingName;
+            } catch (e) {
+                print(e.constructor === ReferenceError);
+            }
+        \`, vmGlobal);
+    `, context)
+
+    expect(context.result).toEqual([true])
 })

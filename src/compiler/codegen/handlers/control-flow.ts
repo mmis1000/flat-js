@@ -207,6 +207,11 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
             }
 
             if (ctx.nextOps.has(ancestor)) {
+                // Switch statements always allocate a synthetic scope for [switch].
+                // Count it here so `break` exits that scope before jumping past the switch.
+                if (ts.isSwitchStatement(ancestor)) {
+                    scopeCount++
+                }
                 return true
             }
             if (ctx.functions.has(ancestor as any)) {

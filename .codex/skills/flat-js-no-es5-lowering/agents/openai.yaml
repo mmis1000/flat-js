@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flat JS No ES5 Lowering"
+  short_description: "Guardrail for implementing ES6+ directly in the VM"
+  default_prompt: "Use $flat-js-no-es5-lowering when adding or fixing ES2015+ language support in Flat JS so features are implemented directly in compiler/runtime instead of being lowered to ES5 patterns."

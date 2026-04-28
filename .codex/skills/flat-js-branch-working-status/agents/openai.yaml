@@ -1,4 +1,4 @@
 interface:
   display_name: "Flat JS Branch Working Status"
-  short_description: "Checklist for confirming a branch is actually green"
-  default_prompt: "Use $flat-js-branch-working-status before confirming a Flat JS branch is working after runtime, compiler, loader, or browser-facing changes."
+  short_description: "Checklist and completion gates for calling a branch green"
+  default_prompt: "Use $flat-js-branch-working-status before confirming a Flat JS branch is working, green, or target complete after runtime, compiler, loader, or browser-facing changes."

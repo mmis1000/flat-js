@@ -155,6 +155,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
             case ts.SyntaxKind.MinusEqualsToken:
             case ts.SyntaxKind.SlashEqualsToken:
             case ts.SyntaxKind.AsteriskEqualsToken:
+            case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
             case ts.SyntaxKind.EqualsToken: {
                 const left = ctx.extractQuote(node.left)
                 if (ts.isIdentifier(left)) {
@@ -174,6 +175,8 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                                                 ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BSlashEqualStaticUnchecked : OpCode.BSlashEqualStatic)
                                                 : kind === ts.SyntaxKind.AsteriskEqualsToken
                                                     ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BAsteriskEqualStaticUnchecked : OpCode.BAsteriskEqualStatic)
+                                                    : kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken
+                                                        ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked : OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic)
                                                     : abort('Why Am I here?')
                             )
                         ]
@@ -190,11 +193,12 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                         ...ctx.generateLeft(node.left, flag),
                         ...ctx.generate(node.right, flag),
                         op(
-                            kind === ts.SyntaxKind.EqualsToken ? OpCode.Set :
+                                kind === ts.SyntaxKind.EqualsToken ? OpCode.Set :
                                 kind === ts.SyntaxKind.PlusEqualsToken ? OpCode.BPlusEqual :
                                     kind === ts.SyntaxKind.MinusEqualsToken ? OpCode.BMinusEqual :
                                         kind === ts.SyntaxKind.SlashEqualsToken ? OpCode.BSlashEqual :
                                             kind === ts.SyntaxKind.AsteriskEqualsToken ? OpCode.BAsteriskEqual :
+                                                kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken ? OpCode.BGreaterThanGreaterThanGreaterThanEqual :
                                                 abort('Why Am I here?')
                         )
                     ]

@@ -117,7 +117,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.BPlusEqual:
         case OpCode.BMinusEqual:
         case OpCode.BSlashEqual:
-        case OpCode.BAsteriskEqual: {
+        case OpCode.BAsteriskEqual:
+        case OpCode.BGreaterThanGreaterThanGreaterThanEqual: {
             const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
@@ -127,6 +128,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 [OpCode.BMinusEqual]: (a, b) => a - b,
                 [OpCode.BSlashEqual]: (a, b) => a / b,
                 [OpCode.BAsteriskEqual]: (a, b) => a * b,
+                [OpCode.BGreaterThanGreaterThanGreaterThanEqual]: (a, b) => a >>> b,
             }
             const result = exprs[command](leftValue, rightVal)
             ctx[OpcodeContextField.setValue](target, name, result)
@@ -136,7 +138,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.BPlusEqualStatic:
         case OpCode.BMinusEqualStatic:
         case OpCode.BSlashEqualStatic:
-        case OpCode.BAsteriskEqualStatic: {
+        case OpCode.BAsteriskEqualStatic:
+        case OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
@@ -146,6 +149,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 [OpCode.BMinusEqualStatic]: (a, b) => a - b,
                 [OpCode.BSlashEqualStatic]: (a, b) => a / b,
                 [OpCode.BAsteriskEqualStatic]: (a, b) => a * b,
+                [OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic]: (a, b) => a >>> b,
             }
             const result = exprs[command](leftValue, rightVal)
             ctx[OpcodeContextField.setStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index, result)
@@ -155,7 +159,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.BPlusEqualStaticUnchecked:
         case OpCode.BMinusEqualStaticUnchecked:
         case OpCode.BSlashEqualStaticUnchecked:
-        case OpCode.BAsteriskEqualStaticUnchecked: {
+        case OpCode.BAsteriskEqualStaticUnchecked:
+        case OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
@@ -165,6 +170,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 [OpCode.BMinusEqualStaticUnchecked]: (a, b) => a - b,
                 [OpCode.BSlashEqualStaticUnchecked]: (a, b) => a / b,
                 [OpCode.BAsteriskEqualStaticUnchecked]: (a, b) => a * b,
+                [OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked]: (a, b) => a >>> b,
             }
             const result = exprs[command](leftValue, rightVal)
             ctx[OpcodeContextField.setStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index, result)

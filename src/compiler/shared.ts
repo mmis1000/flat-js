@@ -9,6 +9,7 @@ export const enum LiteralPoolKind {
     Boolean = 1,
     Number = 2,
     String = 3,
+    BigInt = 4,
 }
 
 /** XOR mask for each pool word at absolute program index `i` (position-dependent). MUST SYNC with runtime `literalPoolWordMask`. */
@@ -143,9 +144,9 @@ export const enum OpCode {
 
     /**
      * Initializes a function or source-file activation scope from the current call setup.
-     * Stack (bottom to top): `thisValue`, `fn`, `fnName`, `InvokeType.Apply`, argument * O, argumentCount, parameterName * N (reversed), parameterNameCount, [variableName, variableType] * M, variableCount, functionType
+     * Stack (bottom to top): `thisValue`, `fn`, `fnName`, `InvokeType.Apply`, argument * O, argumentCount, parameterName * N (reversed), parameterNameCount, restParameterIndex, [variableName, variableType] * M, variableCount, functionType
      * Result: no stack result.
-     * Notes: Under `InvokeType.Construct`, the bottom value is `newTarget` instead of `thisValue`. This opcode binds parameters, locals, `this`, `new.target`, and debug scope state.
+     * Notes: Under `InvokeType.Construct`, the bottom value is `newTarget` instead of `thisValue`. `restParameterIndex` is `-1` when absent. This opcode binds parameters, locals, `this`, `new.target`, and debug scope state.
      */
     EnterFunction,
     /**
@@ -362,6 +363,13 @@ export const enum OpCode {
      * Notes: VM functions transfer control into a new frame instead of pushing synchronously. Async functions yield promises, and generator functions yield iterators.
      */
     CallValue,
+    /**
+     * Expands a prepared argument array back into the VM call stack format.
+     * Stack (bottom to top): argumentArray
+     * Result: argument * M, argumentCount
+     * Notes: Used for spread calls/new/super without lowering to `.apply(...)`.
+     */
+    ExpandArgumentArray,
 
     /**
      * Computes `typeof value`.
@@ -631,6 +639,24 @@ export const enum OpCode {
      * Result: newValue
      */
     BAsteriskEqualStaticUnchecked,
+    /**
+     * Evaluates `target[name] >>>= value`.
+     * Stack (bottom to top): target, name, value
+     * Result: newValue
+     */
+    BGreaterThanGreaterThanGreaterThanEqual,
+    /**
+     * Evaluates a checked statically resolved `>>>=`.
+     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Result: newValue
+     */
+    BGreaterThanGreaterThanGreaterThanEqualStatic,
+    /**
+     * Evaluates an unchecked statically resolved `>>>=`.
+     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Result: newValue
+     */
+    BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked,
 
     /**
      * Deletes a property or binding target.
@@ -821,6 +847,13 @@ export const enum OpCode {
      * Result: array
      */
     ArraySpread,
+    /**
+     * Creates and caches a frozen tagged-template object for the current site.
+     * Stack (bottom to top): rawPart * N, cookedPart * N, partCount
+     * Result: templateObject
+     * Notes: Reuses the same object for the same program site and realm, and defines a frozen non-enumerable `raw` array.
+     */
+    TemplateObject,
 }
 
 export const enum ResolveType {

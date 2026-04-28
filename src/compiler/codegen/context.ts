@@ -46,14 +46,26 @@ export function createCodegenContext(
             return ops
         }
 
+        let start = root.pos
+        let end = root.end
+
+        if (node.pos >= 0 && node.end >= 0) {
+            try {
+                start = node.getStart()
+                end = node.end
+            } catch {
+                // Synthetic lowered nodes may have text ranges but no backing source file.
+            }
+        }
+
         for (const op of ops) {
             if (
                 op.source == null
-                || op.source.end - op.source.start > node.end - node.getStart()
+                || op.source.end - op.source.start > end - start
             ) {
                 op.source = {
-                    start: node.getStart(),
-                    end: node.end
+                    start,
+                    end
                 }
             }
         }

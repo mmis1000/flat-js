@@ -22,6 +22,14 @@ const decodeLiteralFromProgram = (program: number[], pos: number): any => {
         }
         return s
     }
+    if (label === LiteralPoolKind.BigInt) {
+        let s = ''
+        for (let i = 0; i < length; i++) {
+            const w = (program[pos + 2 + i] ^ literalPoolWordMask(pos + 2 + i)) | 0
+            s += String.fromCharCode(w & 0xffff)
+        }
+        return BigInt(s)
+    }
     throw new Error('bad literal pool entry')
 }
 

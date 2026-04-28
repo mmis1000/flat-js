@@ -101,19 +101,28 @@ export const getExecution = (
         getScopeInternal(scope)[SCOPE_DEBUG_PTR] = scopePtr
     }
 
-    /** Native property ops run in the host realm; VM bytecode compares errors to vmGlobal's constructors (e.g. test262 eshost). */
-    const rethrowNativeErrorInRealm = (e: unknown, vmGlobal: any): never => {
-        if (e === null || typeof e !== 'object') throw e
-        const ctor = e.constructor
-        if (typeof ctor !== 'function') throw e
+    /** Native/runtime errors originate in the host realm; remap built-ins before user code observes them. */
+    const remapErrorToRealm = (e: unknown, vmGlobal: any) => {
+        if (e === null || typeof e !== 'object') return e
+        const ctor = (e as any).constructor
+        if (typeof ctor !== 'function') return e
         const ctorName = ctor.name
-        if (!ctorName) throw e
-        const local = vmGlobal[ctorName]
+        if (!ctorName) return e
+        const hostCtor = (globalThis as any)[ctorName]
+        if (typeof hostCtor !== 'function' || ctor !== hostCtor) {
+            return e
+        }
+        const local = vmGlobal?.[ctorName]
         if (typeof local === 'function' && ctor !== local) {
             const msg = Reflect.get(e, 'message')
-            throw new local(typeof msg === 'string' ? msg : '')
+            return new local(typeof msg === 'string' ? msg : '')
         }
-        throw e
+        return e
+    }
+
+    /** Native property ops run in the host realm; VM bytecode compares errors to vmGlobal's constructors (e.g. test262 eshost). */
+    const rethrowNativeErrorInRealm = (e: unknown, vmGlobal: any): never => {
+        throw remapErrorToRealm(e, vmGlobal)
     }
 
     const getScopeInternal = (scope: Scope) => scope as ScopeWithInternals
@@ -597,7 +606,7 @@ export const getExecution = (
     const setValue = (ctx: any, name: string, value: any) => {
         if (!environments.has(ctx)) {
             try {
-                return (ctx[name] = value)
+                return writeBindingValue(ctx as Scope, name, value)
             } catch (e) {
                 rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
             }
@@ -1120,14 +1129,17 @@ export const getExecution = (
                 case OpCode.BMinusEqual:
                 case OpCode.BSlashEqual:
                 case OpCode.BAsteriskEqual:
+                case OpCode.BGreaterThanGreaterThanGreaterThanEqual:
                 case OpCode.BPlusEqualStatic:
                 case OpCode.BMinusEqualStatic:
                 case OpCode.BSlashEqualStatic:
                 case OpCode.BAsteriskEqualStatic:
+                case OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic:
                 case OpCode.BPlusEqualStaticUnchecked:
                 case OpCode.BMinusEqualStaticUnchecked:
                 case OpCode.BSlashEqualStaticUnchecked:
                 case OpCode.BAsteriskEqualStaticUnchecked:
+                case OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked:
                 case OpCode.DefineKeepCtx:
                 case OpCode.Get:
                 case OpCode.SetMultiple:
@@ -1146,6 +1158,7 @@ export const getExecution = (
                     break
                 case OpCode.EnterFunction:
                 case OpCode.DefineFunction:
+                case OpCode.ExpandArgumentArray:
                 case OpCode.CallValue:
                 case OpCode.Call:
                 case OpCode.CallAsEval:
@@ -1181,6 +1194,7 @@ export const getExecution = (
                     break
                 case OpCode.ArrayLiteral:
                 case OpCode.ArraySpread:
+                case OpCode.TemplateObject:
                 case OpCode.ObjectLiteral:
                 case OpCode.Typeof:
                 case OpCode.TypeofReference:
@@ -1270,6 +1284,8 @@ export const getExecution = (
             }
 
         } catch (err: any) {
+            const vmGlobal = getCurrentFrame()?.[Fields.globalThis] ?? initialFrame[Fields.globalThis]
+            err = remapErrorToRealm(err, vmGlobal)
             if (err != null && typeof err === 'object') {
                 err.pos = commandPtr
             }

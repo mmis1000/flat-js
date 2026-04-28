@@ -819,6 +819,29 @@ switch (1) {
 print(a)
 `, [1], printProvider)
 
+testRuntime('switch break restores outer static bindings', `
+function outer(value) {
+    switch (value === null ? 'null' : typeof value) {
+        case 'string':
+        case 'bigint':
+        case 'number':
+        case 'boolean':
+        case 'undefined':
+        case 'null':
+            break
+        case 'symbol':
+        case 'function':
+        case 'object':
+            break
+        default:
+            break
+    }
+    print(typeof lazyResult)
+    function lazyResult() {}
+}
+outer([])
+`, ['function'], printProvider)
+
 
 testRuntime('for break', `
 var a = 0

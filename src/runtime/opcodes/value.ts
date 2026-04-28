@@ -1,4 +1,4 @@
-import { OpCode } from "../../compiler"
+import { OpCode, SpecialVariable } from "../../compiler"
 import {
     Context,
     Fields,
@@ -10,6 +10,8 @@ import {
     environments,
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
+
+const templateObjectCache = new WeakMap<number[], WeakMap<object, any[]>>()
 
 export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): OpcodeHandlerResult => {
     switch (command) {
@@ -33,6 +35,49 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             ctx[OpcodeContextField.pushCurrentFrameStack](arr)
         }
             break
+        case OpCode.TemplateObject: {
+            const partCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const cookedParts: any[] = []
+            for (let i = 0; i < partCount; i++) {
+                cookedParts.unshift(ctx[OpcodeContextField.popCurrentFrameStack]())
+            }
+            const rawParts: string[] = []
+            for (let i = 0; i < partCount; i++) {
+                rawParts.unshift(ctx[OpcodeContextField.popCurrentFrameStack]())
+            }
+
+            const program = ctx[OpcodeContextField.currentProgram]
+            const realm = ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+            let realmCache = templateObjectCache.get(program)
+            if (!realmCache) {
+                realmCache = new WeakMap()
+                templateObjectCache.set(program, realmCache)
+            }
+
+            let siteCache = realmCache.get(realm)
+            if (!siteCache) {
+                siteCache = []
+                realmCache.set(realm, siteCache)
+            }
+
+            const site = ctx[OpcodeContextField.commandPtr]
+            let templateObject = siteCache[site]
+            if (templateObject === undefined) {
+                const raw = Object.freeze([...rawParts])
+                templateObject = [...cookedParts]
+                Object.defineProperty(templateObject, 'raw', {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false,
+                    value: raw,
+                })
+                Object.freeze(templateObject)
+                siteCache[site] = templateObject
+            }
+
+            ctx[OpcodeContextField.pushCurrentFrameStack](templateObject)
+        }
+            break
         case OpCode.ObjectLiteral:
             ctx[OpcodeContextField.pushCurrentFrameStack]({})
             break
@@ -53,7 +98,14 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                         return BREAK_COMMAND
                     }
                 }
-                ctx[OpcodeContextField.pushCurrentFrameStack]('undefined')
+                const globalThis = frame[Fields.globalThis]
+                if (name === SpecialVariable.This) {
+                    ctx[OpcodeContextField.pushCurrentFrameStack](typeof globalThis)
+                } else if (name in globalThis) {
+                    ctx[OpcodeContextField.pushCurrentFrameStack](typeof globalThis[name])
+                } else {
+                    ctx[OpcodeContextField.pushCurrentFrameStack]('undefined')
+                }
             } else {
                 ctx[OpcodeContextField.pushCurrentFrameStack](typeof target[name])
             }

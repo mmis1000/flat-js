@@ -1,6 +1,6 @@
 ---
 name: flat-js-branch-working-status
-description: Use when confirming a Flat JS branch is truly working or ready after compiler, runtime, protected-mode, loader, example, or browser-facing changes. Provides the checklist to run before claiming the branch is green.
+description: Use when confirming a Flat JS branch is truly working, green, ready, or target complete after compiler, runtime, protected-mode, loader, example, or browser-facing changes. Provides the checklist and completion gates to satisfy before claiming the branch is done.
 ---
 
 # Flat JS Branch Working Status
@@ -26,6 +26,7 @@ Do not claim the branch is working until the changed surfaces have been checked 
 - If example assets or loader behavior changed, run:
   - `npm run build-example`
 - If another generated example changed, rebuild that artifact too.
+- If compiler/runtime semantics changed and there is a relevant Test262 harness slice for the area, run it and treat failures as blocking, not advisory.
 
 ## Browser And Example Checks
 
@@ -40,6 +41,18 @@ Run these when changes touched `example/loader.js`, stripped runtime bundling, j
   - `d.done([fn])`
   - `$(el).animate({ left: '40%' })`
 - Confirm the new console error count is zero before saying the example is fixed.
+
+## Target Complete Requirements
+
+Only call the target complete when all relevant checked surfaces are green.
+
+- No known CI failures remain for the touched area.
+- No relevant local test failures remain.
+- No relevant browser or example regressions remain.
+- No relevant Test262 harness failures remain.
+- The original repro path or user-facing behavior has been rechecked.
+
+If one of those surfaces was not run or is still unknown, say that explicitly and do not present the work as fully target complete.
 
 ## Branch Port Checks
 

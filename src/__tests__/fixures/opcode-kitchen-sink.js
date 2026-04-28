@@ -17,6 +17,7 @@ target.count += 1;
 target.count -= 1;
 target.count /= 1;
 target.count *= 2;
+target.count >>>= 1;
 target.count++;
 target.count--;
 ++target.count;
@@ -38,8 +39,16 @@ function directEval(code) {
     return eval(code);
 }
 
+function directEvalSpread(parts) {
+    return eval(...parts);
+}
+
 function callValue(fn) {
     return fn(1, 2);
+}
+
+function callValueSpread(fn, args) {
+    return fn(...args);
 }
 
 function bindAndCall(fn, self) {
@@ -48,6 +57,10 @@ function bindAndCall(fn, self) {
 
 function makeFunctionCtor() {
     return new Function('a', 'b', 'return a + b;');
+}
+
+function readTagged(strings) {
+    return strings.raw[0];
 }
 
 function breakThroughFinally(values) {
@@ -85,6 +98,7 @@ function makeStatics() {
         unchecked -= 1;
         unchecked /= 1;
         unchecked *= 1;
+        unchecked >>>= 1;
         unchecked++;
         unchecked--;
         ++unchecked;
@@ -97,6 +111,7 @@ function makeStatics() {
         checked -= 1;
         checked /= 1;
         checked *= 1;
+        checked >>>= 1;
         checked++;
         checked--;
         ++checked;
@@ -149,17 +164,17 @@ class BaseBox {
 }
 
 class DerivedBox extends BaseBox {
-    constructor(value) {
-        super(value);
+    constructor(...args) {
+        super(...args);
         this.kind = 'derived';
     }
 
-    method(extra) {
-        return super.method(extra) * 2;
+    method(...args) {
+        return super.method(...args) * 2;
     }
 
     static create() {
-        return new DerivedBox(4);
+        return new DerivedBox(...[4]);
     }
 }
 
@@ -204,11 +219,14 @@ try {
 }
 
 directEval('1 + 2');
+directEvalSpread(['1 + 2']);
 callValue(function (a, b) { return a + b; });
+callValueSpread(function (a, b) { return a + b; }, [1, 2]);
 bindAndCall(function (a, b) { return this.base + a + b; }, { base: 5 });
 makeFunctionCtor()('3', '4');
 makeStatics();
 DerivedBox.create();
+readTagged`line\nbreak`;
 counter(1);
 asyncPath(Promise.resolve(5));
 breakThroughFinally([1, 2, 3]);

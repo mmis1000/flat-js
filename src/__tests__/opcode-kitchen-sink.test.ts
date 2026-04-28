@@ -60,6 +60,8 @@ test('opcode kitchen sink fixture keeps broad opcode coverage', () => {
     expect(used.has(OpCode.Await)).toBe(true)
     expect(used.has(OpCode.SuperCall)).toBe(true)
     expect(used.has(OpCode.ArraySpread)).toBe(true)
+    expect(used.has(OpCode.ExpandArgumentArray)).toBe(true)
+    expect(used.has(OpCode.TemplateObject)).toBe(true)
     expect(used.has(OpCode.BreakInTryCatchFinally)).toBe(true)
     expect(used.has(OpCode.TypeofStaticReference)).toBe(true)
     expect(used.has(OpCode.TypeofStaticReferenceUnchecked)).toBe(true)

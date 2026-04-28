@@ -25,6 +25,19 @@ export function generateSegment(
 
     let bodyNodes: Op<OpCode>[]
 
+    const functionNode = ts.isSourceFile(node) ? null : node
+    const restParameterIndex = functionNode?.parameters.findIndex((parameter) => parameter.dotDotDotToken != null) ?? -1
+
+    if (functionNode && restParameterIndex >= 0) {
+        const restParameter = functionNode.parameters[restParameterIndex]!
+        if (restParameterIndex !== functionNode.parameters.length - 1) {
+            throw new Error('not support yet')
+        }
+        if (!ts.isIdentifier(restParameter.name)) {
+            throw new Error('not support yet')
+        }
+    }
+
     if (ts.isSourceFile(node)) {
         const statements = [...node.statements]
         bodyNodes = statements.map((statement) => ctx.generate(statement, withEval ? StatementFlag.Eval : 0)).flat()
@@ -55,15 +68,17 @@ export function generateSegment(
 
     if (ts.isSourceFile(node)) {
         entry.push(op(OpCode.Literal, 2, [0]))
+        entry.push(op(OpCode.Literal, 2, [-1]))
     } else {
         for (const item of [...node.parameters].reverse()) {
-            if (!ts.isIdentifier(item.name) || item.dotDotDotToken != null) {
+            if (!ts.isIdentifier(item.name)) {
                 throw new Error('not support yet')
             }
 
             entry.push(op(OpCode.Literal, 2, [item.name.text]))
         }
         entry.push(op(OpCode.Literal, 2, [node.parameters.length]))
+        entry.push(op(OpCode.Literal, 2, [restParameterIndex]))
     }
 
     entry.push(...generateVariableList(node, scopes))

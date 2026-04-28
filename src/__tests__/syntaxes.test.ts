@@ -23,6 +23,7 @@ const syntaxes = [
     ['VariableDeclarationList let with init', 'let a = 0'],
     ['VariableDeclarationList const', 'const a = 0'],
     ['ArrowFunction', '(() => 0)'],
+    ['ArrowFunction rest', '((...args) => args.length)'],
     ['FunctionStatement', 'function a () {}'],
     ['FunctionExpression', '(function a () {})'],
     ['ObjectLiteral', '({})'],
@@ -32,6 +33,8 @@ const syntaxes = [
     ['ObjectLiteral ComputedKey', '({ [a]: {} })'],
     ['ObjectLiteral String Key', '({ "a": {} })'],
     ['ObjectLiteral Number Key', '({ 0: {} })'],
+    ['CallExpression spread', 'fn(...args)'],
+    ['TaggedTemplateExpression', 'tag`hello`'],
     ['BinaryExpression Comma', '(0, 1)'],
     [
         'BinaryExpression - + ^ | || & && > 1 >> 1 >>> < << >= <= == === != !== * / in ',

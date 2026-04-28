@@ -30,6 +30,14 @@ function encodeLiteralPoolWords(value: any): number[] {
         }
         return words
     }
+    if (typeof value === 'bigint') {
+        const text = String(value)
+        const words: number[] = [LiteralPoolKind.BigInt, text.length]
+        for (let i = 0; i < text.length; i++) {
+            words.push(text.charCodeAt(i))
+        }
+        return words
+    }
     throw new Error('unsupported literal pool value')
 }
 
