@@ -38,6 +38,16 @@ function createLocationMap(src: string) {
     return locationMap
 }
 
+function normalizeAmbiguousLabeledLetAsi(src: string) {
+    // TypeScript parses `label: let // ASI\n...` as a lexical declaration even though,
+    // in sloppy script code, ASI makes it `label: let;` followed by the next statement.
+    // Replacing the spacer before the line comment with `;` preserves source length while
+    // steering the parser to the correct JavaScript statement split.
+    return src.replace(/(:\s*let)([ \t]+)(?=\/\/[^\r\n]*(?:\r\n?|\n))/g, (_, prefix: string, whitespace: string) => {
+        return `${prefix};${whitespace.slice(1)}`
+    })
+}
+
 function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>) {
     const servicesHost: ts.CompilerHost = (<Partial<ts.CompilerHost>>{
         getScriptFileNames: () => ['output.ts'],
@@ -83,8 +93,9 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     const functions: Functions = new Set()
     const scopeChild: ScopeChild = new Map()
 
-    const sourceNode = ts.createSourceFile('output.ts', src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
-    const locationMap = createLocationMap(src)
+    const normalizedSrc = normalizeAmbiguousLabeledLetAsi(src)
+    const sourceNode = ts.createSourceFile('output.ts', normalizedSrc, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+    const locationMap = createLocationMap(normalizedSrc)
 
     validateSyntax(sourceNode, locationMap)
 

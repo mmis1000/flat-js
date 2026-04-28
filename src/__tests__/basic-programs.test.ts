@@ -1089,6 +1089,63 @@ while (true) {
 print(-2)
 `, [-1, 1, -2], printProvider)
 
+testRuntime('labeled block break', `
+outer: {
+    print(0)
+    break outer
+    print('fail')
+}
+print(1)
+`, [0, 1], printProvider)
+
+testRuntime('labeled loop continue', `
+outer:
+for (let i = 0; i < 5; i++) {
+    if (i < 3) {
+        continue outer
+    }
+    print(i)
+}
+`, [3, 4], printProvider)
+
+testRuntime('nested labeled loop continue', `
+outer:
+inner:
+for (let i = 0; i < 3; i++) {
+    if (i < 2) {
+        continue outer
+    }
+    print(i)
+}
+`, [2], printProvider)
+
+testRuntimeThrows('labeled continue target must be an iteration statement', `
+do {
+    label: {
+        continue label
+    }
+} while (false)
+`, SyntaxError)
+
+testRuntimeThrows('labeled lexical declaration is a syntax error', `
+label: const value = 1
+`, SyntaxError)
+
+testRuntimeThrows('strict labeled function declaration is a syntax error', `
+"use strict"
+label: function value() {}
+`, SyntaxError)
+
+testRuntimeThrows('strict yield label is a syntax error', `
+"use strict"
+yield: 1
+`, SyntaxError)
+
+testRuntimeThrows('strict escaped yield label is a syntax error', `
+"use strict"
+yi\\u0065ld: 1
+`, SyntaxError)
+
 testRuntime('do while', `
 let i = 0
 

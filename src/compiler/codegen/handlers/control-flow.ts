@@ -6,6 +6,115 @@ import { abort, headOf, op, generateEnterScope, generateLeaveScope } from '../he
 import type { CodegenContext } from '../context'
 import type { Op, Segment } from '../types'
 
+function unwrapLabeledIterationTarget(statement: ts.Statement): ts.IterationStatement | null {
+    let current: ts.Statement = statement
+
+    while (ts.isLabeledStatement(current)) {
+        current = current.statement
+    }
+
+    if (
+        ts.isForStatement(current)
+        || ts.isForInStatement(current)
+        || ts.isForOfStatement(current)
+        || ts.isWhileStatement(current)
+        || ts.isDoStatement(current)
+    ) {
+        return current
+    }
+
+    return null
+}
+
+function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
+    let current = statement
+
+    while (ts.isLabeledStatement(current)) {
+        current = current.statement
+    }
+
+    return current
+}
+
+function isAsyncModifier(modifier: ts.ModifierLike): boolean {
+    return modifier.kind === ts.SyntaxKind.AsyncKeyword
+}
+
+function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
+    for (const statement of statements) {
+        if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) {
+            return false
+        }
+
+        if (statement.expression.text === 'use strict') {
+            return true
+        }
+    }
+
+    return false
+}
+
+function isStrictContext(node: ts.Node, ctx: CodegenContext): boolean {
+    if (ctx.withStrict) {
+        return true
+    }
+
+    let current: ts.Node | undefined = node
+
+    while (current != null) {
+        if (ts.isClassLike(current)) {
+            return true
+        }
+
+        if (ts.isSourceFile(current)) {
+            return ts.isExternalModule(current) || hasUseStrictDirective(current.statements)
+        }
+
+        if (ts.isBlock(current)) {
+            const owner = ctx.parentMap.get(current)?.node
+            if (owner != null && ts.isFunctionLike(owner)) {
+                if (
+                    ts.isMethodDeclaration(owner)
+                    || ts.isGetAccessorDeclaration(owner)
+                    || ts.isSetAccessorDeclaration(owner)
+                    || ts.isConstructorDeclaration(owner)
+                ) {
+                    return true
+                }
+
+                return hasUseStrictDirective(current.statements)
+            }
+        }
+
+        current = ctx.parentMap.get(current)?.node
+    }
+
+    return false
+}
+
+function isInvalidLabeledStatementItem(statement: ts.Statement, withStrict: boolean): boolean {
+    const item = unwrapLabeledStatementItem(statement)
+
+    if (ts.isVariableStatement(item)) {
+        return !!(item.declarationList.flags & ts.NodeFlags.BlockScoped)
+    }
+
+    if (ts.isClassDeclaration(item)) {
+        return true
+    }
+
+    if (ts.isFunctionDeclaration(item)) {
+        const isAsync = item.modifiers?.some(isAsyncModifier) ?? false
+        if (item.asteriskToken || isAsync) {
+            return true
+        }
+
+        return withStrict
+    }
+
+    return false
+}
+
 export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isIfStatement(node)) {
         const exit = [op(OpCode.Nop, 0)]
@@ -198,7 +307,27 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         ]
     }
 
-    if (ts.isBreakStatement(node) && node.label == null) {
+    if (ts.isLabeledStatement(node)) {
+        const strictContext = isStrictContext(node, ctx)
+
+        if (strictContext && node.label.text === 'yield') {
+            throw new SyntaxError('yield is not a valid label in strict mode')
+        }
+
+        if (isInvalidLabeledStatementItem(node.statement, strictContext)) {
+            throw new SyntaxError('invalid labeled statement item')
+        }
+
+        const nextOp = op(OpCode.Nop, 0)
+        ctx.nextOps.set(node, nextOp)
+
+        return [
+            ...ctx.generate(node.statement, flag),
+            nextOp
+        ]
+    }
+
+    if (ts.isBreakStatement(node) && node.label != null) {
         let crossedTryCatch = 0
         let scopeCount = 0
         const target = findAncient(node, ctx.parentMap, (ancestor) => {
@@ -206,14 +335,14 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                 scopeCount++
             }
 
-            if (ctx.nextOps.has(ancestor)) {
-                // Switch statements always allocate a synthetic scope for [switch].
-                // Count it here so `break` exits that scope before jumping past the switch.
-                if (ts.isSwitchStatement(ancestor)) {
-                    scopeCount++
-                }
+            if (ts.isSwitchStatement(ancestor)) {
+                scopeCount++
+            }
+
+            if (ts.isLabeledStatement(ancestor) && ancestor.label.text === node.label!.text) {
                 return true
             }
+
             if (ctx.functions.has(ancestor as any)) {
                 throw new Error('bug check')
             }
@@ -226,8 +355,8 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
             return false
         })
 
-        if (target == null) {
-            throw new Error('cannot find break target')
+        if (target == null || !ts.isLabeledStatement(target)) {
+            throw new SyntaxError('cannot find break target')
         }
 
         const nextNode = ctx.nextOps.get(target)
@@ -260,6 +389,107 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         ]
     }
 
+    if (ts.isBreakStatement(node) && node.label == null) {
+        let crossedTryCatch = 0
+        let scopeCount = 0
+        const target = findAncient(node, ctx.parentMap, (ancestor) => {
+            if ((ctx.scopes.get(ancestor)?.size ?? 0) > 0) {
+                scopeCount++
+            }
+
+            if (ctx.nextOps.has(ancestor)) {
+                // Switch statements always allocate a synthetic scope for [switch].
+                // Count it here so `break` exits that scope before jumping past the switch.
+                if (ts.isSwitchStatement(ancestor)) {
+                    scopeCount++
+                }
+                return true
+            }
+            if (ctx.functions.has(ancestor as any)) {
+                throw new Error('bug check')
+            }
+
+            if (ts.isTryStatement(ancestor)) {
+                crossedTryCatch++
+                scopeCount = 0
+            }
+
+            return false
+        })
+
+        if (target == null) {
+            throw new SyntaxError('cannot find break target')
+        }
+
+        const nextNode = ctx.nextOps.get(target)
+        if (nextNode == null) {
+            throw new Error('did not get nextNode')
+        }
+
+        if (crossedTryCatch === 0) {
+            return [
+                ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
+                op(OpCode.NodeOffset, 2, [nextNode]),
+                op(OpCode.Jump)
+            ]
+        }
+
+        const exitStub: Op[] = [
+            op(OpCode.Nop, 0),
+            ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
+            op(OpCode.NodeOffset, 2, [nextNode]),
+            op(OpCode.Jump)
+        ]
+        const breakCommand: Op[] = [
+            op(OpCode.Literal, 2, [crossedTryCatch]),
+            op(OpCode.NodeOffset, 2, [exitStub[0]]),
+            op(OpCode.BreakInTryCatchFinally)
+        ]
+        return [
+            ...breakCommand,
+            ...exitStub
+        ]
+    }
+
+    if (ts.isContinueStatement(node) && node.label != null) {
+        let scopeCount = 0
+        const target = findAncient(node, ctx.parentMap, (ancestor) => {
+            if ((ctx.scopes.get(ancestor)?.size ?? 0) > 0) {
+                scopeCount++
+            }
+
+            if (ts.isLabeledStatement(ancestor) && ancestor.label.text === node.label!.text) {
+                return true
+            }
+
+            if (ts.isTryStatement(ancestor)) abort('Not support continue in try catch yet')
+
+            return false
+        })
+
+        if (target == null || !ts.isLabeledStatement(target)) {
+            throw new SyntaxError('cannot find continue target')
+        }
+
+        const loopTarget = unwrapLabeledIterationTarget(target.statement)
+        if (loopTarget == null) {
+            throw new SyntaxError('cannot find continue target')
+        }
+
+        const nextNode = ctx.continueOps.get(loopTarget)
+        if (nextNode == null) {
+            throw new Error('did not get nextNode')
+        }
+
+        const loopHasScope = (ctx.scopes.get(loopTarget)?.size ?? 0) !== 0
+
+        return [
+            ...new Array(loopHasScope ? scopeCount - 1 : scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
+            op(OpCode.NodeOffset, 2, [nextNode]),
+            op(OpCode.Jump)
+        ]
+    }
+
     if (ts.isContinueStatement(node) && node.label == null) {
         let scopeCount = 0
         const target = findAncient(node, ctx.parentMap, (ancestor) => {
@@ -277,7 +507,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         })
 
         if (target == null) {
-            throw new Error('cannot find continue target')
+            throw new SyntaxError('cannot find continue target')
         }
 
         const nextNode = ctx.continueOps.get(target)

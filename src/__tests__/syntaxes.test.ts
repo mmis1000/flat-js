@@ -43,6 +43,10 @@ const syntaxes = [
     ['PostfixUnaryExpression a++', 'a++'],
     ['PostfixUnaryExpression a--', 'a--'],
     ['DebuggerStatement', 'debugger'],
+    ['LabeledStatement block', 'label: { break label }'],
+    ['LabeledStatement loop continue', 'label: for (let i = 0; i < 1; i++) { continue label }'],
+    ['LabeledStatement let newline block', 'if (false) { label: let // ASI\n{} }'],
+    ['LabeledStatement let newline identifier', 'if (false) { label: let // ASI\nvalue = 1 }'],
     ['Nested Scope', `
     let a = 0;
     {
