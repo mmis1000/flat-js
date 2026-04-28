@@ -39,6 +39,7 @@ import {
     SCOPE_FLAGS,
     SCOPE_STATIC_SLOTS,
     SCOPE_STATIC_STORE,
+    SCOPE_WITH_OBJECT,
     Stack,
     TDZ_VALUE,
     TryFrame,
@@ -86,7 +87,8 @@ export const getExecution = (
         [Fields.invokeType]: invokeData[Fields.type],
         [Fields.return]: -1,
         [Fields.programSection]: currentProgram,
-        [Fields.globalThis]: globalThis
+        [Fields.globalThis]: globalThis,
+        [Fields.strict]: false
     }
 
     environments.add(initialFrame)
@@ -126,6 +128,36 @@ export const getExecution = (
     }
 
     const getScopeInternal = (scope: Scope) => scope as ScopeWithInternals
+    const isWithScope = (scope: Scope) => getScopeInternal(scope)[SCOPE_WITH_OBJECT] !== undefined
+    const getWithScopeObject = (scope: Scope) => getScopeInternal(scope)[SCOPE_WITH_OBJECT]!
+    const isObjectLike = (value: unknown): value is object => (typeof value === 'object' && value !== null) || typeof value === 'function'
+    const isEnvironmentScopeObject = (value: unknown): value is Scope => {
+        if (!isObjectLike(value) || environments.has(value)) {
+            return false
+        }
+
+        const internal = getScopeInternal(value as Scope)
+        return internal[SCOPE_WITH_OBJECT] !== undefined
+            || internal[SCOPE_FLAGS] !== undefined
+            || internal[SCOPE_STATIC_SLOTS] !== undefined
+            || internal[SCOPE_STATIC_STORE] !== undefined
+    }
+    const isSpecialVariableName = (name: string) =>
+        name === SpecialVariable.This
+        || name === SpecialVariable.NewTarget
+        || name === SpecialVariable.Super
+        || name === SpecialVariable.SwitchValue
+        || name === SpecialVariable.LoopIterator
+        || name === SpecialVariable.IteratorEntry
+    const createWithScope = (value: unknown): Scope => {
+        if (value == null) {
+            throw new TypeError('Cannot convert undefined or null to object')
+        }
+
+        const scope = getEmptyObject() as ScopeWithInternals
+        scope[SCOPE_WITH_OBJECT] = Object(value)
+        return scope
+    }
 
     const getVariableFlagMap = (scope: Scope) => {
         const internal = getScopeInternal(scope)
@@ -158,7 +190,7 @@ export const getExecution = (
     }
 
     const getVariableFlag = (scope: Scope, name: string) =>
-        getScopeInternal(scope)[SCOPE_FLAGS]?.[name]
+        isWithScope(scope) ? undefined : getScopeInternal(scope)[SCOPE_FLAGS]?.[name]
 
     const setVariableFlag = (scope: Scope, name: string, flags: number) => {
         getVariableFlagMap(scope)[name] = flags
@@ -168,10 +200,33 @@ export const getExecution = (
         }
     }
 
-    const hasBinding = (scope: Scope, name: string) =>
-        getScopeInternal(scope)[SCOPE_FLAGS]?.[name] !== undefined || name in scope
+    const hasBinding = (scope: Scope, name: string) => {
+        if (isWithScope(scope)) {
+            if (isSpecialVariableName(name)) {
+                return false
+            }
+
+            const object = getWithScopeObject(scope) as Record<string, any>
+            if (!Reflect.has(object, name)) {
+                return false
+            }
+
+            const unscopables = (object as any)[Symbol.unscopables]
+            if (isObjectLike(unscopables) && Boolean((unscopables as any)[name])) {
+                return false
+            }
+
+            return true
+        }
+
+        return getScopeInternal(scope)[SCOPE_FLAGS]?.[name] !== undefined || name in scope
+    }
 
     const readBindingValue = (scope: Scope, name: string) => {
+        if (isWithScope(scope)) {
+            return (getWithScopeObject(scope) as Record<string, any>)[name]
+        }
+
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (slotIndex !== undefined) {
             return getStaticVariableStore(scope).values[slotIndex]
@@ -180,6 +235,11 @@ export const getExecution = (
     }
 
     const writeBindingValue = (scope: Scope, name: string, value: any) => {
+        if (isWithScope(scope)) {
+            ;(getWithScopeObject(scope) as Record<string, any>)[name] = value
+            return value
+        }
+
         scope[name] = value
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (slotIndex !== undefined) {
@@ -194,6 +254,16 @@ export const getExecution = (
     }
 
     const getBindingValueChecked = (scope: Scope, name: string) => {
+        if (isWithScope(scope)) {
+            const object = getWithScopeObject(scope)
+            if (!Reflect.has(object, name)) {
+                if (currentFrame[Fields.strict]) {
+                    throw new ReferenceError(name + is_not_defined)
+                }
+                return undefined
+            }
+        }
+
         const value = readBindingValue(scope, name)
         if (value === TDZ_VALUE) {
             throw new ReferenceError(`Cannot access '${name}' before initialization`)
@@ -202,6 +272,14 @@ export const getExecution = (
     }
 
     const setBindingValueChecked = (scope: Scope, name: string, value: any) => {
+        if (isWithScope(scope)) {
+            const object = getWithScopeObject(scope)
+            if (!Reflect.has(object, name) && currentFrame[Fields.strict]) {
+                throw new ReferenceError(name + is_not_defined)
+            }
+            return writeBindingValue(scope, name, value)
+        }
+
         if (readBindingValue(scope, name) === TDZ_VALUE) {
             throw new ReferenceError(`Cannot access '${name}' before initialization`)
         }
@@ -216,13 +294,26 @@ export const getExecution = (
     }
 
     const clearBindingTDZ = (scope: Scope, name: string) => {
+        if (isWithScope(scope)) {
+            return
+        }
         if (readBindingValue(scope, name) === TDZ_VALUE) {
             writeBindingValue(scope, name, undefined)
         }
     }
 
     const freezeBinding = (scope: Scope, name: string) => {
+        if (isWithScope(scope)) {
+            return
+        }
         setVariableFlag(scope, name, (getVariableFlag(scope, name) ?? VariableFlags.None) | VariableFlags.Immutable)
+    }
+
+    const deleteBinding = (scope: Scope, name: string) => {
+        if (isWithScope(scope)) {
+            return delete (getWithScopeObject(scope) as Record<string, any>)[name]
+        }
+        return false
     }
 
     const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean, trackStaticSlot: boolean) => {
@@ -583,6 +674,9 @@ export const getExecution = (
 
     const getValue = (ctx: any, name: string) => {
         if (!environments.has(ctx)) {
+            if (isEnvironmentScopeObject(ctx)) {
+                return getBindingValueChecked(ctx, name)
+            }
             return ctx[name]
         } else {
             const env: Frame = ctx
@@ -605,6 +699,9 @@ export const getExecution = (
 
     const setValue = (ctx: any, name: string, value: any) => {
         if (!environments.has(ctx)) {
+            if (isEnvironmentScopeObject(ctx)) {
+                return setBindingValueChecked(ctx, name, value)
+            }
             try {
                 return writeBindingValue(ctx as Scope, name, value)
             } catch (e) {
@@ -617,7 +714,9 @@ export const getExecution = (
             if (scope) {
                 return setBindingValueChecked(scope, name, value)
             } else {
-                throw new ReferenceError(name + is_not_defined)
+                const currentGlobal = env[Fields.globalThis] as Record<string, any>
+                currentGlobal[name] = value
+                return value
             }
         }
     }
@@ -646,10 +745,15 @@ export const getExecution = (
 
     const EVAL_FUNCTION = eval
 
-    const emulateEval = (str: string, includesLocalScope: boolean) => {
-        str = String(str)
+    const emulateEval = (value: unknown, includesLocalScope: boolean) => {
+        if (typeof value !== 'string') {
+            return value
+        }
 
-        const [programData] = compileFunction(str, { evalMode: true })
+        const [programData] = compileFunction(value, {
+            evalMode: true,
+            withStrict: !!currentFrame[Fields.strict],
+        })
 
         const result = run(
             programData,
@@ -1057,6 +1161,8 @@ export const getExecution = (
     opcodeContextSlots[OpcodeContextField.freezeBinding] = freezeBinding
     opcodeContextSlots[OpcodeContextField.defineVariable] = defineVariable
     opcodeContextSlots[OpcodeContextField.initializeBindingValue] = initializeBindingValue
+    opcodeContextSlots[OpcodeContextField.createWithScope] = createWithScope
+    opcodeContextSlots[OpcodeContextField.deleteBinding] = deleteBinding
     opcodeContextSlots[OpcodeContextField.writeScopeDebugProperty] = writeScopeDebugProperty
     opcodeContextSlots[OpcodeContextField.getStaticVariableScope] = getStaticVariableScope
     opcodeContextSlots[OpcodeContextField.getStaticVariableStoreAt] = getStaticVariableStoreAt
@@ -1142,6 +1248,7 @@ export const getExecution = (
                 case OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked:
                 case OpCode.DefineKeepCtx:
                 case OpCode.Get:
+                case OpCode.ResolveScope:
                 case OpCode.SetMultiple:
                 case OpCode.Jump:
                 case OpCode.JumpIfNot:
@@ -1149,6 +1256,7 @@ export const getExecution = (
                 case OpCode.JumpIfAndKeep:
                 case OpCode.JumpIfNotAndKeep:
                 case OpCode.EnterScope:
+                case OpCode.EnterWith:
                 case OpCode.LeaveScope:
                 case OpCode.DeTDZ:
                 case OpCode.DeTDZStatic:

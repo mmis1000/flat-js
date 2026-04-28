@@ -150,8 +150,8 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         ]
 
         return [
-            continueOp,
             ...body,
+            continueOp,
             ...tail,
             nextOp
         ]

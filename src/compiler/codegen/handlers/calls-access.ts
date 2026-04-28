@@ -351,7 +351,11 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
 
     if (ts.isDeleteExpression(node)) {
         const unwrapped = ctx.extractQuote(node.expression)
-        if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
+        if (
+            ts.isPropertyAccessExpression(unwrapped)
+            || ts.isElementAccessExpression(unwrapped)
+            || ts.isIdentifier(unwrapped)
+        ) {
             return [
                 ...ctx.generateLeft(node.expression, flag),
                 op(OpCode.Delete)

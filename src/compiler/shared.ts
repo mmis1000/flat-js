@@ -156,6 +156,13 @@ export const enum OpCode {
      */
     EnterScope,
     /**
+     * Creates a `with` object-environment scope from the provided value.
+     * Stack (bottom to top): value
+     * Result: no stack result.
+     * Notes: Applies `ToObject`, throws on `null` / `undefined`, and enables `@@unscopables` name filtering.
+     */
+    EnterWith,
+    /**
      * Removes the current block scope.
      * Stack (bottom to top): <empty>
      * Result: no stack result.
@@ -255,6 +262,13 @@ export const enum OpCode {
      * Result: value
      */
     Get,
+    /**
+     * Resolves an environment reference to the concrete binding scope or global object.
+     * Stack (bottom to top): target, name
+     * Result: resolvedTarget, name
+     * Notes: Used for identifier writes/updates so later RHS side effects cannot change which binding object is targeted.
+     */
+    ResolveScope,
     /**
      * Clears the TDZ flag for a binding without consuming the lookup operands.
      * Stack (bottom to top): env, name

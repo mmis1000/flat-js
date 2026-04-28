@@ -1146,6 +1146,148 @@ testRuntimeThrows('strict escaped yield label is a syntax error', `
 yi\\u0065ld: 1
 `, SyntaxError)
 
+testRuntime('with statement object bindings and implicit globals', `
+var box = { x: 1, shadow: 10 }
+var shadow = 20
+with (box) {
+    print(x)
+    print(shadow)
+    x = 2
+    shadow = 11
+    created = 3
+    var hoisted = 4
+}
+print(box.x)
+print(box.shadow)
+print(shadow)
+print(created)
+print(hoisted)
+`, [1, 10, 2, 11, 20, 3, 4], printProvider)
+
+testRuntime('with statement respects Symbol.unscopables', `
+var calls = 0
+var outer, inner
+with (outer = { x: 7 }) {
+    with (inner = {
+        x: 4,
+        get [Symbol.unscopables] () {
+            calls++
+            return { x: false }
+        }
+    }) {
+        x++
+    }
+}
+print(calls)
+print(outer.x)
+print(inner.x)
+`, [1, 7, 5], printProvider)
+
+testRuntime('with statement ignores non-object Symbol.unscopables', `
+var marker = {}
+var env = { toString: marker }
+env[Symbol.unscopables] = ''
+with (env) {
+    print(toString === marker)
+}
+`, [true], printProvider)
+
+testRuntime('delete identifier uses reference semantics in with and outside it', `
+var globalValue = 1
+var box = { scopedValue: 2 }
+print(delete globalValue)
+with (box) {
+    print(delete scopedValue)
+}
+print('scopedValue' in box)
+`, [false, true, false], printProvider)
+
+testRuntime('with statement break restores outer lookup', `
+this.p1 = 1
+var box = { p1: 'a' }
+do {
+    with (box) {
+        p1 = 'x1'
+        break
+    }
+} while (false)
+print(p1)
+print(box.p1)
+`, [1, 'x1'], printProvider)
+
+testRuntime('with statement strict binding reads re-check object presence', `
+var env = {
+    binding: 0,
+    get [Symbol.unscopables] () {
+        delete env.binding
+        return null
+    }
+}
+with (env) {
+    try {
+        (function () {
+            "use strict"
+            return binding
+        })()
+    } catch (error) {
+        print(error instanceof ReferenceError)
+    }
+}
+`, [true], printProvider)
+
+testRuntime('with statement strict binding writes re-check object presence', `
+var env = {
+    binding: 0,
+    get [Symbol.unscopables] () {
+        delete env.binding
+        return null
+    }
+}
+with (env) {
+    try {
+        (function () {
+            "use strict"
+            binding = 123
+        })()
+    } catch (error) {
+        print(error instanceof ReferenceError)
+    }
+}
+`, [true], printProvider)
+
+testRuntimeThrows('strict with statement is a syntax error', `
+"use strict"
+with ({ value: 1 }) {
+    value
+}
+`, SyntaxError)
+
+testRuntimeThrows('with statement lexical declaration body is a syntax error', `
+with ({}) let value
+`, SyntaxError)
+
+testRuntimeThrows('with statement function declaration body is a syntax error', `
+with ({}) function value () {}
+`, SyntaxError)
+
+testRuntimeThrows('with statement labeled function body is a syntax error', `
+with ({}) label: function value () {}
+`, SyntaxError)
+
+test('Runtime: with statement direct eval preserves local scope in alternate realm', () => {
+    const context: Record<string, any> = { console, compileAndRun: require('../index').compileAndRun }
+    vm.createContext(context)
+    vm.runInContext(`
+        const vmGlobal = Object.create(globalThis)
+        vmGlobal.globalThis = vmGlobal
+        vmGlobal.print = function print(value) {
+            globalThis.__result = value
+        }
+        compileAndRun("this.p1 = 1; var myObj = { p1: 'a' }; eval(\\"with(myObj){p1='b'}\\"); print(myObj.p1)", vmGlobal)
+    `, context)
+    expect(context.__result).toBe('b')
+})
+
 testRuntime('do while', `
 let i = 0
 
@@ -1166,7 +1308,7 @@ do {
     if (i < 5) continue
 } while (false)
 print(-2)
-`, [-1, 0, 1, 2, 3, 4, -2], printProvider)
+`, [-1, 0, -2], printProvider)
 
 testRuntime('do while break', `
 let i = 0

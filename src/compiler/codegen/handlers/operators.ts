@@ -54,6 +54,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
+                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PrefixPlusPlus)
                 ]
             case ts.SyntaxKind.MinusMinusToken:
@@ -68,6 +69,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
+                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PrefixMinusMinus)
                 ]
         }
@@ -191,6 +193,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 ) {
                     return [
                         ...ctx.generateLeft(node.left, flag),
+                        ...(ts.isIdentifier(left) ? [op(OpCode.ResolveScope)] : []),
                         ...ctx.generate(node.right, flag),
                         op(
                                 kind === ts.SyntaxKind.EqualsToken ? OpCode.Set :
@@ -308,6 +311,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
+                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PostFixPlusPLus)
                 ]
             case ts.SyntaxKind.MinusMinusToken:
@@ -322,6 +326,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
+                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PostFixMinusMinus)
                 ]
         }

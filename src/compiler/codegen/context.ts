@@ -125,6 +125,11 @@ export function createCodegenContext(
         let current: ts.Node | undefined = node
         let depth = 0
         while (current) {
+            const parent: ts.Node | undefined = parentMap.get(current)?.node
+            if (parent != null && ts.isWithStatement(parent) && parent.statement === current) {
+                return null
+            }
+
             if (isRuntimeScopeNode(current)) {
                 const scope = scopes.get(current)
                 if (scope?.has(name)) {
@@ -141,7 +146,7 @@ export function createCodegenContext(
                 depth++
             }
             depth += getHiddenRuntimeScopeDepth(current)
-            current = parentMap.get(current)?.node
+            current = parent
         }
 
         return null

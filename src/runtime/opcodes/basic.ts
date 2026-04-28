@@ -11,6 +11,7 @@ import {
     VariableRecord,
     getEmptyObject,
     getLiteralFromPool,
+    environments,
     isSmallNumber,
     is_a_constant,
     is_not_defined,
@@ -122,7 +123,6 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
-            const leftValue = ctx[OpcodeContextField.getValue](target, name)
             const exprs: Record<typeof command, (a: any, b: any) => any> = {
                 [OpCode.BPlusEqual]: (a, b) => a + b,
                 [OpCode.BMinusEqual]: (a, b) => a - b,
@@ -130,6 +130,33 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 [OpCode.BAsteriskEqual]: (a, b) => a * b,
                 [OpCode.BGreaterThanGreaterThanGreaterThanEqual]: (a, b) => a >>> b,
             }
+
+            if (environments.has(target)) {
+                const env = target as Frame
+                const scope = ctx[OpcodeContextField.findScope](env, name)
+                let leftValue
+
+                if (scope) {
+                    leftValue = ctx[OpcodeContextField.getBindingValueChecked](scope, name)
+                } else {
+                    const globalThis = env[Fields.globalThis] as Record<string, any>
+                    if (!(name in globalThis)) {
+                        throw new ReferenceError(name + is_not_defined)
+                    }
+                    leftValue = globalThis[name]
+                }
+
+                const result = exprs[command](leftValue, rightVal)
+                if (scope) {
+                    ctx[OpcodeContextField.setBindingValueChecked](scope, name, result)
+                } else {
+                    env[Fields.globalThis][name] = result
+                }
+                ctx[OpcodeContextField.pushCurrentFrameStack](result)
+                break
+            }
+
+            const leftValue = ctx[OpcodeContextField.getValue](target, name)
             const result = exprs[command](leftValue, rightVal)
             ctx[OpcodeContextField.setValue](target, name, result)
             ctx[OpcodeContextField.pushCurrentFrameStack](result)
@@ -197,6 +224,22 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.getValue](target, name))
+        }
+            break
+        case OpCode.ResolveScope: {
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
+
+            if (environments.has(target)) {
+                const env = target as Frame
+                const scope = ctx[OpcodeContextField.findScope](env, name)
+                ctx[OpcodeContextField.pushCurrentFrameStack](scope ?? env[Fields.globalThis])
+                ctx[OpcodeContextField.pushCurrentFrameStack](name)
+                break
+            }
+
+            ctx[OpcodeContextField.pushCurrentFrameStack](target)
+            ctx[OpcodeContextField.pushCurrentFrameStack](name)
         }
             break
         case OpCode.SetMultiple: {
@@ -288,6 +331,13 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             for (const variable of variables) {
                 ctx[OpcodeContextField.defineVariable](scope, variable[Fields.name], variable[Fields.type])
             }
+        }
+            break
+        case OpCode.EnterWith: {
+            const value = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const scope = ctx[OpcodeContextField.createWithScope](value)
+            ctx[OpcodeContextField.currentFrame][Fields.scopes].push(scope)
+            ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], scope)
         }
             break
         case OpCode.LeaveScope:

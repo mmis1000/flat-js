@@ -212,14 +212,10 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                 ctx[OpcodeContextField.setBindingValueChecked](scope, name, newVal)
                 ctx[OpcodeContextField.pushCurrentFrameStack](old)
             } else {
-                try {
-                    const old = target[name]
-                    const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
-                    target[name] = newVal
-                    ctx[OpcodeContextField.pushCurrentFrameStack](old)
-                } catch (error) {
-                    ctx[OpcodeContextField.rethrowNativeErrorInRealm](error, ctx[OpcodeContextField.currentFrame][Fields.globalThis])
-                }
+                const old = ctx[OpcodeContextField.getValue](target, name)
+                const newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
+                ctx[OpcodeContextField.setValue](target, name, newVal)
+                ctx[OpcodeContextField.pushCurrentFrameStack](old)
             }
         }
             break
@@ -270,6 +266,32 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
         case OpCode.PrefixMinusMinus: {
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]()
+
+            if (environments.has(target)) {
+                const env = target as Frame
+                const scope = ctx[OpcodeContextField.findScope](env, name)
+                let currentValue
+
+                if (scope) {
+                    currentValue = ctx[OpcodeContextField.getBindingValueChecked](scope, name)
+                } else {
+                    const globalThis = env[Fields.globalThis] as Record<string, any>
+                    if (!(name in globalThis)) {
+                        throw new ReferenceError(name + is_not_defined)
+                    }
+                    currentValue = globalThis[name]
+                }
+
+                const newVal = command === OpCode.PrefixPlusPlus ? currentValue + 1 : currentValue - 1
+                if (scope) {
+                    ctx[OpcodeContextField.setBindingValueChecked](scope, name, newVal)
+                } else {
+                    env[Fields.globalThis][name] = newVal
+                }
+                ctx[OpcodeContextField.pushCurrentFrameStack](newVal)
+                break
+            }
+
             const currentValue = ctx[OpcodeContextField.getValue](target, name)
             const newVal = command === OpCode.PrefixPlusPlus ? currentValue + 1 : currentValue - 1
             ctx[OpcodeContextField.setValue](target, name, newVal)
@@ -309,7 +331,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                 const env = target as Frame
                 const scope = ctx[OpcodeContextField.findScope](env, name)
                 if (scope) {
-                    ctx[OpcodeContextField.pushCurrentFrameStack](delete scope[name])
+                    ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.deleteBinding](scope, name))
                 } else {
                     ctx[OpcodeContextField.pushCurrentFrameStack](true)
                 }

@@ -42,6 +42,8 @@ export const enum OpcodeContextField {
     freezeBinding,
     defineVariable,
     initializeBindingValue,
+    createWithScope,
+    deleteBinding,
     writeScopeDebugProperty,
     getStaticVariableScope,
     getStaticVariableStoreAt,
@@ -98,6 +100,8 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.freezeBinding](scope: Scope, name: string): void
     [OpcodeContextField.defineVariable](scope: Scope, name: string, type: VariableType, trackStaticSlot?: boolean): void
     [OpcodeContextField.initializeBindingValue](scope: Scope, name: string, value: any): any
+    [OpcodeContextField.createWithScope](value: unknown): Scope
+    [OpcodeContextField.deleteBinding](scope: Scope, name: string): boolean
     [OpcodeContextField.writeScopeDebugProperty](scope: Scope, name: string, value: any): any
 
     [OpcodeContextField.getStaticVariableScope](frame: Frame, depth: number): Scope
@@ -121,7 +125,7 @@ export interface RuntimeOpcodeContext {
         throw(error?: unknown): IteratorResult<unknown>
     }
     [OpcodeContextField.bindInternal](fn: any, self: any, args: any[]): any
-    [OpcodeContextField.emulateEval](str: string, includesLocalScope: boolean): any
+    [OpcodeContextField.emulateEval](value: unknown, includesLocalScope: boolean): any
     [OpcodeContextField.emulateFunctionConstructor](parameterValues: any[]): any
 
     [OpcodeContextField.findScope](ctx: Frame, name: string): Scope | null

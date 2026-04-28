@@ -9,6 +9,66 @@ import type { Op, Segment, SegmentOptions } from './types'
 export type { Op, Segment, SegmentOptions, StaticAccess } from './types'
 export type { CodegenContext } from './context'
 
+function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
+    for (const statement of statements) {
+        if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) {
+            return false
+        }
+
+        if (statement.expression.text === 'use strict') {
+            return true
+        }
+    }
+
+    return false
+}
+
+function isStrictRoot(node: VariableRoot, parentMap: ParentMap, withStrict: boolean): boolean {
+    if (withStrict) {
+        return true
+    }
+
+    let current: ts.Node | undefined = node
+
+    while (current != null) {
+        if (ts.isClassLike(current)) {
+            return true
+        }
+
+        if (ts.isFunctionLike(current) && 'body' in current && current.body != null && ts.isBlock(current.body)) {
+            if (
+                ts.isMethodDeclaration(current)
+                || ts.isGetAccessorDeclaration(current)
+                || ts.isSetAccessorDeclaration(current)
+                || ts.isConstructorDeclaration(current)
+            ) {
+                return true
+            }
+
+            if (hasUseStrictDirective(current.body.statements)) {
+                return true
+            }
+        }
+
+        if (ts.isSourceFile(current)) {
+            return ts.isExternalModule(current) || hasUseStrictDirective(current.statements)
+        }
+
+        if (ts.isBlock(current)) {
+            const owner = parentMap.get(current)?.node
+            if (owner != null && ts.isFunctionLike(owner)) {
+                if (hasUseStrictDirective(current.statements)) {
+                    return true
+                }
+            }
+        }
+
+        current = parentMap.get(current)?.node
+    }
+
+    return false
+}
+
 export function generateSegment(
     node: VariableRoot,
     scopes: Scopes,
@@ -27,6 +87,7 @@ export function generateSegment(
 
     const functionNode = ts.isSourceFile(node) ? null : node
     const restParameterIndex = functionNode?.parameters.findIndex((parameter) => parameter.dotDotDotToken != null) ?? -1
+    const strictRoot = isStrictRoot(node, parentMap, withStrict)
 
     if (functionNode && restParameterIndex >= 0) {
         const restParameter = functionNode.parameters[restParameterIndex]!
@@ -87,6 +148,7 @@ export function generateSegment(
     } else {
         entry.push(op(OpCode.NodeFunctionType, 2, [node]))
     }
+    entry.push(op(OpCode.Literal, 2, [strictRoot ? 1 : 0]))
     const enterFunction = op(OpCode.EnterFunction)
     enterFunction.scopeDebugNames = getScopeDebugNames(node, scopes)
     entry.push(enterFunction)

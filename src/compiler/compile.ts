@@ -12,6 +12,8 @@ export type CompileOptions = {
     range?: boolean
     /** generate with eval result op inserted */
     evalMode?: boolean
+    /** force strict-mode source semantics for direct eval / synthetic entry points */
+    withStrict?: boolean
 }
 
 export type DebugInfo = {
@@ -44,6 +46,14 @@ function normalizeAmbiguousLabeledLetAsi(src: string) {
     // Replacing the spacer before the line comment with `;` preserves source length while
     // steering the parser to the correct JavaScript statement split.
     return src.replace(/(:\s*let)([ \t]+)(?=\/\/[^\r\n]*(?:\r\n?|\n))/g, (_, prefix: string, whitespace: string) => {
+        return `${prefix};${whitespace.slice(1)}`
+    })
+}
+
+function normalizeAmbiguousWithLetAsi(src: string) {
+    // TypeScript also parses `with (...) let // ASI\n...` as a lexical declaration even
+    // though JavaScript treats it as `with (...) let;` followed by the next statement.
+    return src.replace(/(with\s*\([^)]*\)\s*let)([ \t]+)(?=\/\/[^\r\n]*(?:\r\n?|\n))/g, (_, prefix: string, whitespace: string) => {
         return `${prefix};${whitespace.slice(1)}`
     })
 }
@@ -87,13 +97,13 @@ function toSourceRange(locationMap: Map<number, [number, number]>, start: number
     return [startPos[0], startPos[1], endPos[0], endPos[1]]
 }
 
-export function compile(src: string, { debug = false, range = false, evalMode = false }: CompileOptions = {}): [number[], DebugInfo] {
+export function compile(src: string, { debug = false, range = false, evalMode = false, withStrict = false }: CompileOptions = {}): [number[], DebugInfo] {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
     const scopeChild: ScopeChild = new Map()
 
-    const normalizedSrc = normalizeAmbiguousLabeledLetAsi(src)
+    const normalizedSrc = normalizeAmbiguousWithLetAsi(normalizeAmbiguousLabeledLetAsi(src))
     const sourceNode = ts.createSourceFile('output.ts', normalizedSrc, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
     const locationMap = createLocationMap(normalizedSrc)
 
@@ -111,7 +121,8 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     for (const item of functions) {
         const generated = generateSegment(item, scopes, parentMap, functions, evalTaintedFunctions, {
             withPos: range,
-            withEval: (item.kind === ts.SyntaxKind.SourceFile) && evalMode
+            withEval: (item.kind === ts.SyntaxKind.SourceFile) && evalMode,
+            withStrict
         })
         program.push(generated)
         functionToSegment.set(item, generated)

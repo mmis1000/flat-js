@@ -100,6 +100,7 @@ export const enum Fields {
     depth,
 
     globalThis,
+    strict,
     done,
     yield,
     await,
@@ -115,6 +116,7 @@ interface BaseFrame {
     [Fields.programSection]: number[]
     [Fields.scopes]: Scope[],
     [Fields.globalThis]: any
+    [Fields.strict]?: boolean
     [Fields.valueStack]: any[]
     [Fields.generator]?: any
 }
@@ -178,12 +180,14 @@ const SCOPE_FLAGS = Symbol()
 const SCOPE_STATIC_SLOTS = Symbol()
 const SCOPE_STATIC_STORE = Symbol()
 const SCOPE_DEBUG_PTR = Symbol()
+const SCOPE_WITH_OBJECT = Symbol()
 
 type ScopeWithInternals = Scope & {
     [SCOPE_FLAGS]?: Record<string, number>
     [SCOPE_STATIC_SLOTS]?: Record<string, number>
     [SCOPE_STATIC_STORE]?: StaticVariableStore
     [SCOPE_DEBUG_PTR]?: number
+    [SCOPE_WITH_OBJECT]?: object
 }
 
 const is_not_defined = ' is not defined'
@@ -371,6 +375,7 @@ export {
     SCOPE_FLAGS,
     SCOPE_STATIC_SLOTS,
     SCOPE_STATIC_STORE,
+    SCOPE_WITH_OBJECT,
     TDZ_VALUE,
     TEXT_DADA_MASK,
 }

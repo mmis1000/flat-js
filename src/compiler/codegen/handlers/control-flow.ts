@@ -40,6 +40,10 @@ function isAsyncModifier(modifier: ts.ModifierLike): boolean {
     return modifier.kind === ts.SyntaxKind.AsyncKeyword
 }
 
+function hasSyntheticRuntimeScope(node: ts.Node): boolean {
+    return ts.isSwitchStatement(node) || ts.isWithStatement(node)
+}
+
 function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
     for (const statement of statements) {
         if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) {
@@ -82,7 +86,9 @@ function isStrictContext(node: ts.Node, ctx: CodegenContext): boolean {
                     return true
                 }
 
-                return hasUseStrictDirective(current.statements)
+                if (hasUseStrictDirective(current.statements)) {
+                    return true
+                }
             }
         }
 
@@ -113,6 +119,16 @@ function isInvalidLabeledStatementItem(statement: ts.Statement, withStrict: bool
     }
 
     return false
+}
+
+function isInvalidWithStatementItem(statement: ts.Statement): boolean {
+    const item = unwrapLabeledStatementItem(statement)
+
+    if (ts.isVariableStatement(item)) {
+        return !!(item.declarationList.flags & ts.NodeFlags.BlockScoped)
+    }
+
+    return ts.isClassDeclaration(item) || ts.isFunctionDeclaration(item)
 }
 
 export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
@@ -307,6 +323,26 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         ]
     }
 
+    if (ts.isWithStatement(node)) {
+        if (isStrictContext(node, ctx)) {
+            throw new SyntaxError('with statements are not allowed in strict mode')
+        }
+
+        if (isInvalidWithStatementItem(node.statement)) {
+            throw new SyntaxError('invalid with statement item')
+        }
+
+        return [
+            ...(flag & StatementFlag.Eval
+                ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
+                : []),
+            ...ctx.generate(node.expression, flag),
+            op(OpCode.EnterWith),
+            ...ctx.generate(node.statement, flag),
+            ...generateLeaveScope(),
+        ]
+    }
+
     if (ts.isLabeledStatement(node)) {
         const strictContext = isStrictContext(node, ctx)
 
@@ -335,7 +371,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                 scopeCount++
             }
 
-            if (ts.isSwitchStatement(ancestor)) {
+            if (hasSyntheticRuntimeScope(ancestor)) {
                 scopeCount++
             }
 
@@ -397,12 +433,11 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                 scopeCount++
             }
 
+            if (hasSyntheticRuntimeScope(ancestor)) {
+                scopeCount++
+            }
+
             if (ctx.nextOps.has(ancestor)) {
-                // Switch statements always allocate a synthetic scope for [switch].
-                // Count it here so `break` exits that scope before jumping past the switch.
-                if (ts.isSwitchStatement(ancestor)) {
-                    scopeCount++
-                }
                 return true
             }
             if (ctx.functions.has(ancestor as any)) {
@@ -458,6 +493,10 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                 scopeCount++
             }
 
+            if (hasSyntheticRuntimeScope(ancestor)) {
+                scopeCount++
+            }
+
             if (ts.isLabeledStatement(ancestor) && ancestor.label.text === node.label!.text) {
                 return true
             }
@@ -494,6 +533,10 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         let scopeCount = 0
         const target = findAncient(node, ctx.parentMap, (ancestor) => {
             if ((ctx.scopes.get(ancestor)?.size ?? 0) > 0) {
+                scopeCount++
+            }
+
+            if (hasSyntheticRuntimeScope(ancestor)) {
                 scopeCount++
             }
 

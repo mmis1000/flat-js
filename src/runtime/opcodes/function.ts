@@ -68,6 +68,7 @@ const bindFunctionSelfName = (
 export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): OpcodeHandlerResult => {
     switch (command) {
         case OpCode.EnterFunction: {
+            const strict = !!ctx[OpcodeContextField.popCurrentFrameStack]()
             const functionType: FunctionTypes = ctx[OpcodeContextField.popCurrentFrameStack]()
             const variableCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const variables: VariableRecord[] = []
@@ -91,6 +92,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
             const invokeType = ctx[OpcodeContextField.popCurrentFrameStack]<InvokeType>()
             const hasRestParameter = restParameterIndex >= 0
+            ctx[OpcodeContextField.currentFrame][Fields.strict] = strict
 
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                 const obj = ctx[OpcodeContextField.createArgumentObject]()
@@ -312,6 +314,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
             const fnTarget = ctx[OpcodeContextField.functionRedirects].has(fn) ? ctx[OpcodeContextField.functionRedirects].get(fn) : fn
             const vmGlobal = ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+            const realmEval = Reflect.get(vmGlobal, 'eval')
             const descriptor = functionDescriptors.get(fnTarget)
 
             if (
@@ -337,11 +340,11 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     throw new TypeError(`(intermediate value) is not a function`)
                 }
 
-                if (fnTarget === EVAL_FUNCTION) {
+                if (fnTarget === EVAL_FUNCTION || fnTarget === realmEval) {
                     if (command === OpCode.CallAsEval) {
-                        ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.emulateEval](String(parameters[0]), true))
+                        ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.emulateEval](parameters[0], true))
                     } else {
-                        ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.emulateEval](String(parameters[0]), false))
+                        ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.emulateEval](parameters[0], false))
                     }
                 } else if (self === Reflect.get(vmGlobal, 'Reflect') && name === 'construct') {
                     const target = parameters[0]

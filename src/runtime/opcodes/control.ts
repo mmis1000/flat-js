@@ -109,6 +109,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                 [Fields.exit]: exitAddr,
                 [Fields.programSection]: ctx[OpcodeContextField.currentProgram],
                 [Fields.globalThis]: ctx[OpcodeContextField.currentFrame][Fields.globalThis],
+                [Fields.strict]: ctx[OpcodeContextField.currentFrame][Fields.strict],
                 [Fields.generator]: ctx[OpcodeContextField.currentFrame][Fields.generator],
             }
 

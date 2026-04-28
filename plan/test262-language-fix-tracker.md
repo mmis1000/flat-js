@@ -32,11 +32,29 @@ Reduce the `language` category failures in targeted batches:
       - `value-await-module.js`
       - `value-await-module-escaped.js`
     - those remaining failures are out of scope for this batch because module parse semantics are not currently in the intended-support set
+- [x] `with-statement`
+  - Why this batch: direct intended-support compiler/runtime gap with a clear root signature and a bounded focused slice.
+  - Primary signature:
+    - `Expected no error, got Error: Unknown node WithStatement`
+  - Expected areas:
+    - `language/statements/with/**`
+    - adjacent direct-eval / object-environment semantics exercised through `with`
+  - Exit criteria:
+    - `with` statements compile in sloppy script code
+    - strict-mode `with` early errors fire
+    - `with` scope lookup / assignment / delete behavior matches object-environment semantics
+    - focused `language/statements/with/**` rerun is green or reduced to unrelated failures
+  - Result:
+    - focused `language/statements/with/**` rerun is fully green: `182 passed, 0 failed`
+    - fixed areas included:
+      - `with` statement codegen and early errors for invalid statement-position declarations
+      - `break` / `continue` scope unwinding through synthetic `with` scopes
+      - direct-eval interception across alternate realms plus inherited strictness
+      - object-environment `@@unscopables`, `HasProperty`, and strict binding re-check semantics
+      - statement-completion handling for `with` bodies in eval mode
+      - `do...while` `continue` targeting, which the `with` slice exposed through completion tests
 
 ## Next Batches
-
-- [ ] `with-statement`
-  - Primary signature: `Expected no error, got Error: Unknown node WithStatement`
 
 - [ ] `parameter-and-binding-patterns`
   - Primary signatures:
@@ -74,3 +92,16 @@ Reduce the `language` category failures in targeted batches:
   - intended scope failing files: `10265 -> 10181`
   - out-of-scope failing files: `7616 -> 7610`
   - total failing files: `17881 -> 17791`
+- 2026-04-28: Implemented `with` statement codegen and object-environment runtime support across [control-flow.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/control-flow.ts:1>), [operators.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/operators.ts:1>), [loops.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/loops.ts:1>), [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>), [execution.ts](</M:/Playground/flat-js/src/runtime/execution.ts:1>), and the relevant opcode handlers.
+- 2026-04-28: Added focused regressions for `with` semantics, strict object-environment re-checks, alternate-realm direct eval, and corrected `do...while` `continue` behavior in [basic-programs.test.ts](</M:/Playground/flat-js/src/__tests__/basic-programs.test.ts:1>).
+- 2026-04-28: Verified the `with` batch with:
+  - `npm run build:tsc`
+  - `npm run build`
+  - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+  - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "with statement|strict with|delete identifier|do while continue"`
+  - focused Test262 slice: `language/statements/with/**`
+- 2026-04-28: Focused Test262 rerun for `language/statements/with/**` is fully green (`182 passed, 0 failed`).
+- 2026-04-28: Full `language` rescan updated [test262-language-summary.md](</M:/Playground/flat-js/plan/test262-language-summary.md:1>) with these totals:
+  - intended scope failing files: `10181 -> 9874`
+  - out-of-scope failing files: `7610 -> 7609`
+  - total failing files: `17791 -> 17483`

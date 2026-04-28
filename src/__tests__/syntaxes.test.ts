@@ -47,6 +47,7 @@ const syntaxes = [
     ['LabeledStatement loop continue', 'label: for (let i = 0; i < 1; i++) { continue label }'],
     ['LabeledStatement let newline block', 'if (false) { label: let // ASI\n{} }'],
     ['LabeledStatement let newline identifier', 'if (false) { label: let // ASI\nvalue = 1 }'],
+    ['WithStatement', 'with ({ value: 1 }) { value }'],
     ['Nested Scope', `
     let a = 0;
     {
