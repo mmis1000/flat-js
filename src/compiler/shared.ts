@@ -202,11 +202,25 @@ export const enum OpCode {
      */
     GetStatic,
     /**
+     * Reads a statically resolved binding and preserves its slot operands.
+     * Stack (bottom to top): scopeDepth, scopeIndex
+     * Result: scopeDepth, scopeIndex, value
+     * Notes: Used when later evaluation must keep the same static binding while using the pre-read value.
+     */
+    GetStaticKeepCtx,
+    /**
      * Reads a statically resolved binding without the checked access path.
      * Stack (bottom to top): scopeDepth, scopeIndex
      * Result: value
      */
     GetStaticUnchecked,
+    /**
+     * Reads a statically resolved binding without checks and preserves its slot operands.
+     * Stack (bottom to top): scopeDepth, scopeIndex
+     * Result: scopeDepth, scopeIndex, value
+     * Notes: Used when later evaluation must keep the same unchecked static binding while using the pre-read value.
+     */
+    GetStaticUncheckedKeepCtx,
     /**
      * Initializes an existing binding through a record lookup.
      * Stack (bottom to top): env, name, value
@@ -263,12 +277,26 @@ export const enum OpCode {
      */
     Get,
     /**
-     * Resolves an environment reference to the concrete binding scope or global object.
+     * Reads a binding or property by name and preserves its lookup operands.
      * Stack (bottom to top): target, name
-     * Result: resolvedTarget, name
-     * Notes: Used for identifier writes/updates so later RHS side effects cannot change which binding object is targeted.
+     * Result: target, name, value
+     * Notes: Used for compound assignments so the left value is read before the RHS while preserving the original reference.
+     */
+    GetKeepCtx,
+    /**
+     * Resolves an identifier reference once before later side effects.
+     * Stack (bottom to top): target, name
+     * Result: resolvedReference, name
+     * Notes: Used for dynamic identifier writes/updates/calls where later evaluation must preserve the original binding choice.
      */
     ResolveScope,
+    /**
+     * Resolves an identifier reference and reads its current value before later RHS evaluation.
+     * Stack (bottom to top): target, name
+     * Result: resolvedReference, name, currentValue
+     * Notes: Used for dynamic identifier compound assignments/calls so both binding selection and left-value read happen before later side effects.
+     */
+    ResolveScopeGetValue,
     /**
      * Clears the TDZ flag for a binding without consuming the lookup operands.
      * Stack (bottom to top): env, name
@@ -357,12 +385,26 @@ export const enum OpCode {
      */
     Call,
     /**
+     * Calls a property or binding whose callee value was pre-read earlier.
+     * Stack (bottom to top): target, name, fn, argument * M, argumentCount
+     * Result: returnValue
+     * Notes: Used when identifier binding resolution and callee read must happen before argument side effects.
+     */
+    CallResolved,
+    /**
      * Calls a property or binding like `Call`, but preserves local-scope eval semantics.
      * Stack (bottom to top): target, name, argument * M, argumentCount
      * Result: returnValue
      * Notes: Only differs from `Call` when the resolved function is `eval`.
      */
     CallAsEval,
+    /**
+     * Calls a pre-read property or binding like `CallResolved`, but preserves local-scope eval semantics.
+     * Stack (bottom to top): target, name, fn, argument * M, argumentCount
+     * Result: returnValue
+     * Notes: Only differs from `CallResolved` when the resolved function is `eval`.
+     */
+    CallAsEvalResolved,
     /**
      * Constructs a new instance from a callable value.
      * Stack (bottom to top): fn, argument * M, argumentCount
@@ -583,91 +625,91 @@ export const enum OpCode {
 
     /**
      * Evaluates `target[name] += value`.
-     * Stack (bottom to top): target, name, value
+     * Stack (bottom to top): target, name, leftValue, value
      * Result: newValue
      */
     BPlusEqual,
     /**
      * Evaluates a checked statically resolved `+=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BPlusEqualStatic,
     /**
      * Evaluates an unchecked statically resolved `+=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BPlusEqualStaticUnchecked,
     /**
      * Evaluates `target[name] -= value`.
-     * Stack (bottom to top): target, name, value
+     * Stack (bottom to top): target, name, leftValue, value
      * Result: newValue
      */
     BMinusEqual,
     /**
      * Evaluates a checked statically resolved `-=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BMinusEqualStatic,
     /**
      * Evaluates an unchecked statically resolved `-=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BMinusEqualStaticUnchecked,
     /**
      * Evaluates `target[name] /= value`.
-     * Stack (bottom to top): target, name, value
+     * Stack (bottom to top): target, name, leftValue, value
      * Result: newValue
      */
     BSlashEqual,
     /**
      * Evaluates a checked statically resolved `/=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BSlashEqualStatic,
     /**
      * Evaluates an unchecked statically resolved `/=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BSlashEqualStaticUnchecked,
     /**
      * Evaluates `target[name] *= value`.
-     * Stack (bottom to top): target, name, value
+     * Stack (bottom to top): target, name, leftValue, value
      * Result: newValue
      */
     BAsteriskEqual,
     /**
      * Evaluates a checked statically resolved `*=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BAsteriskEqualStatic,
     /**
      * Evaluates an unchecked statically resolved `*=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BAsteriskEqualStaticUnchecked,
     /**
      * Evaluates `target[name] >>>= value`.
-     * Stack (bottom to top): target, name, value
+     * Stack (bottom to top): target, name, leftValue, value
      * Result: newValue
      */
     BGreaterThanGreaterThanGreaterThanEqual,
     /**
      * Evaluates a checked statically resolved `>>>=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BGreaterThanGreaterThanGreaterThanEqualStatic,
     /**
      * Evaluates an unchecked statically resolved `>>>=`.
-     * Stack (bottom to top): value, scopeDepth, scopeIndex
+     * Stack (bottom to top): scopeDepth, scopeIndex, leftValue, value
      * Result: newValue
      */
     BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked,

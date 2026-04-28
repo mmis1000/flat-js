@@ -2,6 +2,7 @@ import type { FunctionTypes, VariableType } from "../../compiler"
 import type {
     Execution,
     Frame,
+    IdentifierReference,
     Result,
     Scope,
     Stack,
@@ -43,6 +44,7 @@ export const enum OpcodeContextField {
     defineVariable,
     initializeBindingValue,
     createWithScope,
+    createIdentifierReference,
     deleteBinding,
     writeScopeDebugProperty,
     getStaticVariableScope,
@@ -101,6 +103,7 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.defineVariable](scope: Scope, name: string, type: VariableType, trackStaticSlot?: boolean): void
     [OpcodeContextField.initializeBindingValue](scope: Scope, name: string, value: any): any
     [OpcodeContextField.createWithScope](value: unknown): Scope
+    [OpcodeContextField.createIdentifierReference](frame: Frame, scope: Scope | null): IdentifierReference
     [OpcodeContextField.deleteBinding](scope: Scope, name: string): boolean
     [OpcodeContextField.writeScopeDebugProperty](scope: Scope, name: string, value: any): any
 

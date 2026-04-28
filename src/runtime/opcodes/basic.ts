@@ -48,10 +48,28 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.getStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index))
         }
             break
+        case OpCode.GetStaticKeepCtx: {
+            const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const value = ctx[OpcodeContextField.getStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index)
+            ctx[OpcodeContextField.pushCurrentFrameStack](depth)
+            ctx[OpcodeContextField.pushCurrentFrameStack](index)
+            ctx[OpcodeContextField.pushCurrentFrameStack](value)
+        }
+            break
         case OpCode.GetStaticUnchecked: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.getStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index))
+        }
+            break
+        case OpCode.GetStaticUncheckedKeepCtx: {
+            const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const value = ctx[OpcodeContextField.getStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index)
+            ctx[OpcodeContextField.pushCurrentFrameStack](depth)
+            ctx[OpcodeContextField.pushCurrentFrameStack](index)
+            ctx[OpcodeContextField.pushCurrentFrameStack](value)
         }
             break
         case OpCode.NullLiteral:
@@ -121,6 +139,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.BAsteriskEqual:
         case OpCode.BGreaterThanGreaterThanGreaterThanEqual: {
             const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const leftValue = ctx[OpcodeContextField.popCurrentFrameStack]()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
             const exprs: Record<typeof command, (a: any, b: any) => any> = {
@@ -130,33 +149,6 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 [OpCode.BAsteriskEqual]: (a, b) => a * b,
                 [OpCode.BGreaterThanGreaterThanGreaterThanEqual]: (a, b) => a >>> b,
             }
-
-            if (environments.has(target)) {
-                const env = target as Frame
-                const scope = ctx[OpcodeContextField.findScope](env, name)
-                let leftValue
-
-                if (scope) {
-                    leftValue = ctx[OpcodeContextField.getBindingValueChecked](scope, name)
-                } else {
-                    const globalThis = env[Fields.globalThis] as Record<string, any>
-                    if (!(name in globalThis)) {
-                        throw new ReferenceError(name + is_not_defined)
-                    }
-                    leftValue = globalThis[name]
-                }
-
-                const result = exprs[command](leftValue, rightVal)
-                if (scope) {
-                    ctx[OpcodeContextField.setBindingValueChecked](scope, name, result)
-                } else {
-                    env[Fields.globalThis][name] = result
-                }
-                ctx[OpcodeContextField.pushCurrentFrameStack](result)
-                break
-            }
-
-            const leftValue = ctx[OpcodeContextField.getValue](target, name)
             const result = exprs[command](leftValue, rightVal)
             ctx[OpcodeContextField.setValue](target, name, result)
             ctx[OpcodeContextField.pushCurrentFrameStack](result)
@@ -167,10 +159,10 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.BSlashEqualStatic:
         case OpCode.BAsteriskEqualStatic:
         case OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic: {
+            const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const leftValue = ctx[OpcodeContextField.popCurrentFrameStack]()
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
-            const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
-            const leftValue = ctx[OpcodeContextField.getStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index)
             const exprs: Record<typeof command, (a: any, b: any) => any> = {
                 [OpCode.BPlusEqualStatic]: (a, b) => a + b,
                 [OpCode.BMinusEqualStatic]: (a, b) => a - b,
@@ -188,10 +180,10 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.BSlashEqualStaticUnchecked:
         case OpCode.BAsteriskEqualStaticUnchecked:
         case OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked: {
+            const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const leftValue = ctx[OpcodeContextField.popCurrentFrameStack]()
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
-            const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
-            const leftValue = ctx[OpcodeContextField.getStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index)
             const exprs: Record<typeof command, (a: any, b: any) => any> = {
                 [OpCode.BPlusEqualStaticUnchecked]: (a, b) => a + b,
                 [OpCode.BMinusEqualStaticUnchecked]: (a, b) => a - b,
@@ -226,6 +218,15 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.getValue](target, name))
         }
             break
+        case OpCode.GetKeepCtx: {
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
+            const value = ctx[OpcodeContextField.getValue](target, name)
+            ctx[OpcodeContextField.pushCurrentFrameStack](target)
+            ctx[OpcodeContextField.pushCurrentFrameStack](name)
+            ctx[OpcodeContextField.pushCurrentFrameStack](value)
+        }
+            break
         case OpCode.ResolveScope: {
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
@@ -233,13 +234,30 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             if (environments.has(target)) {
                 const env = target as Frame
                 const scope = ctx[OpcodeContextField.findScope](env, name)
-                ctx[OpcodeContextField.pushCurrentFrameStack](scope ?? env[Fields.globalThis])
+                ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.createIdentifierReference](env, scope))
                 ctx[OpcodeContextField.pushCurrentFrameStack](name)
                 break
             }
 
             ctx[OpcodeContextField.pushCurrentFrameStack](target)
             ctx[OpcodeContextField.pushCurrentFrameStack](name)
+        }
+            break
+        case OpCode.ResolveScopeGetValue: {
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const sourceTarget = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
+
+            let target = sourceTarget
+            if (environments.has(sourceTarget)) {
+                const env = sourceTarget as Frame
+                const scope = ctx[OpcodeContextField.findScope](env, name)
+                target = ctx[OpcodeContextField.createIdentifierReference](env, scope)
+            }
+
+            const leftValue = ctx[OpcodeContextField.getValue](target, name)
+            ctx[OpcodeContextField.pushCurrentFrameStack](target)
+            ctx[OpcodeContextField.pushCurrentFrameStack](name)
+            ctx[OpcodeContextField.pushCurrentFrameStack](leftValue)
         }
             break
         case OpCode.SetMultiple: {

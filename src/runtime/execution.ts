@@ -43,6 +43,9 @@ import {
     Stack,
     TDZ_VALUE,
     TryFrame,
+    IDENTIFIER_REFERENCE_FRAME,
+    IDENTIFIER_REFERENCE_SCOPE,
+    IdentifierReference,
     VariableFlags,
     VariableRecord,
 } from "./shared"
@@ -131,8 +134,16 @@ export const getExecution = (
     const isWithScope = (scope: Scope) => getScopeInternal(scope)[SCOPE_WITH_OBJECT] !== undefined
     const getWithScopeObject = (scope: Scope) => getScopeInternal(scope)[SCOPE_WITH_OBJECT]!
     const isObjectLike = (value: unknown): value is object => (typeof value === 'object' && value !== null) || typeof value === 'function'
+    const isIdentifierReference = (value: unknown): value is IdentifierReference =>
+        isObjectLike(value)
+        && IDENTIFIER_REFERENCE_FRAME in value
+        && IDENTIFIER_REFERENCE_SCOPE in value
+    const createIdentifierReference = (frame: Frame, scope: Scope | null): IdentifierReference => ({
+        [IDENTIFIER_REFERENCE_FRAME]: frame,
+        [IDENTIFIER_REFERENCE_SCOPE]: scope,
+    } as IdentifierReference)
     const isEnvironmentScopeObject = (value: unknown): value is Scope => {
-        if (!isObjectLike(value) || environments.has(value)) {
+        if (!isObjectLike(value) || environments.has(value) || isIdentifierReference(value)) {
             return false
         }
 
@@ -674,6 +685,21 @@ export const getExecution = (
 
     const getValue = (ctx: any, name: string) => {
         if (!environments.has(ctx)) {
+            if (isIdentifierReference(ctx)) {
+                const scope = ctx[IDENTIFIER_REFERENCE_SCOPE]
+                if (scope) {
+                    return getBindingValueChecked(scope, name)
+                }
+                const env = ctx[IDENTIFIER_REFERENCE_FRAME]
+                const currentGlobal = env[Fields.globalThis]
+                if (name === SpecialVariable.This) {
+                    return currentGlobal
+                }
+                if (name in currentGlobal) {
+                    return (currentGlobal as any)[name]
+                }
+                throw new ReferenceError(name + is_not_defined)
+            }
             if (isEnvironmentScopeObject(ctx)) {
                 return getBindingValueChecked(ctx, name)
             }
@@ -699,6 +725,19 @@ export const getExecution = (
 
     const setValue = (ctx: any, name: string, value: any) => {
         if (!environments.has(ctx)) {
+            if (isIdentifierReference(ctx)) {
+                const scope = ctx[IDENTIFIER_REFERENCE_SCOPE]
+                if (scope) {
+                    return setBindingValueChecked(scope, name, value)
+                }
+                const env = ctx[IDENTIFIER_REFERENCE_FRAME]
+                if (env[Fields.strict]) {
+                    throw new ReferenceError(name + is_not_defined)
+                }
+                const currentGlobal = env[Fields.globalThis] as Record<string, any>
+                currentGlobal[name] = value
+                return value
+            }
             if (isEnvironmentScopeObject(ctx)) {
                 return setBindingValueChecked(ctx, name, value)
             }
@@ -1162,6 +1201,7 @@ export const getExecution = (
     opcodeContextSlots[OpcodeContextField.defineVariable] = defineVariable
     opcodeContextSlots[OpcodeContextField.initializeBindingValue] = initializeBindingValue
     opcodeContextSlots[OpcodeContextField.createWithScope] = createWithScope
+    opcodeContextSlots[OpcodeContextField.createIdentifierReference] = createIdentifierReference
     opcodeContextSlots[OpcodeContextField.deleteBinding] = deleteBinding
     opcodeContextSlots[OpcodeContextField.writeScopeDebugProperty] = writeScopeDebugProperty
     opcodeContextSlots[OpcodeContextField.getStaticVariableScope] = getStaticVariableScope
@@ -1221,7 +1261,9 @@ export const getExecution = (
                 case OpCode.Duplicate:
                 case OpCode.GetRecord:
                 case OpCode.GetStatic:
+                case OpCode.GetStaticKeepCtx:
                 case OpCode.GetStaticUnchecked:
+                case OpCode.GetStaticUncheckedKeepCtx:
                 case OpCode.NullLiteral:
                 case OpCode.UndefinedLiteral:
                 case OpCode.RegexpLiteral:
@@ -1248,7 +1290,9 @@ export const getExecution = (
                 case OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked:
                 case OpCode.DefineKeepCtx:
                 case OpCode.Get:
+                case OpCode.GetKeepCtx:
                 case OpCode.ResolveScope:
+                case OpCode.ResolveScopeGetValue:
                 case OpCode.SetMultiple:
                 case OpCode.Jump:
                 case OpCode.JumpIfNot:
@@ -1269,7 +1313,9 @@ export const getExecution = (
                 case OpCode.ExpandArgumentArray:
                 case OpCode.CallValue:
                 case OpCode.Call:
+                case OpCode.CallResolved:
                 case OpCode.CallAsEval:
+                case OpCode.CallAsEvalResolved:
                 case OpCode.SuperCall:
                 case OpCode.New: {
                     const result = handleFunctionOpcode(command, opcodeContext)

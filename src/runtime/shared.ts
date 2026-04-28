@@ -181,6 +181,12 @@ const SCOPE_STATIC_SLOTS = Symbol()
 const SCOPE_STATIC_STORE = Symbol()
 const SCOPE_DEBUG_PTR = Symbol()
 const SCOPE_WITH_OBJECT = Symbol()
+const IDENTIFIER_REFERENCE_FRAME = Symbol()
+const IDENTIFIER_REFERENCE_SCOPE = Symbol()
+type IdentifierReference = {
+    [IDENTIFIER_REFERENCE_FRAME]: Frame
+    [IDENTIFIER_REFERENCE_SCOPE]: Scope | null
+}
 
 type ScopeWithInternals = Scope & {
     [SCOPE_FLAGS]?: Record<string, number>
@@ -378,6 +384,8 @@ export {
     SCOPE_WITH_OBJECT,
     TDZ_VALUE,
     TEXT_DADA_MASK,
+    IDENTIFIER_REFERENCE_FRAME,
+    IDENTIFIER_REFERENCE_SCOPE,
 }
 
 export type {
@@ -393,5 +401,6 @@ export type {
     ScopeWithInternals,
     StaticVariableStore,
     TryFrame,
+    IdentifierReference,
     VariableRecord,
 }

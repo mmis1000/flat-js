@@ -9,8 +9,11 @@ import {
     FunctionDescriptor,
     GeneratorState,
     HOST_FUNCTION,
+    IDENTIFIER_REFERENCE_FRAME,
+    IDENTIFIER_REFERENCE_SCOPE,
     InvokeParam,
     Scope,
+    SCOPE_WITH_OBJECT,
     VariableRecord,
     bindInfo,
     environments,
@@ -254,7 +257,9 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             break
         case OpCode.CallValue:
         case OpCode.Call:
-        case OpCode.CallAsEval: {
+        case OpCode.CallResolved:
+        case OpCode.CallAsEval:
+        case OpCode.CallAsEvalResolved: {
             const parameterCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             let parameters: any[] = []
             for (let i = 0; i < parameterCount; i++) {
@@ -269,6 +274,10 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 name = ctx[OpcodeContextField.popCurrentFrameStack]()
                 envOrRecord = ctx[OpcodeContextField.popCurrentFrameStack]()
                 fn = ctx[OpcodeContextField.getValue](envOrRecord, name)
+            } else if (command === OpCode.CallResolved || command === OpCode.CallAsEvalResolved) {
+                fn = ctx[OpcodeContextField.popCurrentFrameStack]()
+                name = ctx[OpcodeContextField.popCurrentFrameStack]()
+                envOrRecord = ctx[OpcodeContextField.popCurrentFrameStack]()
             } else {
                 envOrRecord = undefined
                 fn = ctx[OpcodeContextField.popCurrentFrameStack]()
@@ -308,7 +317,16 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             }
 
             let self = undefined
-            if (!environments.has(envOrRecord)) {
+            const isIdentifierReference = envOrRecord != null
+                && typeof envOrRecord === 'object'
+                && IDENTIFIER_REFERENCE_FRAME in envOrRecord
+                && IDENTIFIER_REFERENCE_SCOPE in envOrRecord
+            if (isIdentifierReference) {
+                const scope = (envOrRecord as any)[IDENTIFIER_REFERENCE_SCOPE]
+                if (scope != null && (scope as any)[SCOPE_WITH_OBJECT] !== undefined) {
+                    self = (scope as any)[SCOPE_WITH_OBJECT]
+                }
+            } else if (!environments.has(envOrRecord)) {
                 self = envOrRecord
             }
 
@@ -341,7 +359,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 }
 
                 if (fnTarget === EVAL_FUNCTION || fnTarget === realmEval) {
-                    if (command === OpCode.CallAsEval) {
+                    if (command === OpCode.CallAsEval || command === OpCode.CallAsEvalResolved) {
                         ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.emulateEval](parameters[0], true))
                     } else {
                         ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.emulateEval](parameters[0], false))

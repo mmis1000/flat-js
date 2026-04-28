@@ -7,6 +7,20 @@ import type { Segment } from '../types'
 
 type ArrayLikeElement = ts.Expression | ts.SpreadElement | ts.OmittedExpression
 
+function needsResolveScope(node: ts.Node, ctx: CodegenContext): boolean {
+    let current: ts.Node | undefined = node
+
+    while (current) {
+        const parent: ts.Node | undefined = ctx.parentMap.get(current)?.node
+        if (parent != null && ts.isWithStatement(parent) && parent.statement === current) {
+            return true
+        }
+        current = parent
+    }
+
+    return false
+}
+
 function appendArrayElements(
     res: Segment,
     elements: readonly ArrayLikeElement[],
@@ -131,12 +145,16 @@ export function generateDirectCall(
 
         const leftOps = ctx.generateLeft(self, flag)
         const isEval = ts.isIdentifier(self) && self.text === 'eval'
+        const needsResolvedCall = ts.isIdentifier(self) && needsResolveScope(self, ctx)
 
         return [
             ...leftOps,
+            ...(needsResolvedCall ? [op(OpCode.ResolveScopeGetValue)] : []),
             ...args,
             op(OpCode.Literal, 2, [argCount]),
-            isEval ? op(OpCode.CallAsEval) : op(OpCode.Call)
+            isEval
+                ? op(needsResolvedCall ? OpCode.CallAsEvalResolved : OpCode.CallAsEval)
+                : op(needsResolvedCall ? OpCode.CallResolved : OpCode.Call)
         ]
     }
 
@@ -211,12 +229,16 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
             if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
                 const leftOps = ctx.generateLeft(self, flag)
                 const isEval = ts.isIdentifier(self) && self.text === 'eval'
+                const needsResolvedCall = ts.isIdentifier(self) && needsResolveScope(self, ctx)
 
                 return [
                     ...leftOps,
+                    ...(needsResolvedCall ? [op(OpCode.ResolveScopeGetValue)] : []),
                     ...generateArgumentArray(node.arguments, flag, ctx),
                     op(OpCode.ExpandArgumentArray),
-                    isEval ? op(OpCode.CallAsEval) : op(OpCode.Call)
+                    isEval
+                        ? op(needsResolvedCall ? OpCode.CallAsEvalResolved : OpCode.CallAsEval)
+                        : op(needsResolvedCall ? OpCode.CallResolved : OpCode.Call)
                 ]
             }
 

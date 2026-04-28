@@ -5,6 +5,20 @@ import { abort, getNameOfKind, headOf, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
+function needsResolveScope(node: ts.Node, ctx: CodegenContext): boolean {
+    let current: ts.Node | undefined = node
+
+    while (current) {
+        const parent: ts.Node | undefined = ctx.parentMap.get(current)?.node
+        if (parent != null && ts.isWithStatement(parent) && parent.statement === current) {
+            return true
+        }
+        current = parent
+    }
+
+    return false
+}
+
 export function generateOperators(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isConditionalExpression(node)) {
         const condition = ctx.generate(node.condition, flag)
@@ -54,7 +68,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PrefixPlusPlus)
                 ]
             case ts.SyntaxKind.MinusMinusToken:
@@ -69,7 +83,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PrefixMinusMinus)
                 ]
         }
@@ -163,22 +177,29 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 if (ts.isIdentifier(left)) {
                     const staticAccess = ctx.tryResolveStaticAccess(left, left.text)
                     if (staticAccess) {
+                        if (kind === ts.SyntaxKind.EqualsToken) {
+                            return [
+                                ...ctx.generate(node.right, flag),
+                                ...ctx.generateStaticAccessOps(staticAccess),
+                                op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.SetStaticUnchecked : OpCode.SetStatic)
+                            ]
+                        }
+
                         return [
-                            ...ctx.generate(node.right, flag),
                             ...ctx.generateStaticAccessOps(staticAccess),
+                            op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.GetStaticUncheckedKeepCtx : OpCode.GetStaticKeepCtx),
+                            ...ctx.generate(node.right, flag),
                             op(
-                                kind === ts.SyntaxKind.EqualsToken
-                                    ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.SetStaticUnchecked : OpCode.SetStatic)
-                                    : kind === ts.SyntaxKind.PlusEqualsToken
-                                        ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BPlusEqualStaticUnchecked : OpCode.BPlusEqualStatic)
-                                        : kind === ts.SyntaxKind.MinusEqualsToken
-                                            ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BMinusEqualStaticUnchecked : OpCode.BMinusEqualStatic)
-                                            : kind === ts.SyntaxKind.SlashEqualsToken
-                                                ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BSlashEqualStaticUnchecked : OpCode.BSlashEqualStatic)
-                                                : kind === ts.SyntaxKind.AsteriskEqualsToken
-                                                    ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BAsteriskEqualStaticUnchecked : OpCode.BAsteriskEqualStatic)
-                                                    : kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken
-                                                        ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked : OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic)
+                                kind === ts.SyntaxKind.PlusEqualsToken
+                                    ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BPlusEqualStaticUnchecked : OpCode.BPlusEqualStatic)
+                                    : kind === ts.SyntaxKind.MinusEqualsToken
+                                        ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BMinusEqualStaticUnchecked : OpCode.BMinusEqualStatic)
+                                        : kind === ts.SyntaxKind.SlashEqualsToken
+                                            ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BSlashEqualStaticUnchecked : OpCode.BSlashEqualStatic)
+                                            : kind === ts.SyntaxKind.AsteriskEqualsToken
+                                                ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BAsteriskEqualStaticUnchecked : OpCode.BAsteriskEqualStatic)
+                                                : kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken
+                                                    ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked : OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic)
                                                     : abort('Why Am I here?')
                             )
                         ]
@@ -191,9 +212,16 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                     ts.isIdentifier(left) ||
                     left.kind === ts.SyntaxKind.ThisKeyword
                 ) {
+                    const shouldResolveIdentifier = ts.isIdentifier(left)
                     return [
                         ...ctx.generateLeft(node.left, flag),
-                        ...(ts.isIdentifier(left) ? [op(OpCode.ResolveScope)] : []),
+                        ...(kind === ts.SyntaxKind.EqualsToken
+                            ? shouldResolveIdentifier
+                                ? [op(OpCode.ResolveScope)]
+                                : []
+                            : shouldResolveIdentifier
+                                ? [op(OpCode.ResolveScopeGetValue)]
+                                : [op(OpCode.GetKeepCtx)]),
                         ...ctx.generate(node.right, flag),
                         op(
                                 kind === ts.SyntaxKind.EqualsToken ? OpCode.Set :
@@ -202,7 +230,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                                         kind === ts.SyntaxKind.SlashEqualsToken ? OpCode.BSlashEqual :
                                             kind === ts.SyntaxKind.AsteriskEqualsToken ? OpCode.BAsteriskEqual :
                                                 kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken ? OpCode.BGreaterThanGreaterThanGreaterThanEqual :
-                                                abort('Why Am I here?')
+                                                    abort('Why Am I here?')
                         )
                     ]
                 }
@@ -311,7 +339,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PostFixPlusPLus)
                 ]
             case ts.SyntaxKind.MinusMinusToken:
@@ -326,7 +354,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PostFixMinusMinus)
                 ]
         }

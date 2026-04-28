@@ -202,6 +202,25 @@ for (const item of target.list) {
     outerLet += item;
 }
 
+with (target.nested) {
+    value = 2;
+    value += 1;
+    value -= 1;
+    value /= 1;
+    value *= 1;
+    value >>>= 1;
+}
+
+with ({
+    callMe(value) {
+        return value + 1;
+    },
+    localValue: 1,
+}) {
+    callMe(1);
+    eval('localValue');
+}
+
 switch (target.text) {
     case 'hello':
         outerVar += 1;

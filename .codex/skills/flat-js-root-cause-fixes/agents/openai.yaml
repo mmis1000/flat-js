@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flat JS Root-Cause Fixes"
+  short_description: "Require root-cause fixes for regressions, not workaround paths"
+  default_prompt: "Use $flat-js-root-cause-fixes when fixing Flat JS bugs or regressions so the fix removes the regression cause instead of layering new workaround paths, opcodes, or special cases over it."

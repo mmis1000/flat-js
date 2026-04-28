@@ -269,6 +269,9 @@ testRuntime('i-- before', 'let i = 1; print(i--); print(i)', [1, 0], printProvid
 testRuntime('i-- before', 'let i = { a: 1 }; print(i.a--); print(i.a)', [1, 0], printProvider)
 testRuntimeThrows('undefined i++', 'i++;', ReferenceError, printProvider)
 testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
+testRuntimeThrows('undefined ++i', '++i;', ReferenceError, printProvider)
+testRuntimeThrows('undefined --i', '--i;', ReferenceError, printProvider)
+testRuntimeThrows('undefined i += 1', 'i += 1;', ReferenceError, printProvider)
 testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', ReferenceError, printProvider)
 testRuntimeThrows('syntax error for invalid syntax', '{', SyntaxError, printProvider)
 
@@ -1214,6 +1217,97 @@ do {
 print(p1)
 print(box.p1)
 `, [1, 'x1'], printProvider)
+
+testRuntime('with statement compound assignment resolves binding once', `
+var log = []
+var env = { p: 0 }
+var proxy = new Proxy(env, {
+    has(t, pk) {
+        log.push('has:' + String(pk))
+        return Reflect.has(t, pk)
+    },
+    get(t, pk, r) {
+        log.push('get:' + String(pk))
+        return Reflect.get(t, pk, r)
+    },
+    set(t, pk, v, r) {
+        log.push('set:' + String(pk))
+        return Reflect.set(t, pk, v, r)
+    },
+    getOwnPropertyDescriptor(t, pk) {
+        log.push('getOwnPropertyDescriptor:' + String(pk))
+        return Reflect.getOwnPropertyDescriptor(t, pk)
+    },
+    defineProperty(t, pk, d) {
+        log.push('defineProperty:' + String(pk))
+        return Reflect.defineProperty(t, pk, d)
+    }
+})
+with (proxy) {
+    p += 1
+}
+print(log.join('|'))
+`, ['has:p|get:Symbol(Symbol.unscopables)|has:p|get:p|has:p|set:p|getOwnPropertyDescriptor:p|defineProperty:p'], printProvider)
+
+testRuntime('with statement compound assignment reads left value before rhs side effects', `
+var box
+var result
+with (box = { a: 1 }) {
+    result = a += (delete a)
+}
+print(result)
+`, [2], printProvider)
+
+testRuntime('with statement assignment resolves binding before rhs side effects', `
+var box
+with (box = {}) {
+    capturedBindingValue = (box.capturedBindingValue = 1, 2)
+}
+print(globalThis.capturedBindingValue)
+print(box.capturedBindingValue)
+`, [2, 1], printProvider)
+
+testRuntime('dynamic compound assignment throws before rhs side effects', `
+var ran = false
+try {
+    missingCompoundBinding += (missingCompoundBinding = 1, ran = true, 1)
+} catch (error) {
+    print(error instanceof ReferenceError)
+    print(ran)
+    print('missingCompoundBinding' in globalThis)
+}
+`, [true, false, false], printProvider)
+
+testRuntimeThrows('nested dynamic compound assignment throws before outer assignment', `
+nestedMissingBinding = (nestedMissingBinding += 1)
+`, ReferenceError)
+
+testRuntime('property compound assignment reads left value before rhs side effects', `
+var box = { a: 0 }
+box.a += (box.a = 1)
+print(box.a)
+`, [1], printProvider)
+
+testRuntime('static compound assignment reads left value before rhs side effects', `
+var a = 0
+let b = 0
+a += (a = 1)
+b += (b = 1)
+print(a)
+print(b)
+`, [1, 1], printProvider)
+
+testRuntime('with statement bare identifier call reads callee before argument side effects', `
+var env = {
+    method(arg) {
+        print(this === env)
+        print(arg)
+    }
+}
+with (env) {
+    method((delete env.method, 2))
+}
+`, [true, 2], printProvider)
 
 testRuntime('with statement strict binding reads re-check object presence', `
 var env = {
