@@ -1,7 +1,8 @@
 import * as ts from 'typescript'
 
-import { findAncient } from '../../analysis'
+import { extractVariable, findAncient } from '../../analysis'
 import { OpCode, SpecialVariable, StatementFlag, VariableType } from '../../shared'
+import { generateBindingInitialization } from '../binding-patterns'
 import { abort, headOf, op, generateEnterScope, generateLeaveScope } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Op, Segment } from '../types'
@@ -131,6 +132,21 @@ function isInvalidWithStatementItem(statement: ts.Statement): boolean {
     return ts.isClassDeclaration(item) || ts.isFunctionDeclaration(item)
 }
 
+function generateNamedScope(names: string[]): Segment {
+    if (names.length === 0) {
+        return []
+    }
+
+    return [
+        ...names.flatMap((name) => [
+            op(OpCode.Literal, 2, [name]),
+            op(OpCode.Literal, 2, [VariableType.Var]),
+        ]),
+        op(OpCode.Literal, 2, [names.length]),
+        op(OpCode.EnterScope),
+    ]
+}
+
 export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isIfStatement(node)) {
         const exit = [op(OpCode.Nop, 0)]
@@ -172,8 +188,31 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
             op(OpCode.ExitTryCatchFinally)
         ]
 
+        const catchBinding = node.catchClause?.variableDeclaration?.name
+        const catchBindingNames = catchBinding ? extractVariable(catchBinding).map((name) => name.text) : []
+        const catchTempName = catchBinding != null && !ts.isIdentifier(catchBinding)
+            ? ctx.allocateInternalName('catch')
+            : undefined
         const catchStatement = node.catchClause
-            ? ctx.generate(node.catchClause.block, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch)
+            ? catchTempName == null
+                ? ctx.generate(node.catchClause.block, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch)
+                : [
+                    ...generateNamedScope(catchBindingNames),
+                    ...generateBindingInitialization(
+                        catchBinding!,
+                        [
+                            op(OpCode.GetRecord),
+                            op(OpCode.Literal, 2, [catchTempName]),
+                            op(OpCode.Get),
+                        ],
+                        flag,
+                        ctx
+                    ),
+                    ...node.catchClause.block.statements.map((statement) =>
+                        ctx.generate(statement, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch)
+                    ).flat(),
+                    ...generateLeaveScope(),
+                ]
             : [op(OpCode.Nop, 0)]
         const exitCatch = [
             op(OpCode.ExitTryCatchFinally)
@@ -189,10 +228,6 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         const exitAll = [op(OpCode.Nop, 0)]
         const catchIdentifier = node.catchClause?.variableDeclaration?.name
 
-        if (catchIdentifier && catchIdentifier.kind !== ts.SyntaxKind.Identifier) {
-            throw new Error('not support non identifier binding')
-        }
-
         const init = [
             op(OpCode.NodeOffset, 2, [headOf(exitAll)]),
             node.catchClause
@@ -202,7 +237,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                 ? op(OpCode.NodeOffset, 2, [headOf(finallyStatement)])
                 : op(OpCode.Literal, 2, [-1]),
             node.catchClause?.variableDeclaration
-                ? op(OpCode.Literal, 2, [catchIdentifier?.text])
+                ? op(OpCode.Literal, 2, [catchTempName ?? (catchIdentifier != null && ts.isIdentifier(catchIdentifier) ? catchIdentifier.text : '')])
                 : op(OpCode.UndefinedLiteral),
             op(OpCode.InitTryCatch)
         ]

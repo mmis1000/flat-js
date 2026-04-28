@@ -79,11 +79,8 @@ export function extractVariable(node: ts.Identifier | ts.ObjectBindingPattern | 
     if (ts.isArrayBindingPattern(node)) {
         let list: ts.Identifier[] = []
         for (const element of node.elements) {
-            if (ts.isIdentifier(element)) {
-                list.push(element)
-            }
-            if (ts.isObjectBindingPattern(element) || ts.isArrayBindingPattern(element)) {
-                list = [...list, ...extractVariable(element)]
+            if (ts.isBindingElement(element)) {
+                list = [...list, ...extractVariable(element.name)]
             }
         }
         return list
@@ -92,19 +89,7 @@ export function extractVariable(node: ts.Identifier | ts.ObjectBindingPattern | 
     if (ts.isObjectBindingPattern(node)) {
         let list: ts.Identifier[] = []
         for (const element of node.elements) {
-            if (ts.isIdentifier(element.name) && element.propertyName === undefined) {
-                list.push(element.name)
-            }
-
-            if (element.propertyName) {
-                if (ts.isIdentifier(element.name)) {
-                    list.push(element.name)
-                }
-
-                if (ts.isObjectBindingPattern(element.name) || ts.isArrayBindingPattern(element.name)) {
-                    list = [...list, ...extractVariable(element.name)]
-                }
-            }
+            list = [...list, ...extractVariable(element.name)]
         }
         return list
     }

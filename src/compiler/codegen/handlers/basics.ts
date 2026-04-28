@@ -1,6 +1,7 @@
 import * as ts from 'typescript'
 
 import { OpCode, SpecialVariable, StatementFlag } from '../../shared'
+import { generateBindingInitialization } from '../binding-patterns'
 import { generateEnterScope, generateLeaveScope, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
@@ -40,7 +41,20 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
 
         for (const declaration of node.declarations) {
             if (!ts.isIdentifier(declaration.name)) {
-                throw new Error('not support pattern yet')
+                if (!declaration.initializer) {
+                    throw new Error('not support pattern yet')
+                }
+
+                ops.push(...generateBindingInitialization(
+                    declaration.name,
+                    ctx.generate(declaration.initializer, flag),
+                    flag,
+                    ctx,
+                    {
+                        freezeConst: !!(node.flags & ts.NodeFlags.Const),
+                    }
+                ))
+                continue
             }
 
             const staticAccess = ctx.tryResolveStaticAccess(declaration.name, declaration.name.text)

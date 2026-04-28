@@ -1,3 +1,5 @@
+import * as vm from 'vm'
+
 import { compileAndRun } from '../index'
 
 test('rest parameters create an unmapped arguments object', () => {
@@ -106,4 +108,62 @@ test('tagged templates reuse the same object identity at one call site', () => {
 
         [...m.keys()].length
     `)).toBe(1)
+})
+
+test('destructuring declarations initialize array and object bindings', () => {
+    expect(compileAndRun(`
+        const { a, b = 2 } = { a: 1 };
+        let [x, , y = 4, ...rest] = [10, 20, undefined, 30, 40];
+
+        [a, b, x, y, rest.join(',')]
+    `)).toEqual([1, 2, 10, 4, '30,40'])
+})
+
+test('destructured and default parameters keep arguments unmapped', () => {
+    expect(compileAndRun(`
+        function collect(a = 1, { b } = { b: a + 1 }, ...rest) {
+            arguments[0] = 10
+            return [a, b, arguments[0], rest.join(',')]
+        }
+
+        collect(undefined, undefined, 3, 4)
+    `)).toEqual([1, 2, 10, '3,4'])
+})
+
+test('catch binding patterns destructure the thrown value', () => {
+    expect(compileAndRun(`
+        try {
+            throw { a: 1, b: 2 }
+        } catch ({ a, b }) {
+            [a, b]
+        }
+    `)).toEqual([1, 2])
+})
+
+test('array and object literals use the provided realm prototypes', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    const result = compileAndRun(`
+        delete Array.prototype[Symbol.iterator]
+
+        let threwTypeError = false
+        try {
+            const [x] = []
+        } catch (e) {
+            threwTypeError = e.constructor === TypeError
+        }
+
+        [
+            Object.getPrototypeOf([]) === Array.prototype,
+            Object.getPrototypeOf({}) === Object.prototype,
+            threwTypeError,
+        ]
+    `, vmGlobal)
+
+    expect(result).toEqual([true, true, true])
 })

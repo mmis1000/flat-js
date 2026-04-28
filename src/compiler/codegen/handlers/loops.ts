@@ -1,6 +1,8 @@
 import * as ts from 'typescript'
 
+import { extractVariable } from '../../analysis'
 import { OpCode, SetFlag, SpecialVariable, VariableType } from '../../shared'
+import { generateBindingInitialization } from '../binding-patterns'
 import { abort, headOf, markInternals, op, generateEnterScope, generateLeaveScope } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
@@ -48,33 +50,28 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         const update0: Segment = []
 
         if (hasScope && initializer && ts.isVariableDeclarationList(initializer)) {
-            for (const item of initializer.declarations) {
-                if (!ts.isIdentifier(item.name)) {
-                    throw new Error('not support')
-                }
+            const copiedNames: string[] = []
 
-                update0.push(
-                    op(OpCode.Literal, 2, [item.name.text]),
-                    op(OpCode.GetRecord),
-                    op(OpCode.Literal, 2, [item.name.text]),
-                    op(OpCode.Get),
-                    op(OpCode.Literal, 2, [SetFlag.DeTDZ | ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0)])
-                )
+            for (const item of initializer.declarations) {
+                for (const name of extractVariable(item.name)) {
+                    copiedNames.push(name.text)
+                    update0.push(
+                        op(OpCode.Literal, 2, [name.text]),
+                        op(OpCode.GetRecord),
+                        op(OpCode.Literal, 2, [name.text]),
+                        op(OpCode.Get),
+                        op(OpCode.Literal, 2, [SetFlag.DeTDZ | ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0)])
+                    )
+                }
             }
 
             update0.push(
-                op(OpCode.Literal, 2, [initializer.declarations.length]),
+                op(OpCode.Literal, 2, [copiedNames.length]),
                 ...generateLeaveScope(),
                 ...generateEnterScope(node, ctx.scopes),
                 op(OpCode.GetRecord),
                 op(OpCode.SetMultiple)
             )
-
-            for (const item of initializer.declarations) {
-                if (!ts.isIdentifier(item.name)) {
-                    throw new Error('not support')
-                }
-            }
         }
 
         const update1 = incrementor
@@ -169,12 +166,14 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             ts.isVariableDeclarationList(node.initializer)
                 ? (node.initializer.flags & ts.NodeFlags.Const)
                 : 0
-        const variableName =
+        const variableNames =
             ts.isVariableDeclarationList(node.initializer)
-                ? ts.isIdentifier(node.initializer.declarations[0].name)
-                    ? node.initializer.declarations[0].name.text
-                    : abort('Not a identifier')
-                : ''
+                ? extractVariable(node.initializer.declarations[0].name).map((name) => name.text)
+                : []
+        const declarationName =
+            ts.isVariableDeclarationList(node.initializer)
+                ? node.initializer.declarations[0].name
+                : null
 
         const enter = generateEnterScope(node, ctx.scopes)
         const leave = generateLeaveScope()
@@ -184,6 +183,41 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 return ctx.generateLeft(node.initializer.declarations[0].name, flag)
             }
             return ctx.generateLeft(node.initializer, flag)
+        }
+
+        const generateEntryBinding = () => {
+            const entryValue = [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+                op(OpCode.Get),
+                op(OpCode.EntryGetValue),
+            ]
+
+            if (declarationName && !ts.isIdentifier(declarationName)) {
+                return generateBindingInitialization(
+                    declarationName,
+                    entryValue,
+                    flag,
+                    ctx,
+                    { freezeConst: !!variableIsConst }
+                )
+            }
+
+            return [
+                ...getLhs(),
+                ...entryValue,
+                op(OpCode.SetInitialized),
+                op(OpCode.Pop),
+                ...(variableIsConst
+                    ? [
+                        ...getLhs(),
+                        op(OpCode.FreezeVariable),
+                        op(OpCode.Pop),
+                        op(OpCode.Pop)
+                    ]
+                    : []
+                ),
+            ]
         }
 
         const head = [
@@ -214,28 +248,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 op(OpCode.EntryIsDone),
             ],
             op(OpCode.JumpIf),
-
-            ...getLhs(),
-
-            ...[
-                op(OpCode.GetRecord),
-                op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
-                op(OpCode.Get),
-                op(OpCode.EntryGetValue),
-            ],
-
-            op(OpCode.SetInitialized),
-            op(OpCode.Pop),
-
-            ...(variableIsConst
-                ? [
-                    ...getLhs(),
-                    op(OpCode.FreezeVariable),
-                    op(OpCode.Pop),
-                    op(OpCode.Pop)
-                ]
-                : []
-            ),
+            ...generateEntryBinding(),
         ]
 
         const body = ctx.generate(node.statement, flag)
@@ -248,14 +261,15 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
             op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
 
-            op(OpCode.Literal, 2, [variableName]),
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [variableName]),
-            op(OpCode.Get),
+            ...variableNames.flatMap((name) => [
+                op(OpCode.Literal, 2, [name]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [name]),
+                op(OpCode.Get),
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+            ]),
 
-            op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
-
-            op(OpCode.Literal, 2, [2]),
+            op(OpCode.Literal, 2, [1 + variableNames.length]),
             ...generateLeaveScope(),
             ...generateEnterScope(node, ctx.scopes),
             op(OpCode.GetRecord),
@@ -304,12 +318,14 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             ts.isVariableDeclarationList(node.initializer)
                 ? !!(node.initializer.flags & ts.NodeFlags.Const)
                 : false
-        const variableName =
+        const variableNames =
             ts.isVariableDeclarationList(node.initializer)
-                ? ts.isIdentifier(node.initializer.declarations[0].name)
-                    ? node.initializer.declarations[0].name.text
-                    : abort('Not a identifier')
-                : ''
+                ? extractVariable(node.initializer.declarations[0].name).map((name) => name.text)
+                : []
+        const declarationName =
+            ts.isVariableDeclarationList(node.initializer)
+                ? node.initializer.declarations[0].name
+                : null
 
         const enter = generateEnterScope(node, ctx.scopes)
         const leave = generateLeaveScope()
@@ -319,6 +335,42 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 return ctx.generateLeft(node.initializer.declarations[0].name, flag)
             }
             return ctx.generateLeft(node.initializer, flag)
+        }
+
+        const generateEntryBinding = () => {
+            const entryValue = [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+                op(OpCode.Get),
+                op(OpCode.Literal, 2, ['value']),
+                op(OpCode.Get),
+            ]
+
+            if (declarationName && !ts.isIdentifier(declarationName)) {
+                return generateBindingInitialization(
+                    declarationName,
+                    entryValue,
+                    flag,
+                    ctx,
+                    { freezeConst: variableIsConst }
+                )
+            }
+
+            return [
+                ...getLhs(),
+                ...entryValue,
+                op(OpCode.SetInitialized),
+                op(OpCode.Pop),
+                ...(variableIsConst
+                    ? [
+                        ...getLhs(),
+                        op(OpCode.FreezeVariable),
+                        op(OpCode.Pop),
+                        op(OpCode.Pop)
+                    ]
+                    : []
+                ),
+            ]
         }
 
         const head = [
@@ -358,27 +410,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 op(OpCode.Get),
             ],
             op(OpCode.JumpIf),
-
-            ...getLhs(),
-            ...[
-                op(OpCode.GetRecord),
-                op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
-                op(OpCode.Get),
-                op(OpCode.Literal, 2, ['value']),
-                op(OpCode.Get),
-            ],
-            op(OpCode.SetInitialized),
-            op(OpCode.Pop),
-
-            ...(variableIsConst
-                ? [
-                    ...getLhs(),
-                    op(OpCode.FreezeVariable),
-                    op(OpCode.Pop),
-                    op(OpCode.Pop)
-                ]
-                : []
-            ),
+            ...generateEntryBinding(),
         ]
 
         const body = ctx.generate(node.statement, flag)
@@ -390,13 +422,15 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.Get),
             op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
 
-            op(OpCode.Literal, 2, [variableName]),
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [variableName]),
-            op(OpCode.Get),
-            op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+            ...variableNames.flatMap((name) => [
+                op(OpCode.Literal, 2, [name]),
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [name]),
+                op(OpCode.Get),
+                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
+            ]),
 
-            op(OpCode.Literal, 2, [2]),
+            op(OpCode.Literal, 2, [1 + variableNames.length]),
             ...generateLeaveScope(),
             ...generateEnterScope(node, ctx.scopes),
             op(OpCode.GetRecord),

@@ -2,6 +2,7 @@ import * as ts from 'typescript'
 
 import type { Functions, ParentMap, Scopes, VariableRoot } from '../analysis'
 import { FunctionTypes, OpCode, StatementFlag } from '../shared'
+import { generateBindingInitialization } from './binding-patterns'
 import { createCodegenContext } from './context'
 import { generateVariableList, getScopeDebugNames, markInternal, markInternals, op } from './helpers'
 import type { Op, Segment, SegmentOptions } from './types'
@@ -87,6 +88,13 @@ export function generateSegment(
 
     const functionNode = ts.isSourceFile(node) ? null : node
     const restParameterIndex = functionNode?.parameters.findIndex((parameter) => parameter.dotDotDotToken != null) ?? -1
+    const simpleParameterList = functionNode == null
+        ? true
+        : functionNode.parameters.every((parameter) =>
+            ts.isIdentifier(parameter.name)
+            && parameter.initializer == null
+            && parameter.dotDotDotToken == null
+        )
     const strictRoot = isStrictRoot(node, parentMap, withStrict)
 
     if (functionNode && restParameterIndex >= 0) {
@@ -94,10 +102,41 @@ export function generateSegment(
         if (restParameterIndex !== functionNode.parameters.length - 1) {
             throw new Error('not support yet')
         }
-        if (!ts.isIdentifier(restParameter.name)) {
-            throw new Error('not support yet')
-        }
     }
+
+    const parameterRuntimeNames = functionNode == null
+        ? []
+        : functionNode.parameters.map((parameter) =>
+            simpleParameterList && ts.isIdentifier(parameter.name)
+                ? parameter.name.text
+                : ctx.allocateInternalName('param')
+        )
+
+    const parameterPrologue = functionNode == null
+        ? []
+        : functionNode.parameters.flatMap((parameter, index) => {
+            if (
+                simpleParameterList
+                && ts.isIdentifier(parameter.name)
+                && parameter.initializer == null
+            ) {
+                return []
+            }
+
+            return generateBindingInitialization(
+                parameter.name,
+                [
+                    op(OpCode.GetRecord),
+                    op(OpCode.Literal, 2, [parameterRuntimeNames[index]]),
+                    op(OpCode.Get),
+                ],
+                0,
+                ctx,
+                {
+                    initializer: parameter.initializer,
+                }
+            )
+        })
 
     if (ts.isSourceFile(node)) {
         const statements = [...node.statements]
@@ -129,16 +168,14 @@ export function generateSegment(
 
     if (ts.isSourceFile(node)) {
         entry.push(op(OpCode.Literal, 2, [0]))
+        entry.push(op(OpCode.Literal, 2, [1]))
         entry.push(op(OpCode.Literal, 2, [-1]))
     } else {
-        for (const item of [...node.parameters].reverse()) {
-            if (!ts.isIdentifier(item.name)) {
-                throw new Error('not support yet')
-            }
-
-            entry.push(op(OpCode.Literal, 2, [item.name.text]))
+        for (let index = node.parameters.length - 1; index >= 0; index--) {
+            entry.push(op(OpCode.Literal, 2, [parameterRuntimeNames[index]]))
         }
         entry.push(op(OpCode.Literal, 2, [node.parameters.length]))
+        entry.push(op(OpCode.Literal, 2, [simpleParameterList ? 1 : 0]))
         entry.push(op(OpCode.Literal, 2, [restParameterIndex]))
     }
 
@@ -157,6 +194,7 @@ export function generateSegment(
 
     const results = [
         ...entry,
+        ...parameterPrologue,
         ...functionDeclarationNodes,
         ...bodyNodes
     ]

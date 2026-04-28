@@ -25,6 +25,7 @@ export type CodegenContext = {
     generateIdentifierGet(node: ts.Identifier): Segment
     tryResolveStaticAccess(node: ts.Node, name: string): StaticAccess | null
     isStaticAccessUnchecked(access: StaticAccess): boolean
+    allocateInternalName(prefix?: string): string
 }
 
 export function createCodegenContext(
@@ -38,6 +39,7 @@ export function createCodegenContext(
     const functionDeclarations: ts.FunctionDeclaration[] = []
     const nextOps = new Map<ts.Node, Op>()
     const continueOps = new Map<ts.Node, Op>()
+    let nextInternalNameId = 0
     const staticScopeSlotIndices = new Map<ts.Node, Map<string, number>>()
     const staticResolutionEnabled = !withEval && !evalTaintedFunctions.has(root)
 
@@ -174,6 +176,10 @@ export function createCodegenContext(
         ]
     }
 
+    function allocateInternalName(prefix: string = 'tmp') {
+        return `[${prefix}:${nextInternalNameId++}]`
+    }
+
     function generateLeft_(node: ts.Node, flag: number): Segment {
         const rawNode = extractQuote(node)
 
@@ -239,6 +245,7 @@ export function createCodegenContext(
         generateIdentifierGet,
         tryResolveStaticAccess,
         isStaticAccessUnchecked,
+        allocateInternalName,
     }
 
     return ctx

@@ -21,8 +21,11 @@ const syntaxes = [
     ['VariableDeclarationList var with init', 'var a = 0'],
     ['VariableDeclarationList let without init', 'let a'],
     ['VariableDeclarationList let with init', 'let a = 0'],
+    ['VariableDeclarationList let array pattern', 'let [a, b = 1, ...rest] = items'],
     ['VariableDeclarationList const', 'const a = 0'],
+    ['VariableDeclarationList const object pattern', 'const { a: b = 1 } = value'],
     ['ArrowFunction', '(() => 0)'],
+    ['ArrowFunction destructuring parameter', '(([a, b]) => a + b)'],
     ['ArrowFunction rest', '((...args) => args.length)'],
     ['FunctionStatement', 'function a () {}'],
     ['FunctionExpression', '(function a () {})'],
@@ -48,6 +51,7 @@ const syntaxes = [
     ['LabeledStatement let newline block', 'if (false) { label: let // ASI\n{} }'],
     ['LabeledStatement let newline identifier', 'if (false) { label: let // ASI\nvalue = 1 }'],
     ['WithStatement', 'with ({ value: 1 }) { value }'],
+    ['Catch destructuring', 'try { throw value } catch ({ a, b }) { a + b }'],
     ['Nested Scope', `
     let a = 0;
     {

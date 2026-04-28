@@ -40,6 +40,17 @@ describe('for...of', () => {
         `)
         expect(result).toEqual([7, 8])
     })
+
+    test('destructuring bindings in for-of keep per-iteration values', () => {
+        const result = compileAndRun(`
+            const fns = [];
+            for (let [a, b] of [[1, 2], [3, 4]]) {
+                fns.push(() => a + b);
+            }
+            [fns[0](), fns[1]()];
+        `)
+        expect(result).toEqual([3, 7])
+    })
 })
 
 describe('array spread [...iterable]', () => {

@@ -82,6 +82,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 })
             }
             const restParameterIndex = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const simpleParameterList = !!ctx[OpcodeContextField.popCurrentFrameStack]()
             const argumentNameCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const argumentNames: string[] = []
             for (let i = 0; i < argumentNameCount; i++) {
@@ -100,9 +101,10 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                 const obj = ctx[OpcodeContextField.createArgumentObject]()
                 const bindingLength = Math.min(argumentNameCount, parameterCount)
+                const mapsArguments = simpleParameterList
 
                 for (let i = 0; i < parameterCount; i++) {
-                    if (!hasRestParameter && i < bindingLength) {
+                    if (mapsArguments && i < bindingLength) {
                         Object.defineProperty(obj, i, {
                             enumerable: true,
                             configurable: true,

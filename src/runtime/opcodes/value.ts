@@ -13,10 +13,26 @@ import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type Runti
 
 const templateObjectCache = new WeakMap<number[], WeakMap<object, any[]>>()
 
+const createRealmArray = (ctx: RuntimeOpcodeContext, values: any[] = []) => {
+    const arr = [...values]
+    const vmArray = Reflect.get(ctx[OpcodeContextField.currentFrame][Fields.globalThis], 'Array')
+    const prototype = vmArray?.prototype
+    if (prototype && Object.getPrototypeOf(arr) !== prototype) {
+        Object.setPrototypeOf(arr, prototype)
+    }
+    return arr
+}
+
+const createRealmObject = (ctx: RuntimeOpcodeContext) => {
+    const vmObject = Reflect.get(ctx[OpcodeContextField.currentFrame][Fields.globalThis], 'Object')
+    const prototype = vmObject?.prototype
+    return prototype ? Object.create(prototype) : {}
+}
+
 export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): OpcodeHandlerResult => {
     switch (command) {
         case OpCode.ArrayLiteral:
-            ctx[OpcodeContextField.pushCurrentFrameStack]([])
+            ctx[OpcodeContextField.pushCurrentFrameStack](createRealmArray(ctx))
             break
         case OpCode.ArraySpread: {
             const iterable = ctx[OpcodeContextField.popCurrentFrameStack]()
@@ -63,8 +79,8 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             const site = ctx[OpcodeContextField.commandPtr]
             let templateObject = siteCache[site]
             if (templateObject === undefined) {
-                const raw = Object.freeze([...rawParts])
-                templateObject = [...cookedParts]
+                const raw = Object.freeze(createRealmArray(ctx, rawParts))
+                templateObject = createRealmArray(ctx, cookedParts)
                 Object.defineProperty(templateObject, 'raw', {
                     configurable: false,
                     enumerable: false,
@@ -79,7 +95,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
         }
             break
         case OpCode.ObjectLiteral:
-            ctx[OpcodeContextField.pushCurrentFrameStack]({})
+            ctx[OpcodeContextField.pushCurrentFrameStack](createRealmObject(ctx))
             break
         case OpCode.Typeof: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()

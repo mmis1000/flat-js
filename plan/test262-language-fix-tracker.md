@@ -64,6 +64,19 @@ Reduce the `language` category failures in targeted batches:
     - `Expected no error, got Error: not supported left node: ArrayLiteralExpression`
     - `Expected no error, got Error: not supported left node: ObjectLiteralExpression`
     - `Expected no error, got Error: not support non identifier binding`
+  - Current diagnosis split:
+    - `binding declarations / params / catch`
+      - shared binding-pattern codegen was missing for declaration names, parameter bindings, and `catch` bindings
+      - status: partially fixed in compiler/runtime
+    - `binding runtime semantics`
+      - remaining array-pattern failures cluster around iterator closing, generator-family call timing, and anonymous function/class naming in default initializers
+      - status: in progress
+    - `assignment patterns`
+      - plain destructuring assignment and loop heads that use assignment targets still fail on `ArrayLiteralExpression` / `ObjectLiteralExpression`
+      - status: not started
+    - `early errors`
+      - residual `Expected test to throw error of type SyntaxError, but did not throw error`
+      - status: not started
 
 - [ ] `missing-operators`
   - Primary signatures:
@@ -105,3 +118,18 @@ Reduce the `language` category failures in targeted batches:
   - intended scope failing files: `10181 -> 9874`
   - out-of-scope failing files: `7610 -> 7609`
   - total failing files: `17791 -> 17483`
+- 2026-04-28: Started `parameter-and-binding-patterns` and wired a shared binding-pattern initialization helper through:
+  - declaration destructuring in [basics.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/basics.ts:1>)
+  - `for` / `for-in` / `for-of` declaration heads and per-iteration closure copying in [loops.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/loops.ts:1>)
+  - destructured/default/rest parameters in [index.ts](</M:/Playground/flat-js/src/compiler/codegen/index.ts:1>) plus [function.ts](</M:/Playground/flat-js/src/runtime/opcodes/function.ts:1>)
+  - destructured `catch` bindings in [control-flow.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/control-flow.ts:1>)
+- 2026-04-28: Fixed binding-name extraction for array/object binding patterns in [analysis.ts](</M:/Playground/flat-js/src/compiler/analysis.ts:1>), which was previously missing names nested under `BindingElement`.
+- 2026-04-28: Added focused regressions in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>), [for-of-and-spread.test.ts](</M:/Playground/flat-js/src/__tests__/for-of-and-spread.test.ts:1>), and [syntaxes.test.ts](</M:/Playground/flat-js/src/__tests__/syntaxes.test.ts:1>) for destructuring declarations, parameters, `catch`, and `for-of` closure capture.
+- 2026-04-28: Fixed a root runtime realm leak in [value.ts](</M:/Playground/flat-js/src/runtime/opcodes/value.ts:1>) so `ArrayLiteral` / `ObjectLiteral` and tagged-template backing arrays use the provided VM realm prototypes instead of host-realm prototypes.
+  - This directly fixes binding tests that mutate `Array.prototype` in an alternate realm before destructuring.
+  - Added an alternate-realm regression in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) to cover the realm-sensitive array/object literal path.
+- 2026-04-28: Focused validation for this batch currently shows:
+  - local targeted Jest for destructuring/runtime regressions is green
+  - `iter-get-err-array-prototype` is now green for plain declarations, plain functions, plain methods, loop declarations, and `catch`
+  - residual `iter-get-err-array-prototype` failures are concentrated in generator / async-generator call paths, which indicates generator-family parameter instantiation timing is still wrong there
+  - `iter-close` still fails broadly, which confirms iterator closing is a separate remaining runtime contract
