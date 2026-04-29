@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const vm = require('vm');
 const { compile } = require(path.join(__dirname, '..', 'lib', 'compiler'));
 const flatEntry = path.join(__dirname, '..', 'lib', 'index.js');
 
@@ -25,14 +26,22 @@ module.exports = function flatJsTest262Preprocessor(test) {
   }
 
   test.contents = `'use strict';
-const { compileAndRun } = require(${JSON.stringify(flatEntry)});
-// Host globals for Test262: eshost's Node agent puts print + a real globalThis on the VM context.
-const vmGlobal = Object.create(globalThis);
-vmGlobal.globalThis = vmGlobal;
-vmGlobal.print = function print(...args) {
-  console.log(...args);
-};
-compileAndRun(${JSON.stringify(src)}, vmGlobal);
+(() => {
+  const __flatJsVm = require('vm');
+  const { compileAndRun } = require(${JSON.stringify(flatEntry)});
+  const context = __flatJsVm.createContext({ console, require });
+  const vmGlobal = __flatJsVm.runInContext(\`
+    const g = Object.create(globalThis);
+    g.globalThis = g;
+    g.print = function print(...args) {
+      console.log(...args);
+    };
+    g.console = console;
+    g.require = require;
+    g;
+  \`, context);
+  return compileAndRun(${JSON.stringify(src)}, vmGlobal);
+})();
 `;
   return test;
 };

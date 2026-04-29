@@ -4,10 +4,15 @@ const path = require('path')
 const { spawn } = require('child_process')
 
 const rootDir = process.cwd()
-const languageDir = path.join(rootDir, 'node_modules', 'test262', 'test', 'language')
-const summaryPath = path.join(rootDir, 'plan', 'test262-language-summary.md')
+const defaultLanguageDir = path.join(rootDir, 'node_modules', 'test262', 'test', 'language')
+const languageDir = process.env.TEST262_SCAN_ROOT
+    ? path.resolve(rootDir, process.env.TEST262_SCAN_ROOT)
+    : defaultLanguageDir
+const summaryPath = process.env.TEST262_SCAN_SUMMARY
+    ? path.resolve(rootDir, process.env.TEST262_SCAN_SUMMARY)
+    : path.join(rootDir, 'plan', 'test262-language-summary.md')
 const maxFilesPerChunk = 350
-const chunkConcurrency = Math.max(2, Math.min(8, Number(process.env.TEST262_SCAN_CONCURRENCY || 8), os.cpus().length || 1))
+const chunkConcurrency = Math.max(2, Math.min(16, Number(process.env.TEST262_SCAN_CONCURRENCY || 12), os.cpus().length || 1))
 const maxExplicitChunkArgs = 48
 const maxExplicitChunkCommandLength = 7000
 
@@ -495,7 +500,7 @@ function renderSummary(resultsByFile, scanNotes) {
     lines.push('')
     lines.push('## Scan Method')
     lines.push('')
-    lines.push('- Ran `test262-harness` with the JSON reporter against `node_modules/test262/test/language` in recursively split chunks.')
+    lines.push(`- Ran \`test262-harness\` with the JSON reporter against \`${relativeFromRoot(languageDir)}\` in recursively split chunks.`)
     lines.push(`- Started with directory chunks of at most about ${maxFilesPerChunk} tests, then fell back to smaller units when the harness emitted partial JSON or crashed.`)
     lines.push('- Classified failures per file after combining default/strict scenarios.')
     lines.push('- Marked a failure as `out-of-scope` when the repo currently has no implementation path for that syntax or runtime model, such as modules, dynamic import, explicit resource management, or unsupported modern class element forms.')

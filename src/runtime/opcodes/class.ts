@@ -52,6 +52,7 @@ export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         }
             break
         case OpCode.DefineGetter: {
+            const enumerable = !!ctx[OpcodeContextField.popCurrentFrameStack]()
             const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const obj = ctx[OpcodeContextField.popCurrentFrameStack]<Record<string, any>>()
@@ -61,13 +62,14 @@ export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 get: fn as () => any,
                 set: existing.set,
                 configurable: true,
-                enumerable: false,
+                enumerable,
             })
 
             ctx[OpcodeContextField.pushCurrentFrameStack](obj)
         }
             break
         case OpCode.DefineSetter: {
+            const enumerable = !!ctx[OpcodeContextField.popCurrentFrameStack]()
             const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const obj = ctx[OpcodeContextField.popCurrentFrameStack]<Record<string, any>>()
@@ -77,7 +79,7 @@ export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 get: existing.get,
                 set: fn as (v: any) => void,
                 configurable: true,
-                enumerable: false,
+                enumerable,
             })
 
             ctx[OpcodeContextField.pushCurrentFrameStack](obj)

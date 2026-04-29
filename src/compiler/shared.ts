@@ -326,7 +326,7 @@ export const enum OpCode {
 
     /**
      * Creates a VM function object from encoded metadata.
-     * Stack (bottom to top): name, nodeOffset, nodeFunctionType
+     * Stack (bottom to top): name, expectedArgumentCount, nodeOffset, bodyOffset, nodeFunctionType
      * Result: fn
      */
     DefineFunction,
@@ -434,6 +434,12 @@ export const enum OpCode {
      */
     Typeof,
     /**
+     * Applies ECMAScript `ToPropertyKey`.
+     * Stack (bottom to top): value
+     * Result: propertyKey
+     */
+    ToPropertyKey,
+    /**
      * Computes `typeof target[name]` / `typeof binding`.
      * Stack (bottom to top): target, name
      * Result: typeofValue
@@ -495,6 +501,13 @@ export const enum OpCode {
      * Result: object
      */
     ObjectLiteral,
+    /**
+     * Copies own enumerable properties except the excluded keys into a fresh object.
+     * Stack (bottom to top): source, excludedKey * N, excludedKeyCount
+     * Result: restObject
+     * Notes: Uses `ToPropertyKey`-style exclusion matching for string/number/symbol keys and preserves the current realm's `Object.prototype`.
+     */
+    ObjectRest,
     /**
      * Creates a regular expression object.
      * Stack (bottom to top): source, flags
@@ -932,6 +945,9 @@ export const enum FunctionTypes {
     GeneratorDeclaration,
     GeneratorExpression,
     GeneratorMethod,
+    AsyncGeneratorDeclaration,
+    AsyncGeneratorExpression,
+    AsyncGeneratorMethod,
     AsyncFunctionDeclaration,
     AsyncFunctionExpression,
     AsyncArrowFunction,

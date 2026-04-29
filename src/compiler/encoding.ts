@@ -71,7 +71,13 @@ export function finalizeLiteralPool(programData: number[], literalValues: any[])
     programData.push(...poolWords)
 }
 
-export function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment>, programData: number[], literalValues: any[]) {
+export function generateData(
+    seg: Segment,
+    fnRootToSegment: Map<ts.Node, Segment>,
+    fnRootToBodyStart: Map<ts.Node, Op>,
+    programData: number[],
+    literalValues: any[]
+) {
     for (const op of seg) {
         if (op.length === 0) {
             continue
@@ -84,10 +90,15 @@ export function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment
 
         if (op.op === OpCode.NodeOffset) {
             const ptr: any = op.preData[0]
+            const mode = op.preData[1]
             programData.push(OpCode.Literal)
             if (ptr.kind !== undefined) {
                 const nodePtr: ts.Node = ptr
-                programData.push(headOf(fnRootToSegment.get(nodePtr)!).offset)
+                programData.push(
+                    mode === 'bodyStart'
+                        ? fnRootToBodyStart.get(nodePtr)!.offset
+                        : headOf(fnRootToSegment.get(nodePtr)!).offset
+                )
             } else {
                 const opPtr: Op = ptr
                 programData.push(opPtr.offset)
@@ -106,7 +117,14 @@ export function generateData(seg: Segment, fnRootToSegment: Map<ts.Node, Segment
             ) ?? false)
 
             let resolvedType: FunctionTypes
-            if (hasAsterisk) {
+            if (hasAsterisk && hasAsync) {
+                switch (func.kind) {
+                    case ts.SyntaxKind.FunctionDeclaration: resolvedType = FunctionTypes.AsyncGeneratorDeclaration; break
+                    case ts.SyntaxKind.FunctionExpression: resolvedType = FunctionTypes.AsyncGeneratorExpression; break
+                    case ts.SyntaxKind.MethodDeclaration: resolvedType = FunctionTypes.AsyncGeneratorMethod; break
+                    default: throw new Error('unexpected async generator kind')
+                }
+            } else if (hasAsterisk) {
                 switch (func.kind) {
                     case ts.SyntaxKind.FunctionDeclaration: resolvedType = FunctionTypes.GeneratorDeclaration; break
                     case ts.SyntaxKind.FunctionExpression: resolvedType = FunctionTypes.GeneratorExpression; break

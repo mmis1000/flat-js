@@ -51,6 +51,21 @@ describe('for...of', () => {
         `)
         expect(result).toEqual([3, 7])
     })
+
+    test('assignment-pattern heads in for-of destructure each entry', () => {
+        const result = compileAndRun(`
+            var a = 0;
+            var b = 0;
+            var total = 0;
+
+            for ([a, b] of [[1, 2], [3, 4]]) {
+                total += a + b;
+            }
+
+            [a, b, total];
+        `)
+        expect(result).toEqual([3, 4, 10])
+    })
 })
 
 describe('array spread [...iterable]', () => {

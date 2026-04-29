@@ -97,9 +97,43 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
         case OpCode.ObjectLiteral:
             ctx[OpcodeContextField.pushCurrentFrameStack](createRealmObject(ctx))
             break
+        case OpCode.ObjectRest: {
+            const excludedKeyCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const excludedKeys: Array<string | symbol> = []
+            for (let i = 0; i < excludedKeyCount; i++) {
+                const key = ctx[OpcodeContextField.popCurrentFrameStack]()
+                excludedKeys.unshift(typeof key === 'symbol' ? key : String(key))
+            }
+
+            const source = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const rest = createRealmObject(ctx)
+            const from = Object(source)
+            const excluded = new Set(excludedKeys)
+
+            for (const key of Reflect.ownKeys(from)) {
+                if (excluded.has(key)) {
+                    continue
+                }
+
+                const descriptor = Reflect.getOwnPropertyDescriptor(from, key)
+                if (!descriptor?.enumerable) {
+                    continue
+                }
+
+                rest[key] = from[key]
+            }
+
+            ctx[OpcodeContextField.pushCurrentFrameStack](rest)
+        }
+            break
         case OpCode.Typeof: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
             ctx[OpcodeContextField.pushCurrentFrameStack](typeof value)
+        }
+            break
+        case OpCode.ToPropertyKey: {
+            const value = ctx[OpcodeContextField.popCurrentFrameStack]()
+            ctx[OpcodeContextField.pushCurrentFrameStack](typeof value === 'symbol' ? value : String(value))
         }
             break
         case OpCode.TypeofReference: {

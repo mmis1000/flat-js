@@ -56,6 +56,7 @@ export const enum OpcodeContextField {
     createArgumentObject,
     defineFunction,
     createGeneratorFromExecution,
+    createAsyncGeneratorFromExecution,
     bindInternal,
     emulateEval,
     emulateFunctionConstructor,
@@ -115,10 +116,11 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.setStaticVariableValueChecked](frame: Frame, depth: number, index: number, value: any): any
 
     [OpcodeContextField.createArgumentObject](): Record<string, any>
-    [OpcodeContextField.defineFunction](globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number): any
+    [OpcodeContextField.defineFunction](globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number, bodyOffset: number): any
     [OpcodeContextField.createGeneratorFromExecution](
         program: number[],
         offset: number,
+        bodyOffset: number,
         globalThis: object,
         scopes: Scope[],
         invokeData: any,
@@ -126,6 +128,18 @@ export interface RuntimeOpcodeContext {
     ): IterableIterator<unknown> & {
         return(value?: unknown): IteratorResult<unknown>
         throw(error?: unknown): IteratorResult<unknown>
+    }
+    [OpcodeContextField.createAsyncGeneratorFromExecution](
+        program: number[],
+        offset: number,
+        bodyOffset: number,
+        globalThis: object,
+        scopes: Scope[],
+        invokeData: any,
+        args: unknown[]
+    ): AsyncIterableIterator<unknown> & {
+        return(value?: unknown): Promise<IteratorResult<unknown>>
+        throw(error?: unknown): Promise<IteratorResult<unknown>>
     }
     [OpcodeContextField.bindInternal](fn: any, self: any, args: any[]): any
     [OpcodeContextField.emulateEval](value: unknown, includesLocalScope: boolean): any

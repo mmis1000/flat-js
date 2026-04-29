@@ -2,7 +2,7 @@ import * as ts from 'typescript'
 
 import { extractVariable } from '../../analysis'
 import { OpCode, SetFlag, SpecialVariable, VariableType } from '../../shared'
-import { generateBindingInitialization } from '../binding-patterns'
+import { generateAssignmentPattern, generateBindingInitialization } from '../binding-patterns'
 import { abort, headOf, markInternals, op, generateEnterScope, generateLeaveScope } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
@@ -203,6 +203,13 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 )
             }
 
+            if (!ts.isVariableDeclarationList(node.initializer)) {
+                const assignmentTarget = ctx.extractQuote(node.initializer)
+                if (ts.isArrayLiteralExpression(assignmentTarget) || ts.isObjectLiteralExpression(assignmentTarget)) {
+                    return generateAssignmentPattern(assignmentTarget, entryValue, flag, ctx)
+                }
+            }
+
             return [
                 ...getLhs(),
                 ...entryValue,
@@ -354,6 +361,13 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                     ctx,
                     { freezeConst: variableIsConst }
                 )
+            }
+
+            if (!ts.isVariableDeclarationList(node.initializer)) {
+                const assignmentTarget = ctx.extractQuote(node.initializer)
+                if (ts.isArrayLiteralExpression(assignmentTarget) || ts.isObjectLiteralExpression(assignmentTarget)) {
+                    return generateAssignmentPattern(assignmentTarget, entryValue, flag, ctx)
+                }
             }
 
             return [

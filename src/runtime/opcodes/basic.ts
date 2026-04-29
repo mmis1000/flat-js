@@ -3,6 +3,7 @@ import {
     Context,
     Fields,
     Frame,
+    IDENTIFIER_REFERENCE_SCOPE,
     REGEXP,
     Scope,
     TDZ_VALUE,
@@ -19,6 +20,13 @@ import {
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
 export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): void => {
+    const getResolvedBindingScope = (value: unknown): Scope | null => {
+        if (value == null || typeof value !== 'object' || !(IDENTIFIER_REFERENCE_SCOPE in value)) {
+            return null
+        }
+        return (value as { [IDENTIFIER_REFERENCE_SCOPE]: Scope | null })[IDENTIFIER_REFERENCE_SCOPE]
+    }
+
     switch (command) {
         case OpCode.Literal: {
             const value = ctx[OpcodeContextField.read]()
@@ -116,8 +124,9 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.SetInitialized: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
-            const env = ctx[OpcodeContextField.popCurrentFrameStack]<Frame>()
-            const scope = ctx[OpcodeContextField.findScope](env, name)!
+            const env = ctx[OpcodeContextField.popCurrentFrameStack]<Frame | object>()
+            const scope = getResolvedBindingScope(env)
+                ?? ctx[OpcodeContextField.findScope](env as Frame, name)!
             ctx[OpcodeContextField.initializeBindingValue](scope, name, value)
             ctx[OpcodeContextField.pushCurrentFrameStack](value)
         }
@@ -382,9 +391,10 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         }
             break
         case OpCode.FreezeVariable: {
-            const env = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.valueStack], 2) as Frame
+            const env = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.valueStack], 2) as Frame | object
             const name = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.valueStack]) as string
-            const scope = ctx[OpcodeContextField.findScope](env, name)
+            const scope = getResolvedBindingScope(env)
+                ?? ctx[OpcodeContextField.findScope](env as Frame, name)
             if (scope) {
                 ctx[OpcodeContextField.freezeBinding](scope, name)
             }

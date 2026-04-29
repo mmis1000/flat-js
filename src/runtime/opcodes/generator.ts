@@ -1,6 +1,7 @@
 import { OpCode } from "../../compiler"
 import {
     Fields,
+    FrameType,
     GeneratorState,
     assertIteratorResult,
     generatorStates,
@@ -47,9 +48,18 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
             if (state && state.pendingAction) {
                 const action = state.pendingAction
                 state.pendingAction = null
-                ctx[OpcodeContextField.popCurrentFrameStack]()
                 if (action.type === 'throw') {
+                    if (ctx[OpcodeContextField.currentFrame][Fields.type] === FrameType.Try) {
+                        ctx[OpcodeContextField.pushCurrentFrameStack](action.value)
+                        ctx[OpcodeContextField.initiateThrow]()
+                        return BREAK_COMMAND
+                    }
                     throw action.value
+                }
+                if (ctx[OpcodeContextField.currentFrame][Fields.type] === FrameType.Try) {
+                    ctx[OpcodeContextField.pushCurrentFrameStack](action.value)
+                    ctx[OpcodeContextField.initiateReturn]()
+                    return BREAK_COMMAND
                 }
                 ctx[OpcodeContextField.executeReturn](action.value)
                 return BREAK_COMMAND

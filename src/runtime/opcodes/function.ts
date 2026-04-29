@@ -20,6 +20,7 @@ import {
     functionDescriptors,
     generatorStates,
     getEmptyObject,
+    isAsyncGeneratorType,
     isAsyncType,
     isGeneratorType,
 } from "../shared"
@@ -56,6 +57,8 @@ const bindFunctionSelfName = (
         case FunctionTypes.MethodDeclaration:
         case FunctionTypes.GeneratorExpression:
         case FunctionTypes.GeneratorMethod:
+        case FunctionTypes.AsyncGeneratorExpression:
+        case FunctionTypes.AsyncGeneratorMethod:
         case FunctionTypes.AsyncFunctionExpression:
         case FunctionTypes.AsyncMethod:
             if (name !== '') {
@@ -156,6 +159,9 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     case FunctionTypes.GeneratorDeclaration:
                     case FunctionTypes.GeneratorExpression:
                     case FunctionTypes.GeneratorMethod:
+                    case FunctionTypes.AsyncGeneratorDeclaration:
+                    case FunctionTypes.AsyncGeneratorExpression:
+                    case FunctionTypes.AsyncGeneratorMethod:
                     case FunctionTypes.AsyncFunctionDeclaration:
                     case FunctionTypes.AsyncFunctionExpression:
                     case FunctionTypes.AsyncMethod:
@@ -198,6 +204,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 switch (functionType) {
                     case FunctionTypes.MethodDeclaration:
                     case FunctionTypes.GeneratorMethod:
+                    case FunctionTypes.AsyncGeneratorMethod:
                     case FunctionTypes.AsyncMethod:
                     case FunctionTypes.GetAccessor:
                     case FunctionTypes.SetAccessor:
@@ -240,9 +247,23 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             break
         case OpCode.DefineFunction: {
             const type = ctx[OpcodeContextField.popCurrentFrameStack]<FunctionTypes>()
+            const bodyOffset = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const offset = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const expectedArgumentCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
-            ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.defineFunction](ctx[OpcodeContextField.currentFrame][Fields.globalThis], ctx[OpcodeContextField.currentFrame][Fields.scopes], name, type, offset))
+            const fn = ctx[OpcodeContextField.defineFunction](
+                ctx[OpcodeContextField.currentFrame][Fields.globalThis],
+                ctx[OpcodeContextField.currentFrame][Fields.scopes],
+                name,
+                type,
+                offset,
+                bodyOffset
+            )
+            Object.defineProperty(fn, 'length', {
+                value: expectedArgumentCount,
+                configurable: true,
+            })
+            ctx[OpcodeContextField.pushCurrentFrameStack](fn)
         }
             break
         case OpCode.ExpandArgumentArray: {
@@ -432,10 +453,27 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
                     ctx[OpcodeContextField.pushCurrentFrameStack](Reflect.apply(fnTarget, self, parameters))
                 }
+            } else if (isAsyncGeneratorType(descriptor[Fields.type])) {
+                const iterator = ctx[OpcodeContextField.createAsyncGeneratorFromExecution](
+                    descriptor[Fields.programSection],
+                    descriptor[Fields.offset],
+                    descriptor.bodyOffset,
+                    descriptor[Fields.globalThis],
+                    [...descriptor[Fields.scopes]],
+                    {
+                        [Fields.type]: InvokeType.Apply,
+                        [Fields.function]: fnTarget,
+                        [Fields.name]: descriptor[Fields.name],
+                        [Fields.self]: self,
+                    },
+                    parameters
+                )
+                ctx[OpcodeContextField.pushCurrentFrameStack](iterator)
             } else if (isGeneratorType(descriptor[Fields.type])) {
                 const iterator = ctx[OpcodeContextField.createGeneratorFromExecution](
                     descriptor[Fields.programSection],
                     descriptor[Fields.offset],
+                    descriptor.bodyOffset,
                     descriptor[Fields.globalThis],
                     [...descriptor[Fields.scopes]],
                     {

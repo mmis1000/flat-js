@@ -1,16 +1,18 @@
 import * as ts from 'typescript'
 
 import { FunctionTypes, OpCode, SpecialVariable, VariableType } from '../../shared'
+import { getExpectedArgumentCount } from './functions'
 import { markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
-export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
-    if (!ts.isClassDeclaration(node) && !ts.isClassExpression(node)) {
-        return
-    }
-
-    const className = node.name?.text ?? ''
+export function generateClassValue(
+    node: ts.ClassDeclaration | ts.ClassExpression,
+    flag: number,
+    ctx: CodegenContext,
+    nameOverride?: string
+): Segment {
+    const className = nameOverride ?? node.name?.text ?? ''
     const extendsClause = node.heritageClauses?.find(
         (clause: ts.HeritageClause) => clause.token === ts.SyntaxKind.ExtendsKeyword
     )
@@ -42,7 +44,9 @@ export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext
     if (ctorMember) {
         res.push(
             op(OpCode.Literal, 2, [className]),
+            op(OpCode.Literal, 2, [getExpectedArgumentCount(ctorMember)]),
             op(OpCode.NodeOffset, 2, [ctorMember]),
+            op(OpCode.NodeOffset, 2, [ctorMember, 'bodyStart']),
             op(OpCode.Literal, 2, [hasSuper ? FunctionTypes.DerivedConstructor : FunctionTypes.Constructor]),
             op(OpCode.DefineFunction)
         )
@@ -90,13 +94,17 @@ export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext
             }
 
             res.push(op(OpCode.Duplicate))
+            res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(member)]))
             res.push(op(OpCode.NodeOffset, 2, [member]))
+            res.push(op(OpCode.NodeOffset, 2, [member, 'bodyStart']))
             res.push(op(OpCode.NodeFunctionType, 2, [member]))
             res.push(op(OpCode.DefineFunction))
 
             if (ts.isGetAccessorDeclaration(member)) {
+                res.push(op(OpCode.Literal, 2, [0]))
                 res.push(op(OpCode.DefineGetter))
             } else if (ts.isSetAccessorDeclaration(member)) {
+                res.push(op(OpCode.Literal, 2, [0]))
                 res.push(op(OpCode.DefineSetter))
             } else {
                 res.push(op(OpCode.DefineMethod))
@@ -109,6 +117,16 @@ export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext
     if (hasSuper) {
         res.push(op(OpCode.LeaveScope))
     }
+
+    return res
+}
+
+export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
+    if (!ts.isClassDeclaration(node) && !ts.isClassExpression(node)) {
+        return
+    }
+
+    const res = generateClassValue(node, flag, ctx)
 
     if (ts.isClassDeclaration(node) && node.name) {
         return [

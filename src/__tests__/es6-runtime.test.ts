@@ -119,6 +119,325 @@ test('destructuring declarations initialize array and object bindings', () => {
     `)).toEqual([1, 2, 10, 4, '30,40'])
 })
 
+test('object binding rest copies own enumerable leftovers', () => {
+    expect(compileAndRun(`
+        var source = { a: 1, b: 2 };
+        var { a: first, ...rest } = source;
+        [first, typeof rest, Object.keys(rest).join(',')]
+    `)).toEqual([1, 'object', 'b'])
+})
+
+test('object binding rest supports computed exclusions and skips non-enumerable keys', () => {
+    expect(compileAndRun(`
+        var key = 'a'
+        var getterCalls = 0
+        var source = {}
+        Object.defineProperty(source, 'a', {
+            enumerable: true,
+            get() {
+                getterCalls += 1
+                return 1
+            }
+        })
+        Object.defineProperty(source, 'hidden', {
+            enumerable: false,
+            value: 2
+        })
+        source.b = 3
+
+        var { [key]: first, ...rest } = source;
+        [first, getterCalls, Object.keys(rest).join(','), 'hidden' in rest, rest.b]
+    `)).toEqual([1, 1, 'b', false, 3])
+})
+
+test('destructuring assignment patterns work for arrays and objects', () => {
+    expect(compileAndRun(`
+        var a = 0;
+        var b = 0;
+        var c = 0;
+        var rest = [];
+
+        ([a, b = 3, ...rest] = [1, undefined, 4, 5]);
+        ({ a: c, b } = { a: 9, b: 2 });
+
+        [a, b, c, rest.join(',')]
+    `)).toEqual([1, 2, 9, '4,5'])
+})
+
+test('destructuring assignment supports mixed nested rest object patterns', () => {
+    expect(compileAndRun(`
+        let b, c;
+        ([, ...{ '2': b, ...c }] = [1, 2, 3, 4]);
+
+        [b, Array.isArray(c), c[0], c[1], c.length]
+    `)).toEqual([4, false, 2, 3, undefined])
+})
+
+test('array binding closes iterators that are not exhausted', () => {
+    expect(compileAndRun(`
+        let doneCallCount = 0
+        const iter = {
+            [Symbol.iterator]() {
+                return {
+                    next() {
+                        return { value: 1, done: false }
+                    },
+                    return() {
+                        doneCallCount += 1
+                        return {}
+                    }
+                }
+            }
+        }
+
+        const [x] = iter
+        doneCallCount
+    `)).toBe(1)
+})
+
+test('array binding does not close iterators once exhausted', () => {
+    expect(compileAndRun(`
+        let doneCallCount = 0
+        const iter = {
+            [Symbol.iterator]() {
+                let index = 0
+                return {
+                    next() {
+                        index += 1
+                        return index === 1
+                            ? { value: 1, done: false }
+                            : { value: undefined, done: true }
+                    },
+                    return() {
+                        doneCallCount += 1
+                        return {}
+                    }
+                }
+            }
+        }
+
+        let [x, y] = iter
+        doneCallCount
+    `)).toBe(0)
+})
+
+test('array assignment rest closes iterators when assignment-target evaluation throws', () => {
+    expect(compileAndRun(`
+        var nextCount = 0
+        var returnCount = 0
+        var iterable = {}
+        var iterator = {
+            next() {
+                nextCount += 1
+                return { done: true }
+            },
+            return() {
+                returnCount += 1
+                return {}
+            }
+        }
+        var thrower = function() {
+            throw new Error('boom')
+        }
+        iterable[Symbol.iterator] = function() {
+            return iterator
+        }
+
+        try {
+            0, [...{}[thrower()]] = iterable
+        } catch (e) {}
+
+        [nextCount, returnCount]
+    `)).toEqual([0, 1])
+})
+
+test('array assignment rest materializes undefined values from holey arrays', () => {
+    expect(compileAndRun(`
+        var x = null
+        let length
+        var vals = [,];
+
+        [...{ 0: x, length }] = vals;
+
+        [x === undefined, length]
+    `)).toEqual([true, 1])
+})
+
+test('array iterator close requires an object return result on normal completion', () => {
+    expect(() => compileAndRun(`
+        const iter = {
+            [Symbol.iterator]() {
+                return {
+                    next() {
+                        return { value: 1, done: false }
+                    },
+                    return() {
+                        return null
+                    }
+                }
+            }
+        }
+
+        const [x] = iter
+    `)).toThrow(TypeError)
+})
+
+test('destructuring assignment evaluates iterator done before coercing the property key', () => {
+    expect(compileAndRun(`
+        var log = [];
+
+        function source() {
+            log.push('source');
+            var iterator = {
+                next: function() {
+                    log.push('iterator-step');
+                    return {
+                        get done() {
+                            log.push('iterator-done');
+                            return true;
+                        },
+                        get value() {
+                            log.push('iterator-value');
+                        }
+                    };
+                }
+            };
+            var source = {};
+            source[Symbol.iterator] = function() {
+                log.push('iterator');
+                return iterator;
+            };
+            return source;
+        }
+
+        function target() {
+            log.push('target');
+            return target = {
+                set q(v) {
+                    log.push('set');
+                }
+            };
+        }
+
+        function targetKey() {
+            log.push('target-key');
+            return {
+                toString: function() {
+                    log.push('target-key-tostring');
+                    return 'q';
+                }
+            };
+        }
+
+        ([target()[targetKey()]] = source());
+        log;
+    `)).toEqual([
+        'source',
+        'iterator',
+        'target',
+        'target-key',
+        'iterator-step',
+        'iterator-done',
+        'target-key-tostring',
+        'set',
+    ])
+})
+
+test('generator return closes iterators during destructuring assignment suspension', () => {
+    expect(compileAndRun(`
+        var returnCount = 0
+        var iterable = {}
+        var iterator = {
+            next() {
+                return { done: false, value: undefined }
+            },
+            return() {
+                returnCount += 1
+                return {}
+            }
+        }
+        iterable[Symbol.iterator] = function() {
+            return iterator
+        }
+
+        function* g() {
+            var vals = iterable
+            var result
+            result = [ {} = yield ] = vals
+        }
+
+        var result
+        var iter = g()
+        iter.next()
+        result = iter.return(777);
+
+        [returnCount, result.value, result.done]
+    `)).toEqual([1, 777, true])
+})
+
+test('generator return close errors override the pending return result in destructuring assignment', () => {
+    expect(() => compileAndRun(`
+        var iterable = {}
+        var iterator = {
+            next() {
+                return { done: false, value: undefined }
+            },
+            return() {
+                throw new Error('close')
+            }
+        }
+        iterable[Symbol.iterator] = function() {
+            return iterator
+        }
+
+        function* g() {
+            var vals = iterable
+            var result
+            result = [ {} = yield ] = vals
+        }
+
+        var result
+        var iter = g()
+        iter.next()
+        result = iter.return(777);
+    `)).toThrow('close')
+})
+
+test('generator throw preserves the original abrupt completion when iterator close also throws', () => {
+    expect(compileAndRun(`
+        var returnCount = 0
+        var iterable = {}
+        var iterator = {
+            next() {
+                return { done: false, value: undefined }
+            },
+            return() {
+                returnCount += 1
+                throw new Error('close')
+            }
+        }
+        iterable[Symbol.iterator] = function() {
+            return iterator
+        }
+
+        function* g() {
+            var vals = iterable
+            var result
+            result = [ {} = yield ] = vals
+        }
+
+        var result
+        var iter = g()
+        iter.next()
+
+        try {
+            result = iter.throw(new Error('outer'));
+        } catch (error) {
+            [returnCount, error.message]
+        }
+    `)).toEqual([1, 'outer'])
+})
+
 test('destructured and default parameters keep arguments unmapped', () => {
     expect(compileAndRun(`
         function collect(a = 1, { b } = { b: a + 1 }, ...rest) {
@@ -166,4 +485,72 @@ test('array and object literals use the provided realm prototypes', () => {
     `, vmGlobal)
 
     expect(result).toEqual([true, true, true])
+})
+
+test('destructuring default initializers infer names for anonymous functions and classes', () => {
+    expect(compileAndRun(`
+        let [a = function(){}, b = () => {}, c = class {}, d = async function(){}, e = function*(){}] = []
+        let { f = function(){}, g = class {} } = {}
+        var h
+        var i
+
+        ([h = function(){}] = []);
+        ({ i = class {} } = {});
+
+        function collect([j = function(){}] = []) {
+            return j.name
+        }
+
+        [a.name, b.name, c.name, d.name, e.name, f.name, g.name, h.name, i.name, collect()]
+    `)).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'])
+})
+
+test('generator parameter destructuring errors throw at call time', () => {
+    expect(compileAndRun(`
+        const arg = []
+        Object.defineProperty(arg, Symbol.iterator, {
+            configurable: true,
+            get() {
+                throw new TypeError('boom')
+            }
+        })
+
+        let generatorFnError = false
+        let generatorMethodError = false
+        let asyncGeneratorFnError = false
+        let asyncGeneratorMethodError = false
+
+        const fn = function*([x]) {}
+        const asyncFn = async function*([x]) {}
+        const obj = {
+            *method([x]) {},
+            async *asyncMethod([x]) {}
+        }
+
+        try {
+            fn(arg)
+        } catch (e) {
+            generatorFnError = e.constructor === TypeError
+        }
+
+        try {
+            obj.method(arg)
+        } catch (e) {
+            generatorMethodError = e.constructor === TypeError
+        }
+
+        try {
+            asyncFn(arg)
+        } catch (e) {
+            asyncGeneratorFnError = e.constructor === TypeError
+        }
+
+        try {
+            obj.asyncMethod(arg)
+        } catch (e) {
+            asyncGeneratorMethodError = e.constructor === TypeError
+        }
+
+        [generatorFnError, generatorMethodError, asyncGeneratorFnError, asyncGeneratorMethodError]
+    `)).toEqual([true, true, true, true])
 })

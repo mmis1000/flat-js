@@ -4,6 +4,7 @@ import type { Functions, ParentMap, Scopes, VariableRoot } from '../analysis'
 import { FunctionTypes, OpCode, StatementFlag } from '../shared'
 import { generateBindingInitialization } from './binding-patterns'
 import { createCodegenContext } from './context'
+import { getExpectedArgumentCount } from './handlers/functions'
 import { generateVariableList, getScopeDebugNames, markInternal, markInternals, op } from './helpers'
 import type { Op, Segment, SegmentOptions } from './types'
 
@@ -153,11 +154,16 @@ export function generateSegment(
         ]
     }
 
+    const bodyStart = markInternal(op(OpCode.Nop, 0)) as Op<OpCode> & { bodyStartMarker?: boolean }
+    bodyStart.bodyStartMarker = true
+
     const functionDeclarationNodes = ctx.functionDeclarations.map((declaration) => [
         op(OpCode.GetRecord),
         op(OpCode.Literal, 2, [declaration.name?.text]),
         op(OpCode.Literal, 2, [declaration.name?.text]),
+        op(OpCode.Literal, 2, [getExpectedArgumentCount(declaration)]),
         op(OpCode.NodeOffset, 2, [declaration]),
+        op(OpCode.NodeOffset, 2, [declaration, 'bodyStart']),
         op(OpCode.NodeFunctionType, 2, [declaration]),
         op(OpCode.DefineFunction),
         op(OpCode.Set),
@@ -196,6 +202,7 @@ export function generateSegment(
         ...entry,
         ...parameterPrologue,
         ...functionDeclarationNodes,
+        bodyStart,
         ...bodyNodes
     ]
 

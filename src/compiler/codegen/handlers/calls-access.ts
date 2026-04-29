@@ -1,6 +1,7 @@
 import * as ts from 'typescript'
 
 import { FunctionTypes, OpCode, SpecialVariable } from '../../shared'
+import { getExpectedArgumentCount } from './functions'
 import { op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
@@ -32,6 +33,13 @@ function appendArrayElements(
 
     for (const element of elements) {
         if (element.kind === ts.SyntaxKind.OmittedExpression) {
+            res.push(op(OpCode.Duplicate))
+            res.push(op(OpCode.Literal, 2, ['length']))
+            res.push(op(OpCode.GetKeepCtx))
+            res.push(op(OpCode.Literal, 2, [1]))
+            res.push(op(OpCode.BPlus))
+            res.push(op(OpCode.SetKeepCtx))
+            res.push(op(OpCode.Pop))
             nextIndex++
             continue
         }
@@ -315,21 +323,29 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
 
             if (ts.isMethodDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
+                res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(item)]))
                 res.push(op(OpCode.NodeOffset, 2, [item]))
+                res.push(op(OpCode.NodeOffset, 2, [item, 'bodyStart']))
                 res.push(op(OpCode.NodeFunctionType, 2, [item]))
                 res.push(op(OpCode.DefineFunction))
                 res.push(op(OpCode.DefineKeepCtx))
             } else if (ts.isGetAccessorDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
+                res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(item)]))
                 res.push(op(OpCode.NodeOffset, 2, [item]))
+                res.push(op(OpCode.NodeOffset, 2, [item, 'bodyStart']))
                 res.push(op(OpCode.NodeFunctionType, 2, [item]))
                 res.push(op(OpCode.DefineFunction))
+                res.push(op(OpCode.Literal, 2, [1]))
                 res.push(op(OpCode.DefineGetter))
             } else if (ts.isSetAccessorDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
+                res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(item)]))
                 res.push(op(OpCode.NodeOffset, 2, [item]))
+                res.push(op(OpCode.NodeOffset, 2, [item, 'bodyStart']))
                 res.push(op(OpCode.NodeFunctionType, 2, [item]))
                 res.push(op(OpCode.DefineFunction))
+                res.push(op(OpCode.Literal, 2, [1]))
                 res.push(op(OpCode.DefineSetter))
             } else if (ts.isPropertyAssignment(item)) {
                 res.push(...ctx.generate(item.initializer, flag))

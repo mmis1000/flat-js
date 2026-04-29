@@ -17,6 +17,8 @@ const syntaxes = [
     ['Left PropertyAccessExpression', 'a.b = 1'],
     ['Left ElementAccessExpression', 'a[b] = 1'],
     ['Left ElementAccessExpression', 'a[b] = 1'],
+    ['Destructuring assignment array pattern', '([a, b = 1, ...rest] = items)'],
+    ['Destructuring assignment object pattern', '({ a: b = 1, ...rest } = value)'],
     ['VariableDeclarationList var without init', 'var a'],
     ['VariableDeclarationList var with init', 'var a = 0'],
     ['VariableDeclarationList let without init', 'let a'],
@@ -50,8 +52,10 @@ const syntaxes = [
     ['LabeledStatement loop continue', 'label: for (let i = 0; i < 1; i++) { continue label }'],
     ['LabeledStatement let newline block', 'if (false) { label: let // ASI\n{} }'],
     ['LabeledStatement let newline identifier', 'if (false) { label: let // ASI\nvalue = 1 }'],
+    ['IfStatement let newline block', 'if (false) let // ASI\n{}'],
     ['WithStatement', 'with ({ value: 1 }) { value }'],
     ['Catch destructuring', 'try { throw value } catch ({ a, b }) { a + b }'],
+    ['ForOf assignment pattern head', 'for ([a, b] of pairs) { a + b }'],
     ['Nested Scope', `
     let a = 0;
     {

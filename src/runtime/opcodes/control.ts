@@ -140,12 +140,15 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                 case TryCatchFinallyState.Finally:
                     switch (prevResolveType) {
                         case ResolveType.normal:
+                            ctx[OpcodeContextField.stack].pop()
                             ctx[OpcodeContextField.ptr] = exit
                             return BREAK_COMMAND
                         case ResolveType.throw:
+                            ctx[OpcodeContextField.stack].pop()
                             ctx[OpcodeContextField.executeThrow](prevValue)
                             return BREAK_COMMAND
                         case ResolveType.return:
+                            ctx[OpcodeContextField.stack].pop()
                             ctx[OpcodeContextField.executeReturn](prevValue)
                             return BREAK_COMMAND
                         case ResolveType.break:
@@ -163,6 +166,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                         return BREAK_COMMAND
                     }
 
+                    ctx[OpcodeContextField.stack].pop()
                     ctx[OpcodeContextField.ptr] = exit
                     return BREAK_COMMAND
                 default:

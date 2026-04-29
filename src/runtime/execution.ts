@@ -21,6 +21,7 @@ import {
     getLiteralFromPool,
     HOST_FUNCTION,
     InvokeParam,
+    isAsyncGeneratorType,
     isAsyncType,
     is_a_constant,
     isGeneratorType,
@@ -432,17 +433,33 @@ export const getExecution = (
     }
 
     const createGeneratorFromExecution = (
-        pr: number[], offset: number, gt: object,
+        pr: number[], offset: number, bodyOffset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
         // Build an initial frame via a throwaway execution; do NOT run it. The generator
         // always executes inside the caller's VM via handover (OpCode.Call & OpCode.Yield).
         const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
+            (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
+        )
+        while (
+            scratchExecution[Fields.stack].length > 0
+            && (
+                hasNestedFunctionFrame()
+                || scratchExecution[Fields.ptr] !== bodyOffset
+            )
+        ) {
+            const res = scratchExecution[Fields.step]()
+            if (res[Fields.done] || res[Fields.yield] || res[Fields.await]) {
+                throw new Error('generator prologue suspended unexpectedly')
+            }
+        }
+
         const baseFrames: Stack = scratchExecution[Fields.stack].slice()
 
         const state: GeneratorState = {
             stack: baseFrames,
-            ptr: offset,
+            ptr: bodyOffset,
             completed: false,
             started: false,
             pendingAction: null,
@@ -536,6 +553,143 @@ export const getExecution = (
         return gen
     }
 
+    const createAsyncGeneratorFromExecution = (
+        pr: number[], offset: number, bodyOffset: number, gt: object,
+        scopes: Scope[], invokeData: InvokeParam, args: unknown[]
+    ): AsyncIterableIterator<unknown> & {
+        return(value?: unknown): Promise<IteratorResult<unknown>>
+        throw(error?: unknown): Promise<IteratorResult<unknown>>
+    } => {
+        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
+            (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
+        )
+        while (
+            scratchExecution[Fields.stack].length > 0
+            && (
+                hasNestedFunctionFrame()
+                || scratchExecution[Fields.ptr] !== bodyOffset
+            )
+        ) {
+            const res = scratchExecution[Fields.step]()
+            if (res[Fields.done] || res[Fields.yield] || res[Fields.await]) {
+                throw new Error('generator prologue suspended unexpectedly')
+            }
+        }
+
+        const baseFrames: Stack = scratchExecution[Fields.stack].slice()
+
+        const state: GeneratorState = {
+            stack: baseFrames,
+            ptr: bodyOffset,
+            completed: false,
+            started: false,
+            pendingAction: null,
+            baseFrame: baseFrames[0],
+            gen: null,
+            execution: scratchExecution
+        }
+
+        for (const f of baseFrames) {
+            f[Fields.generator] = state
+        }
+
+        let requestQueue = Promise.resolve()
+
+        const enqueueRequest = (method: 'next' | 'throw' | 'return', value?: unknown): Promise<IteratorResult<unknown>> => {
+            const request = requestQueue.then(async () => {
+                const exec = state.execution
+                const stk = exec[Fields.stack]
+
+                if (state.completed) {
+                    if (method === 'throw') {
+                        throw value
+                    }
+                    if (method === 'return') {
+                        return { value, done: true }
+                    }
+                    return { value: undefined, done: true }
+                }
+
+                if (!state.started) {
+                    if (method === 'throw') {
+                        state.completed = true
+                        state.stack = []
+                        throw value
+                    }
+                    if (method === 'return') {
+                        state.completed = true
+                        state.stack = []
+                        return { value, done: true }
+                    }
+                }
+
+                if (method === 'throw') {
+                    state.pendingAction = { type: 'throw', value }
+                } else if (method === 'return') {
+                    state.pendingAction = { type: 'return', value }
+                } else {
+                    state.pendingAction = null
+                }
+
+                stk.length = 0
+                stk.push(...state.stack)
+                exec[Fields.ptr] = state.ptr
+
+                const wasStarted = state.started
+                state.started = true
+
+                if (wasStarted && method === 'next') {
+                    exec[Fields.pushValue](value)
+                }
+
+                while (true) {
+                    const res = exec[Fields.step]()
+                    if (isResultYield(res)) {
+                        return { value: res[Fields.value], done: false }
+                    }
+                    if (isResultDone(res)) {
+                        state.completed = true
+                        state.stack = []
+                        const out = res[Fields.value]
+                        if (isIteratorYieldDone(out)) {
+                            return { value: out.value, done: out.done }
+                        }
+                        return { value: out, done: true }
+                    }
+                    if (res[Fields.await]) {
+                        const awaited = res as ResultAwait
+                        try {
+                            exec[Fields.pushValue](await Promise.resolve(awaited[Fields.value]))
+                        } catch (error) {
+                            exec[Fields.setPendingThrow](error)
+                        }
+                    }
+                }
+            })
+
+            requestQueue = request.then(() => undefined, () => undefined)
+            return request
+        }
+
+        const gen: any = {
+            next(value?: unknown): Promise<IteratorResult<unknown>> {
+                return enqueueRequest('next', value)
+            },
+            throw(error?: unknown): Promise<IteratorResult<unknown>> {
+                return enqueueRequest('throw', error)
+            },
+            return(value?: unknown): Promise<IteratorResult<unknown>> {
+                return enqueueRequest('return', value)
+            },
+            [Symbol.asyncIterator]() { return gen }
+        }
+
+        state.gen = gen
+
+        return gen
+    }
+
     const createAsyncFromExecution = (
         pr: number[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
@@ -586,7 +740,7 @@ export const getExecution = (
         })
     }
 
-    const defineFunction = (globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number) => {
+    const defineFunction = (globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number, bodyOffset: number) => {
         // TODO: types
         const scopeClone = [...scopes]
 
@@ -596,6 +750,7 @@ export const getExecution = (
             [Fields.name]: name,
             [Fields.type]: type,
             [Fields.offset]: offset,
+            bodyOffset,
             [Fields.scopes]: scopeClone,
             [Fields.programSection]: pr,
             [Fields.globalThis]: globalThis
@@ -616,9 +771,16 @@ export const getExecution = (
                     [Fields.self]: this
                 }
 
+            if (isAsyncGeneratorType(type)) {
+                return createAsyncGeneratorFromExecution(
+                    pr, offset, des.bodyOffset, des[Fields.globalThis],
+                    [...scopeClone], invokeData, args
+                )
+            }
+
             if (isGeneratorType(type)) {
                 return createGeneratorFromExecution(
-                    pr, offset, des[Fields.globalThis],
+                    pr, offset, des.bodyOffset, des[Fields.globalThis],
                     [...scopeClone], invokeData, args
                 )
             }
@@ -1213,6 +1375,7 @@ export const getExecution = (
     opcodeContextSlots[OpcodeContextField.createArgumentObject] = createArgumentObject
     opcodeContextSlots[OpcodeContextField.defineFunction] = defineFunction
     opcodeContextSlots[OpcodeContextField.createGeneratorFromExecution] = createGeneratorFromExecution
+    opcodeContextSlots[OpcodeContextField.createAsyncGeneratorFromExecution] = createAsyncGeneratorFromExecution
     opcodeContextSlots[OpcodeContextField.bindInternal] = bindInternal
     opcodeContextSlots[OpcodeContextField.emulateEval] = emulateEval
     opcodeContextSlots[OpcodeContextField.emulateFunctionConstructor] = emulateFunctionConstructor
@@ -1350,7 +1513,9 @@ export const getExecution = (
                 case OpCode.ArraySpread:
                 case OpCode.TemplateObject:
                 case OpCode.ObjectLiteral:
+                case OpCode.ObjectRest:
                 case OpCode.Typeof:
+                case OpCode.ToPropertyKey:
                 case OpCode.TypeofReference:
                 case OpCode.TypeofStaticReference:
                 case OpCode.TypeofStaticReferenceUnchecked:
@@ -1463,7 +1628,7 @@ export const getExecution = (
 
     return {
         get [Fields.ptr] () {
-            return commandPtr
+            return ptr
         },
         set [Fields.ptr] (v: number) {
             commandPtr = v

@@ -1,7 +1,7 @@
 import * as ts from 'typescript'
 
 import { collectEvalTaintedFunctions, linkScopes, markParent, resolveScopes, searchFunctionAndScope, type Functions, type ParentMap, type ScopeChild, type Scopes } from './analysis'
-import { generateSegment, type Segment } from './codegen'
+import { generateSegment, type Op, type Segment } from './codegen'
 import { finalizeLiteralPool, genOffset, generateData } from './encoding'
 import { OpCode, type ProgramScopeDebugMap } from './shared'
 
@@ -58,6 +58,106 @@ function normalizeAmbiguousWithLetAsi(src: string) {
     })
 }
 
+function normalizeAmbiguousStatementLetAsi(src: string) {
+    // TypeScript similarly parses `if/while/for (...) let // ASI\n...` as a lexical
+    // declaration, but sloppy JavaScript treats it as an expression statement `let;`
+    // followed by the next statement on the following line.
+    return src.replace(/(((?:if|while|for)\s*\([^)]*\)\s*let))([ \t]+)(?=\/\/[^\r\n]*(?:\r\n?|\n))/g, (_, prefix: string, _statement: string, whitespace: string) => {
+        return `${prefix};${whitespace.slice(1)}`
+    })
+}
+
+function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
+    for (const statement of statements) {
+        if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) {
+            return false
+        }
+
+        if (statement.expression.text === 'use strict') {
+            return true
+        }
+    }
+
+    return false
+}
+
+const strictModeReservedWords = new Set([
+    'implements',
+    'interface',
+    'let',
+    'package',
+    'private',
+    'protected',
+    'public',
+    'static',
+    'yield',
+])
+
+const validateStrictIdentifierReference = (identifier: ts.Identifier, strictContext: boolean) => {
+    if (!strictContext) {
+        return
+    }
+
+    if (
+        identifier.text === 'eval'
+        || identifier.text === 'arguments'
+        || strictModeReservedWords.has(identifier.text)
+    ) {
+        throwPatternSyntaxError(`invalid identifier reference: ${identifier.text}`)
+    }
+}
+
+const validateStrictPatternExpression = (node: ts.Node, strictContext: boolean) => {
+    if (!strictContext) {
+        return
+    }
+
+    const visit = (current: ts.Node) => {
+        if (ts.isFunctionLike(current) || ts.isClassLike(current)) {
+            return
+        }
+
+        if (ts.isIdentifier(current)) {
+            if (current.text === 'yield') {
+                throwPatternSyntaxError('yield is not allowed in strict destructuring expressions')
+            }
+            return
+        }
+
+        if (ts.isPropertyAccessExpression(current)) {
+            visit(current.expression)
+            return
+        }
+
+        if (ts.isElementAccessExpression(current)) {
+            visit(current.expression)
+            if (current.argumentExpression != null) {
+                visit(current.argumentExpression)
+            }
+            return
+        }
+
+        if (ts.isPropertyAssignment(current)) {
+            if (ts.isComputedPropertyName(current.name)) {
+                visit(current.name.expression)
+            }
+            visit(current.initializer)
+            return
+        }
+
+        if (ts.isShorthandPropertyAssignment(current)) {
+            if (current.objectAssignmentInitializer != null) {
+                visit(current.objectAssignmentInitializer)
+            }
+            return
+        }
+
+        current.forEachChild(visit)
+    }
+
+    visit(node)
+}
+
 function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>) {
     const servicesHost: ts.CompilerHost = (<Partial<ts.CompilerHost>>{
         getScriptFileNames: () => ['output.ts'],
@@ -91,6 +191,248 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
     }
 }
 
+function unwrapParenthesizedExpression(node: ts.Expression): ts.Expression {
+    while (ts.isParenthesizedExpression(node)) {
+        node = node.expression
+    }
+    return node
+}
+
+function splitAssignmentTarget(node: ts.Expression): { target: ts.Expression, initializer?: ts.Expression } {
+    const rawNode = unwrapParenthesizedExpression(node)
+    if (ts.isBinaryExpression(rawNode) && rawNode.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        return {
+            target: rawNode.left as ts.Expression,
+            initializer: rawNode.right,
+        }
+    }
+    return { target: rawNode }
+}
+
+function throwPatternSyntaxError(message: string): never {
+    throw new SyntaxError(message)
+}
+
+function validateBindingPattern(pattern: ts.BindingName, strictContext: boolean) {
+    if (ts.isIdentifier(pattern)) {
+        validateStrictIdentifierReference(pattern, strictContext)
+        return
+    }
+
+    if (ts.isArrayBindingPattern(pattern)) {
+        for (const [index, element] of pattern.elements.entries()) {
+            if (ts.isOmittedExpression(element)) {
+                continue
+            }
+
+            if (element.dotDotDotToken) {
+                if (index !== pattern.elements.length - 1 || !!pattern.elements.hasTrailingComma) {
+                    throwPatternSyntaxError('array rest element must be last')
+                }
+                if (element.initializer != null) {
+                    throwPatternSyntaxError('array rest element may not have an initializer')
+                }
+            }
+
+            validateBindingPattern(element.name, strictContext)
+        }
+        return
+    }
+
+    if (ts.isObjectBindingPattern(pattern)) {
+        for (const [index, element] of pattern.elements.entries()) {
+            if (element.dotDotDotToken) {
+                if (index !== pattern.elements.length - 1) {
+                    throwPatternSyntaxError('object rest element must be last')
+                }
+                if (!ts.isIdentifier(element.name) || element.propertyName != null || element.initializer != null) {
+                    throwPatternSyntaxError('object rest element must be a bare identifier')
+                }
+                validateBindingPattern(element.name, strictContext)
+                continue
+            }
+
+            validateBindingPattern(element.name, strictContext)
+        }
+        return
+    }
+}
+
+function validateAssignmentTarget(target: ts.Expression, strictContext: boolean) {
+    const rawTarget = unwrapParenthesizedExpression(target)
+
+    if (ts.isIdentifier(rawTarget)) {
+        validateStrictIdentifierReference(rawTarget, strictContext)
+        return
+    }
+
+    if (ts.isPropertyAccessExpression(rawTarget) || ts.isElementAccessExpression(rawTarget)) {
+        if (ts.isOptionalChain(rawTarget)) {
+            throwPatternSyntaxError('invalid destructuring assignment target')
+        }
+
+        validateStrictPatternExpression(rawTarget.expression, strictContext)
+        if (ts.isElementAccessExpression(rawTarget) && rawTarget.argumentExpression != null) {
+            validateStrictPatternExpression(rawTarget.argumentExpression, strictContext)
+        }
+        return
+    }
+
+    if (ts.isArrayLiteralExpression(rawTarget) || ts.isObjectLiteralExpression(rawTarget)) {
+        validateAssignmentPattern(rawTarget, strictContext)
+        return
+    }
+
+    throwPatternSyntaxError('invalid destructuring assignment target')
+}
+
+function validateAssignmentPattern(pattern: ts.ArrayLiteralExpression | ts.ObjectLiteralExpression, strictContext: boolean) {
+    if (ts.isArrayLiteralExpression(pattern)) {
+        for (const [index, element] of pattern.elements.entries()) {
+            if (ts.isOmittedExpression(element)) {
+                continue
+            }
+
+            if (ts.isSpreadElement(element)) {
+                if (index !== pattern.elements.length - 1 || !!pattern.elements.hasTrailingComma) {
+                    throwPatternSyntaxError('array rest element must be last')
+                }
+
+                const rawExpression = unwrapParenthesizedExpression(element.expression)
+                if (ts.isBinaryExpression(rawExpression) && rawExpression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+                    throwPatternSyntaxError('array rest element may not have an initializer')
+                }
+
+                validateAssignmentTarget(rawExpression, strictContext)
+                continue
+            }
+
+            const { target, initializer } = splitAssignmentTarget(element)
+            validateAssignmentTarget(target, strictContext)
+            if (initializer != null) {
+                validateStrictPatternExpression(initializer, strictContext)
+            }
+        }
+        return
+    }
+
+    for (const [index, property] of pattern.properties.entries()) {
+        if (ts.isSpreadAssignment(property)) {
+            if (index !== pattern.properties.length - 1) {
+                throwPatternSyntaxError('object rest element must be last')
+            }
+            validateAssignmentTarget(property.expression, strictContext)
+            continue
+        }
+
+        if (ts.isShorthandPropertyAssignment(property)) {
+            validateAssignmentTarget(property.name, strictContext)
+            if (property.objectAssignmentInitializer != null) {
+                validateStrictPatternExpression(property.objectAssignmentInitializer, strictContext)
+            }
+            continue
+        }
+
+        if (ts.isPropertyAssignment(property)) {
+            if (ts.isComputedPropertyName(property.name)) {
+                validateStrictPatternExpression(property.name.expression, strictContext)
+            }
+
+            const { target, initializer } = splitAssignmentTarget(property.initializer)
+            validateAssignmentTarget(target, strictContext)
+            if (initializer != null) {
+                validateStrictPatternExpression(initializer, strictContext)
+            }
+            continue
+        }
+
+        throwPatternSyntaxError('invalid destructuring assignment property')
+    }
+}
+
+function validateDestructuringSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
+    const isForInOrOfDeclaration = (node: ts.VariableDeclaration) => {
+        const list = node.parent
+        const parent = list?.parent
+        return ts.isVariableDeclarationList(list)
+            && parent != null
+            && (ts.isForInStatement(parent) || ts.isForOfStatement(parent))
+            && parent.initializer === list
+    }
+
+    const getStrictContext = (node: ts.Node, inheritedStrict: boolean) => {
+        if (inheritedStrict || withStrict) {
+            return true
+        }
+
+        if (ts.isClassLike(node)) {
+            return true
+        }
+
+        if (ts.isSourceFile(node)) {
+            return ts.isExternalModule(node) || hasUseStrictDirective(node.statements)
+        }
+
+        if (ts.isFunctionLike(node) && 'body' in node && node.body != null && ts.isBlock(node.body)) {
+            if (
+                ts.isMethodDeclaration(node)
+                || ts.isGetAccessorDeclaration(node)
+                || ts.isSetAccessorDeclaration(node)
+                || ts.isConstructorDeclaration(node)
+            ) {
+                return true
+            }
+
+            if (hasUseStrictDirective(node.body.statements)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    function visit(node: ts.Node, inheritedStrict: boolean) {
+        const strictContext = getStrictContext(node, inheritedStrict)
+
+        if (ts.isVariableDeclaration(node) && !ts.isIdentifier(node.name)) {
+            validateBindingPattern(node.name, strictContext)
+            if (
+                !isForInOrOfDeclaration(node)
+                && !ts.isCatchClause(node.parent)
+                && node.initializer == null
+            ) {
+                throwPatternSyntaxError('destructuring declarations require an initializer')
+            }
+        }
+
+        if (ts.isParameter(node) && !ts.isIdentifier(node.name)) {
+            validateBindingPattern(node.name, strictContext)
+        }
+
+        if (ts.isCatchClause(node) && node.variableDeclaration != null && !ts.isIdentifier(node.variableDeclaration.name)) {
+            validateBindingPattern(node.variableDeclaration.name, strictContext)
+        }
+
+        if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+            const left = unwrapParenthesizedExpression(node.left)
+            if (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left)) {
+                validateAssignmentPattern(left, strictContext)
+            }
+        }
+
+        if ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
+            const target = unwrapParenthesizedExpression(node.initializer)
+            if (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) {
+                validateAssignmentPattern(target, strictContext)
+            }
+        }
+
+        node.forEachChild((child) => visit(child, strictContext))
+    }
+
+    visit(sourceNode, false)
+}
+
 function toSourceRange(locationMap: Map<number, [number, number]>, start: number, end: number): [number, number, number, number] {
     const startPos = locationMap.get(start)!
     const endPos = locationMap.get(end)!
@@ -103,11 +445,16 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     const functions: Functions = new Set()
     const scopeChild: ScopeChild = new Map()
 
-    const normalizedSrc = normalizeAmbiguousWithLetAsi(normalizeAmbiguousLabeledLetAsi(src))
+    const normalizedSrc = normalizeAmbiguousStatementLetAsi(
+        normalizeAmbiguousWithLetAsi(
+            normalizeAmbiguousLabeledLetAsi(src)
+        )
+    )
     const sourceNode = ts.createSourceFile('output.ts', normalizedSrc, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
     const locationMap = createLocationMap(normalizedSrc)
 
     validateSyntax(sourceNode, locationMap)
+    validateDestructuringSyntax(sourceNode, withStrict)
 
     markParent(sourceNode, parentMap)
     searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
@@ -117,6 +464,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
 
     const program: Segment[] = []
     const functionToSegment = new Map<ts.Node, Segment>()
+    const functionToBodyStart = new Map<ts.Node, Op>()
 
     for (const item of functions) {
         const generated = generateSegment(item, scopes, parentMap, functions, evalTaintedFunctions, {
@@ -126,6 +474,11 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
         })
         program.push(generated)
         functionToSegment.set(item, generated)
+        const bodyStart = generated.find((op: any) => op.bodyStartMarker) as Op | undefined
+        if (!bodyStart) {
+            throw new Error('missing function body start marker')
+        }
+        functionToBodyStart.set(item, bodyStart)
     }
 
     const flattened = program.flat()
@@ -177,7 +530,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
         }
     }
 
-    generateData(flattened, functionToSegment, programData, literalValues)
+    generateData(flattened, functionToSegment, functionToBodyStart, programData, literalValues)
 
     const codeLength = programData.length
 

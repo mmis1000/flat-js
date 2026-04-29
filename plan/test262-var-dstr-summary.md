@@ -1,0 +1,50 @@
+# Test262 Language Failure Summary
+
+Generated: 2026-04-29T02:40:08.353Z
+
+## Scan Method
+
+- Ran `test262-harness` with the JSON reporter against `node_modules/test262/test/language/statements/variable/dstr` in recursively split chunks.
+- Started with directory chunks of at most about 350 tests, then fell back to smaller units when the harness emitted partial JSON or crashed.
+- Classified failures per file after combining default/strict scenarios.
+- Marked a failure as `out-of-scope` when the repo currently has no implementation path for that syntax or runtime model, such as modules, dynamic import, explicit resource management, or unsupported modern class element forms.
+
+## Scope Heuristics
+
+- Intended support includes current script-mode compiler/runtime features already present in `src/compiler/**` and `src/runtime/**`, such as classes with constructors/methods/accessors, generators, async functions, spread calls, tagged templates, `for-of`, and `new.target`.
+- Out-of-scope buckets currently include module syntax and evaluation (`import`, `export`, `module-code`, `dynamic import`, `import.meta`), explicit resource management (`using`, `await using`), and class element features that the compiler does not model yet (`PropertyDeclaration`, `PrivateIdentifier`, `ClassStaticBlockDeclaration`).
+
+## Totals
+
+- Failing files in intended scope: 0
+- Failing files in out-of-scope areas: 2
+- Total failing files recorded: 2
+- Scanner notes: 1
+
+## Counts By Bucket
+
+### intended
+
+- none
+
+### out-of-scope
+
+- not intended / unsupported behavior: 2
+
+## Scanner Notes
+
+- Split dir:node_modules/test262/test/language/statements/variable/dstr after non-json-output.
+
+## Detailed Failures
+
+### intended
+
+- none
+
+### out-of-scope
+
+#### not intended / unsupported behavior (2)
+
+- `language/statements/variable/dstr/ary-ptrn-elem-id-static-init-await-invalid.js` - Expected test to throw error of type SyntaxError, but did not throw error | features: class-static-block | scenarios: default, strict mode
+- `language/statements/variable/dstr/obj-ptrn-elem-id-static-init-await-invalid.js` - Expected test to throw error of type SyntaxError, but did not throw error | features: class-static-block | scenarios: default, strict mode
+

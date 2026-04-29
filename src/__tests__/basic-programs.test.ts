@@ -1356,6 +1356,60 @@ with ({ value: 1 }) {
 }
 `, SyntaxError)
 
+testRuntimeThrows('destructuring declaration without initializer is a syntax error', `
+let [value]
+`, SyntaxError)
+
+testRuntimeThrows('array rest initializer is a syntax error', `
+let [...value = []] = []
+`, SyntaxError)
+
+testRuntimeThrows('array rest must be final in declarations', `
+let [...value, other] = [1, 2]
+`, SyntaxError)
+
+testRuntimeThrows('array rest initializer is a syntax error in assignment heads', `
+var value
+for ([...value = 1] in [[]]) {}
+`, SyntaxError)
+
+testRuntimeThrows('array rest trailing comma is a syntax error in assignment patterns', `
+var value
+0, [...value,] = []
+`, SyntaxError)
+
+testRuntimeThrows('object rest must be final in assignment heads', `
+var rest
+var other
+for ({...rest, other} of [{}]) {}
+`, SyntaxError)
+
+testRuntimeThrows('strict destructuring assignment rejects eval shorthand targets', `
+"use strict"
+0, { eval } = {}
+`, SyntaxError)
+
+testRuntimeThrows('strict destructuring assignment rejects escaped reserved shorthand targets', `
+"use strict"
+0, { l\\u0065t } = {}
+`, SyntaxError)
+
+testRuntimeThrows('strict arrow destructuring parameters reject escaped reserved shorthand targets', `
+"use strict"
+var fn = ({ l\\u0065t }) => {}
+`, SyntaxError)
+
+testRuntimeThrows('strict destructuring assignment rejects yield in computed targets', `
+"use strict"
+var x = {}
+0, [x[yield]] = []
+`, SyntaxError)
+
+testRuntimeThrows('destructuring assignment rejects optional chain targets', `
+var x = {}
+0, [x?.y = 42] = [23]
+`, SyntaxError)
+
 testRuntimeThrows('with statement lexical declaration body is a syntax error', `
 with ({}) let value
 `, SyntaxError)

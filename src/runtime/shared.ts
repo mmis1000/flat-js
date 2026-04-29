@@ -299,6 +299,7 @@ type FunctionDescriptor = {
     [Fields.name]: string,
     [Fields.type]: FunctionTypes,
     [Fields.offset]: number,
+    bodyOffset: number,
     [Fields.scopes]: Scope[],
     [Fields.programSection]: number[],
     [Fields.globalThis]: any
@@ -308,6 +309,11 @@ const isGeneratorType = (t: FunctionTypes) =>
     t === FunctionTypes.GeneratorDeclaration ||
     t === FunctionTypes.GeneratorExpression ||
     t === FunctionTypes.GeneratorMethod
+
+const isAsyncGeneratorType = (t: FunctionTypes) =>
+    t === FunctionTypes.AsyncGeneratorDeclaration ||
+    t === FunctionTypes.AsyncGeneratorExpression ||
+    t === FunctionTypes.AsyncGeneratorMethod
 
 const isAsyncType = (t: FunctionTypes) =>
     t === FunctionTypes.AsyncFunctionDeclaration ||
@@ -365,6 +371,7 @@ export {
     getLiteralFromPool,
     HOST_FUNCTION,
     isAsyncType,
+    isAsyncGeneratorType,
     is_a_constant,
     isGeneratorType,
     is_not_defined,

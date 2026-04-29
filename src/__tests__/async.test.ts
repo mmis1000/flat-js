@@ -153,6 +153,20 @@ describe('Async/Await', () => {
         expect(result).toBe(42)
     })
 
+    test('async generator next returns a promise and runs destructured parameters', async () => {
+        const result = await compileAndRun(`
+            let callCount = 0;
+            const fn = async function*([x, y, z]) {
+                callCount = x + y + z;
+            };
+
+            const iter = fn([1, 2, 3]);
+            const first = iter.next();
+            first.then((step) => [typeof first.then, callCount, step.value, step.done]);
+        `)
+        expect(result).toEqual(['function', 6, undefined, true])
+    })
+
     test('complex microtask interleaving', async () => {
         const result = await compileAndRun(`
             let log = '';

@@ -12,6 +12,7 @@ const target = {
     flag: false,
     text: 'hello',
 };
+let restResult;
 
 target.count += 1;
 target.count -= 1;
@@ -220,6 +221,19 @@ with ({
     callMe(1);
     eval('localValue');
 }
+
+({
+    [({
+        toString() {
+            return 'drop';
+        },
+    })]: target.count,
+    ...restResult
+} = {
+    drop: 4,
+    keep: 5,
+    tail: 6,
+});
 
 switch (target.text) {
     case 'hello':

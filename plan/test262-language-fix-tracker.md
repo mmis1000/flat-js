@@ -56,7 +56,7 @@ Reduce the `language` category failures in targeted batches:
 
 ## Next Batches
 
-- [ ] `parameter-and-binding-patterns`
+- [x] `parameter-and-binding-patterns`
   - Primary signatures:
     - `Expected no error, got Error: not support yet`
     - `Expected no error, got Error: not support pattern yet`
@@ -64,19 +64,23 @@ Reduce the `language` category failures in targeted batches:
     - `Expected no error, got Error: not supported left node: ArrayLiteralExpression`
     - `Expected no error, got Error: not supported left node: ObjectLiteralExpression`
     - `Expected no error, got Error: not support non identifier binding`
-  - Current diagnosis split:
-    - `binding declarations / params / catch`
-      - shared binding-pattern codegen was missing for declaration names, parameter bindings, and `catch` bindings
-      - status: partially fixed in compiler/runtime
-    - `binding runtime semantics`
-      - remaining array-pattern failures cluster around iterator closing, generator-family call timing, and anonymous function/class naming in default initializers
-      - status: in progress
-    - `assignment patterns`
-      - plain destructuring assignment and loop heads that use assignment targets still fail on `ArrayLiteralExpression` / `ObjectLiteralExpression`
-      - status: not started
-    - `early errors`
-      - residual `Expected test to throw error of type SyntaxError, but did not throw error`
-      - status: not started
+  - Result:
+    - shared binding-pattern codegen now covers declarations, parameters, `catch`, loop heads, and assignment patterns
+    - array/object binding temps use fast static slots instead of named dynamic lookups
+    - iterator-closing semantics are fixed for destructuring initialization and generator suspension cases
+    - strict destructuring early errors now cover reserved words, `yield`, optional-chain targets, and rest trailing commas
+    - async generator destructuring parameters now run through a real async-generator path instead of a sync-generator fallback
+    - focused destructuring slices are green for intended-support roots:
+      - `language/statements/variable/dstr/**`
+      - `language/expressions/assignment/dstr/**`
+      - `language/expressions/arrow-function/dstr/**`
+      - `language/expressions/function/dstr/**`
+      - `language/statements/function/dstr/**`
+      - `language/expressions/generators/dstr/**`
+      - `language/statements/generators/dstr/**`
+      - `language/expressions/async-generator/dstr/**`
+      - `language/statements/async-generator/dstr/**`
+    - the only noted residual in these focused slices is out-of-scope class-static-block coverage in the variable-declaration summary
 
 - [ ] `missing-operators`
   - Primary signatures:
@@ -133,3 +137,26 @@ Reduce the `language` category failures in targeted batches:
   - `iter-get-err-array-prototype` is now green for plain declarations, plain functions, plain methods, loop declarations, and `catch`
   - residual `iter-get-err-array-prototype` failures are concentrated in generator / async-generator call paths, which indicates generator-family parameter instantiation timing is still wrong there
   - `iter-close` still fails broadly, which confirms iterator closing is a separate remaining runtime contract
+- 2026-04-29: Tightened destructuring early-error validation in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>) for strict reserved identifiers, strict `yield`, optional-chain assignment targets, and array-rest trailing commas.
+- 2026-04-29: Fixed destructuring iterator-close runtime semantics in [binding-patterns.ts](</M:/Playground/flat-js/src/compiler/codegen/binding-patterns.ts:1>) so abrupt completion preserves the original throw/return behavior while still performing the required iterator cleanup.
+- 2026-04-29: Verified the mixed nested assignment-pattern regression `([, ...{ '2': b, ...c }] = [1, 2, 3, 4])` in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>).
+- 2026-04-29: Fixed the async-generator root cause by giving `async function*` / `async *method()` their own function kinds in [encoding.ts](</M:/Playground/flat-js/src/compiler/encoding.ts:1>) and a real async-generator runtime path in [execution.ts](</M:/Playground/flat-js/src/runtime/execution.ts:1>) plus [function.ts](</M:/Playground/flat-js/src/runtime/opcodes/function.ts:1>).
+- 2026-04-29: Added focused repo regressions in [async.test.ts](</M:/Playground/flat-js/src/__tests__/async.test.ts:1>) for `async function*` `.next()` promise behavior and kept destructuring parameter call-time error coverage green in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>).
+- 2026-04-29: Focused validation for the completed batch is green:
+  - `npm run build:tsc`
+  - `node .\node_modules\jest\bin\jest.js --runInBand --no-cache --runTestsByPath .\src\__tests__\async.test.ts`
+  - `node .\node_modules\jest\bin\jest.js --runInBand --no-cache --runTestsByPath .\src\__tests__\es6-runtime.test.ts -t "mixed nested rest object patterns|generator parameter destructuring errors throw at call time"`
+  - `node plan\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/async-generator/dstr`
+  - `node plan\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/async-generator/dstr`
+- 2026-04-29: Re-ran repo tests before trusting the broad scan:
+  - `npm test`
+  - fixed a nested `break` unwinding regression in [control.ts](</M:/Playground/flat-js/src/runtime/opcodes/control.ts:1>)
+  - refreshed opcode coverage in [opcode-kitchen-sink.js](</M:/Playground/flat-js/src/__tests__/fixures/opcode-kitchen-sink.js:1>) for `ToPropertyKey` and `ObjectRest`
+- 2026-04-29: Rebuilt the runtime bundle with `npm run build` and then re-ran the full `language` scan from the repo-green state.
+  - authoritative full-scan totals now are:
+    - intended scope failing files: `3589 -> 3585`
+    - out-of-scope failing files: `6627 -> 6627`
+    - total failing files: `10216 -> 10212`
+  - no new `async-generator` destructuring regressions appeared in the full summary
+  - the `TypeError: ... reading '6'` break/finally failures exposed by the stale-build scan are gone in the rebuilt scan
+  - remaining `try` / `continue-in-try-catch` failures are still part of the next runtime-semantic cluster, not a regression from the completed destructuring batch

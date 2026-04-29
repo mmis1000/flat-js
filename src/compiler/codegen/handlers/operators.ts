@@ -2,6 +2,7 @@ import * as ts from 'typescript'
 
 import { OpCode } from '../../shared'
 import { abort, getNameOfKind, headOf, op } from '../helpers'
+import { generateAssignmentPattern } from '../binding-patterns'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -174,6 +175,10 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
             case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
             case ts.SyntaxKind.EqualsToken: {
                 const left = ctx.extractQuote(node.left)
+                if (kind === ts.SyntaxKind.EqualsToken && (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left))) {
+                    return generateAssignmentPattern(left, ctx.generate(node.right, flag), flag, ctx, { preserveResult: true })
+                }
+
                 if (ts.isIdentifier(left)) {
                     const staticAccess = ctx.tryResolveStaticAccess(left, left.text)
                     if (staticAccess) {
