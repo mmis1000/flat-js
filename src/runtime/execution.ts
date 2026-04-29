@@ -1,11 +1,6 @@
-import { FunctionTypes, InvokeType, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "../compiler"
+import { FunctionTypes, InvokeType, OpCode, ResolveType, SpecialVariable, TryCatchFinallyState, VariableType } from "../compiler"
 import {
-    APPLY,
-    assertIteratorResult,
-    BIND,
     bindInfo,
-    CALL,
-    Context,
     environments,
     Execution,
     Fields,
@@ -17,9 +12,6 @@ import {
     generatorStates,
     GeneratorState,
     getEmptyObject,
-    getIterator,
-    getLiteralFromPool,
-    HOST_FUNCTION,
     InvokeParam,
     isAsyncGeneratorType,
     isAsyncType,
@@ -29,8 +21,6 @@ import {
     isIteratorYieldDone,
     isResultDone,
     isResultYield,
-    iteratorComplete,
-    iteratorNext,
     Result,
     ResultAwait,
     ResultDone,
@@ -47,8 +37,7 @@ import {
     IDENTIFIER_REFERENCE_FRAME,
     IDENTIFIER_REFERENCE_SCOPE,
     IdentifierReference,
-    VariableFlags,
-    VariableRecord,
+    VariableFlags
 } from "./shared"
 import { handleBasicOpcode } from "./opcodes/basic"
 import { handleClassOpcode } from "./opcodes/class"

@@ -6,12 +6,10 @@ import {
     Fields,
     Frame,
     FrameType,
-    FunctionDescriptor,
     GeneratorState,
     HOST_FUNCTION,
     IDENTIFIER_REFERENCE_FRAME,
     IDENTIFIER_REFERENCE_SCOPE,
-    InvokeParam,
     Scope,
     SCOPE_WITH_OBJECT,
     VariableRecord,
@@ -22,7 +20,7 @@ import {
     getEmptyObject,
     isAsyncGeneratorType,
     isAsyncType,
-    isGeneratorType,
+    isGeneratorType
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
 

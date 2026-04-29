@@ -1,4 +1,4 @@
-import { FunctionTypes, InvokeType, LiteralPoolKind, OpCode, ResolveType, SetFlag, SpecialVariable, TryCatchFinallyState, VariableType } from "../compiler"
+import { FunctionTypes, InvokeType, LiteralPoolKind, ResolveType, TryCatchFinallyState, VariableType } from "../compiler"
 import { TEXT_DADA_MASK, isSmallNumber, literalPoolWordMask } from "../compiler/shared"
 
 const decodeLiteralFromProgram = (program: number[], pos: number): any => {
