@@ -102,8 +102,58 @@ Reduce the `language` category failures in targeted batches:
 
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
-    - `M:\Playground\flat-js\lib\runtime\execution.js:623`
+    - `M:\Playground\flat-js\lib\runtime\execution.js:877`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
+  - Current scan split:
+    - intended-support matches: `2632`
+    - actionable Flat JS work: `2238`
+    - non-actionable TypeScript parser misses to document only: `394`
+    - host/module interaction exclusions: `57`
+  - Actionable intended-support groups:
+    - functions, parameters, eval, arguments env: `537` total (`375` runtime, `162` early)
+      - fix eval scope, mapped arguments, parameter/body environments, and directive strictness
+    - supported class constructors/methods/accessors/super: `546` total (`327` runtime, `219` early)
+      - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
+      - exclude class fields, private names, and static blocks from this cluster
+    - generators and async generators: `339` total (`261` runtime, `78` early)
+      - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
+    - control-flow completion and iterator close: `288` total (`88` runtime, `200` early)
+      - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
+    - lexical/global declaration early errors: `205` total (`43` runtime, `162` early)
+      - fix redeclarations, global script declaration conflicts, and owned static checks
+    - object literal, property keys, named evaluation: `192` total (`115` runtime, `77` early)
+      - fix `__proto__`, computed key order, methods/accessors, and function/class name inference
+    - references, assignment, update/delete: `124` total (`72` runtime, `52` early)
+      - fix `PutValue`, strict unresolved references, update/delete, writable/reference semantics
+    - RegExp runtime behavior: `7` total (`7` runtime, `0` early)
+      - document separately from parser misses and inspect runtime-only regexp failures
+  - Recommended order:
+    - environment/eval
+    - references/control-flow
+    - object/class/generator batches
+  - Non-actionable TypeScript parser misses:
+    - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
+    - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
+    - invalid assignment target forms under `assignmenttargettype`: `174`
+    - invalid RegExp literals, flags, modifiers, named groups, unicode escapes: `167`
+    - strict reserved words accepted as identifiers: `20`
+    - invalid optional-chain assignment/tag/update forms: `11`
+    - invalid loop declaration heads: `8`
+    - directive prologue / ASI parse forms: `7`
+    - function declarations in invalid statement positions: `5`
+    - invalid `await` grammar forms: `2`
+  - Host/module interaction exclusions:
+    - keep these out of `runtime-semantic-cluster` because they require host/module machinery, not script runtime fixes
+    - module parse/instantiation/evaluation: `33`
+      - needs ModuleRecord, live bindings, exports, module eval state, and host resolution
+    - top-level await / module await grammar: `7`
+      - requires Module goal and async module execution
+    - module-only `await` reserved-word grammar: `7`
+      - only errors under Module goal
+    - `import`/`export` in eval/script parse goal: `5`
+      - bound to module syntax handling and parse goal separation
+    - `import.meta` host metadata: `5`
+      - requires host-provided module metadata
 
 ## Run Log
 
