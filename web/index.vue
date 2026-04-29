@@ -6,17 +6,19 @@
         :data-mobile-bottom="mobileBottomTab"
     >
         <div class="mobile-tab-bar mobile-tab-bar-top">
-            <button
-                type="button"
-                :class="{ active: mobileTopTab === 'code' }"
-                @click="mobileTopTab = 'code'"
-            >Code</button>
-            <button
-                type="button"
-                :class="{ active: mobileTopTab === 'debug' }"
-                :disabled="state === 'idle'"
-                @click="mobileTopTab = 'debug'"
-            >Debug</button>
+            <div class="mobile-tab-buttons">
+                <button
+                    type="button"
+                    :class="{ active: mobileTopTab === 'code' }"
+                    @click="mobileTopTab = 'code'"
+                >Code</button>
+                <button
+                    type="button"
+                    :class="{ active: mobileTopTab === 'debug' }"
+                    :disabled="state === 'idle'"
+                    @click="mobileTopTab = 'debug'"
+                >Debug</button>
+            </div>
         </div>
         <div v-show="state !== 'idle'" class="area-debug pane">
             <div class="pane-title debug-pane-title">
@@ -102,7 +104,10 @@
         <div class="area-game pane">
             <div class="pane-title game-pane-title">
                 <span>Game</span>
-                <div class="game-pane-controls">
+                <div
+                    class="game-pane-controls"
+                    :class="{ 'mobile-options-open': mobileGameOptionsOpen }"
+                >
                     <div class="game-view-toggle" role="group" aria-label="Game view">
                         <button
                             type="button"
@@ -119,32 +124,6 @@
                             Map
                         </button>
                     </div>
-                    <label class="game-stage-label">
-                        Stage
-                        <select
-                            v-model="stageMode"
-                            class="game-stage-select"
-                            :disabled="state !== 'idle'"
-                        >
-                            <option value="default">Default</option>
-                            <option value="random">Random</option>
-                            <option value="hardRandom">Hard random</option>
-                        </select>
-                    </label>
-                    <label class="game-hitbox-label">
-                        <input
-                            v-model="showHitboxes"
-                            type="checkbox"
-                        >
-                        Show hitboxes
-                    </label>
-                    <label class="game-continuous-label">
-                        <input
-                            v-model="continuousRun"
-                            type="checkbox"
-                        >
-                        Continuous
-                    </label>
                     <label class="game-speed-label">
                         Speed
                         <select
@@ -161,8 +140,43 @@
                             <option :value="16">16×</option>
                         </select>
                     </label>
+                    <button
+                        type="button"
+                        class="game-options-toggle"
+                        :aria-label="mobileGameOptionsOpen ? 'Hide game options' : 'Show game options'"
+                        :aria-expanded="mobileGameOptionsOpen ? 'true' : 'false'"
+                        @click="mobileGameOptionsOpen = !mobileGameOptionsOpen"
+                    >
+                        {{ mobileGameOptionsOpen ? 'Hide' : 'Options' }}
+                    </button>
+                    <label class="game-stage-label game-advanced-control">
+                        Stage
+                        <select
+                            v-model="stageMode"
+                            class="game-stage-select"
+                            :disabled="state !== 'idle'"
+                        >
+                            <option value="default">Default</option>
+                            <option value="random">Random</option>
+                            <option value="hardRandom">Hard random</option>
+                        </select>
+                    </label>
+                    <label class="game-hitbox-label game-advanced-control">
+                        <input
+                            v-model="showHitboxes"
+                            type="checkbox"
+                        >
+                        Show hitboxes
+                    </label>
+                    <label class="game-continuous-label game-advanced-control">
+                        <input
+                            v-model="continuousRun"
+                            type="checkbox"
+                        >
+                        Continuous
+                    </label>
                     <span
-                        class="game-avg-ticks"
+                        class="game-avg-ticks game-advanced-control"
                         title="Mean world ticks over completed runs (win or program finished). Kill does not count."
                     >
                         Avg {{ avgTicksLabel }}
@@ -170,7 +184,7 @@
                     </span>
                     <button
                         type="button"
-                        class="game-clear-avg"
+                        class="game-clear-avg game-advanced-control"
                         :disabled="scoreHistory.length === 0"
                         @click="clearRunAverage"
                     >
@@ -372,6 +386,7 @@ export default Vue.extend({
             showHitboxes: false,
             mobileTopTab: 'code' as 'code' | 'debug',
             mobileBottomTab: 'game' as 'game' | 'output',
+            mobileGameOptionsOpen: false,
         })()
     },
     computed: {
@@ -392,6 +407,16 @@ export default Vue.extend({
             }
             if (val === 'idle') {
                 this.debugPaneCollapsed = false
+            }
+        },
+        mobileTopTab (val: 'code' | 'debug') {
+            if (val === 'debug') {
+                this.debugPaneCollapsed = false
+            }
+        },
+        mobileBottomTab (val: 'game' | 'output') {
+            if (val !== 'game') {
+                this.mobileGameOptionsOpen = false
             }
         },
         async result () {
@@ -982,6 +1007,7 @@ pre {
 .app {
     --debug-width: 0px;
     height: 100vh;
+    height: 100dvh;
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
@@ -1035,6 +1061,9 @@ pre {
 .mobile-tab-bar {
     display: none;
 }
+.mobile-tab-buttons {
+    display: contents;
+}
 .pane {
     display: flex;
     flex-direction: column;
@@ -1073,6 +1102,7 @@ pre {
 .debug-rail-toggle,
 .run-button,
 .game-clear-avg,
+.game-options-toggle,
 .game-view-toggle button {
     border: 1px solid rgba(120, 180, 205, 0.28);
     background: linear-gradient(180deg, rgba(31, 46, 58, 0.98), rgba(15, 22, 29, 0.98));
@@ -1083,6 +1113,7 @@ pre {
 }
 .debug-rail-button,
 .debug-rail-toggle,
+.game-options-toggle,
 .game-clear-avg {
     padding: 0.35em 0.75em;
 }
@@ -1227,6 +1258,9 @@ pre {
 .game-clear-avg {
     font-size: 0.8em;
 }
+.game-options-toggle {
+    display: none;
+}
 .game-clear-avg:disabled {
     opacity: 0.45;
     cursor: default;
@@ -1306,14 +1340,23 @@ pre {
         background: #1a1a1a;
         border-bottom: 1px solid rgba(127, 127, 127, 0.5);
     }
+    .mobile-tab-buttons {
+        display: flex;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
     .mobile-tab-bar-top {
         grid-area: tabtop;
+        align-items: center;
+        gap: 0.5em;
+        padding-right: 0.55em;
     }
     .mobile-tab-bar-bottom {
         grid-area: tabbot;
         border-top: 1px solid rgba(127, 127, 127, 0.5);
     }
-    .mobile-tab-bar button {
+    .mobile-tab-buttons button,
+    .mobile-tab-bar-bottom button {
         flex: 1 1 0;
         border: 0;
         background: transparent;
@@ -1323,11 +1366,13 @@ pre {
         cursor: pointer;
         border-bottom: 2px solid transparent;
     }
-    .mobile-tab-bar button.active {
+    .mobile-tab-buttons button.active,
+    .mobile-tab-bar-bottom button.active {
         color: #fff;
         border-bottom-color: #9cf;
     }
-    .mobile-tab-bar button:disabled {
+    .mobile-tab-buttons button:disabled,
+    .mobile-tab-bar-bottom button:disabled {
         opacity: 0.4;
         cursor: default;
     }
@@ -1349,18 +1394,155 @@ pre {
     .app[data-mobile-bottom="output"] .area-game {
         display: none;
     }
+    .debug-rail-button,
+    .debug-rail-toggle {
+        display: none;
+    }
+    .pane-title {
+        padding: 0.85em 0.9em;
+    }
     .code-pane-title,
     .game-pane-title {
+        flex-direction: column;
         align-items: stretch;
+        gap: 0.75em;
+    }
+    .code-title-group,
+    .code-toolbar,
+    .game-pane-controls,
+    .execution-controls {
+        width: 100%;
+    }
+    .code-title-group {
+        justify-content: space-between;
     }
     .code-toolbar,
     .game-pane-controls,
     .execution-controls {
         justify-content: flex-start;
     }
+    .code-toolbar {
+        flex: 0 0 auto;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.65em;
+    }
+    .snippet-label {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        width: 100%;
+    }
+    .snippet-select {
+        width: 100%;
+    }
+    .execution-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    }
+    .run-button {
+        width: 100%;
+    }
+    .game-pane-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: center;
+    }
+    .game-stage-label,
+    .game-speed-label {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+    }
+    .game-stage-select,
+    .game-speed-select {
+        width: 100%;
+    }
+    .game-avg-ticks {
+        white-space: normal;
+        line-height: 1.35;
+    }
+    .game-clear-avg {
+        justify-self: start;
+    }
+    .game-pane {
+        padding: 8px;
+    }
     .app.running.debug-collapsed .debug-pane-heading {
         writing-mode: initial;
         transform: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .app,
+    .app.running {
+        height: 100dvh;
+        max-height: 100dvh;
+        min-height: 0;
+        grid-template-rows: auto minmax(0, 0.85fr) auto minmax(0, 1.15fr);
+        overflow: hidden;
+    }
+    .pane-title {
+        padding: 0.6em 0.7em;
+    }
+    .code-pane-title,
+    .game-pane-title {
+        gap: 0.5em;
+    }
+    .game-pane-title > span {
+        display: none;
+    }
+    .code-toolbar {
+        gap: 0.45em;
+    }
+    .execution-controls {
+        grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+        gap: 0.35em;
+    }
+    .run-button {
+        padding-left: 0.55em;
+        padding-right: 0.55em;
+    }
+    .game-pane-controls {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 0.45em 0.6em;
+    }
+    .game-options-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2.2em;
+    }
+    .game-advanced-control {
+        display: none;
+    }
+    .game-pane-controls.mobile-options-open {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .game-pane-controls.mobile-options-open .game-view-toggle,
+    .game-pane-controls.mobile-options-open .game-options-toggle {
+        justify-self: start;
+    }
+    .game-pane-controls.mobile-options-open .game-stage-label,
+    .game-pane-controls.mobile-options-open .game-hitbox-label,
+    .game-pane-controls.mobile-options-open .game-continuous-label,
+    .game-pane-controls.mobile-options-open .game-clear-avg {
+        display: flex;
+    }
+    .game-pane-controls.mobile-options-open .game-stage-label {
+        display: grid;
+    }
+    .game-pane-controls.mobile-options-open .game-avg-ticks {
+        display: block;
+    }
+    .mobile-tab-buttons button,
+    .mobile-tab-bar-bottom button {
+        padding: 0.6em 0.75em;
+    }
+    .mobile-tab-bar-top {
+        flex-wrap: nowrap;
+        padding-right: 0.35em;
     }
 }
 </style>
