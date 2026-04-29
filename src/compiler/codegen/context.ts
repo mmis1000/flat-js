@@ -1,6 +1,6 @@
 import * as ts from 'typescript'
 
-import type { Functions, ParentMap, Scopes, VariableRoot } from '../analysis'
+import { getFunctionBodyScopeNode, hasParameterExpressions, type Functions, type ParentMap, type Scopes, type VariableRoot } from '../analysis'
 import { OpCode, SpecialVariable, VariableType } from '../shared'
 import { getNameOfKind, op } from './helpers'
 import { dispatchGenerate } from './dispatch'
@@ -42,6 +42,10 @@ export function createCodegenContext(
     let nextInternalNameId = 0
     const staticScopeSlotIndices = new Map<ts.Node, Map<string, number>>()
     const staticResolutionEnabled = !withEval && !evalTaintedFunctions.has(root)
+    const rootHasParameterExpressions = !ts.isSourceFile(root) && hasParameterExpressions(root)
+    const rootExpressionBody = rootHasParameterExpressions && root.body != null && !ts.isBlock(root.body)
+        ? root.body
+        : null
 
     function stampSource(ops: Segment, node: ts.Node): Segment {
         if (!withPos) {
@@ -82,8 +86,34 @@ export function createCodegenContext(
         return node
     }
 
+    function isWithinNode(node: ts.Node, ancestor: ts.Node) {
+        let current: ts.Node | undefined = node
+        while (current != null) {
+            if (current === ancestor) {
+                return true
+            }
+            current = parentMap.get(current)?.node
+        }
+        return false
+    }
+
+    function isFunctionBodyRuntimeScopeNode(node: ts.Node) {
+        if (!ts.isBlock(node)) {
+            return false
+        }
+
+        const pair = parentMap.get(node)
+        if (pair == null || pair.key !== 'body' || !ts.isFunctionLike(pair.node) || !('body' in pair.node)) {
+            return false
+        }
+
+        return getFunctionBodyScopeNode(pair.node as ts.FunctionLikeDeclarationBase) === node
+    }
+
     function isRuntimeScopeNode(node: ts.Node) {
-        return functions.has(node as VariableRoot) || (scopes.get(node)?.size ?? 0) > 0
+        return functions.has(node as VariableRoot)
+            || isFunctionBodyRuntimeScopeNode(node)
+            || (scopes.get(node)?.size ?? 0) > 0
     }
 
     function getHiddenRuntimeScopeDepth(node: ts.Node) {
@@ -126,10 +156,15 @@ export function createCodegenContext(
 
         let current: ts.Node | undefined = node
         let depth = 0
+        const hiddenExpressionBodyScopeDepth = rootExpressionBody != null && isWithinNode(node, rootExpressionBody)
         while (current) {
             const parent: ts.Node | undefined = parentMap.get(current)?.node
             if (parent != null && ts.isWithStatement(parent) && parent.statement === current) {
                 return null
+            }
+
+            if (current === root && hiddenExpressionBodyScopeDepth) {
+                depth += 1
             }
 
             if (isRuntimeScopeNode(current)) {

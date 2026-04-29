@@ -85,6 +85,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 })
             }
             const restParameterIndex = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
+            const hasParameterExpressions = !!ctx[OpcodeContextField.popCurrentFrameStack]()
             const simpleParameterList = !!ctx[OpcodeContextField.popCurrentFrameStack]()
             const argumentNameCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const argumentNames: string[] = []
@@ -137,21 +138,14 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 return obj
             }
 
-            if (invokeType === InvokeType.Apply) {
-                const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
-                const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
-                const self = ctx[OpcodeContextField.popCurrentFrameStack]()
-
-                let scope: Scope
-
-                if (functionType === FunctionTypes.SourceFileInPlace) {
-                    scope = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.scopes]) || ctx[OpcodeContextField.currentFrame][Fields.globalThis]
-                } else {
-                    scope = getEmptyObject()
-                    ctx[OpcodeContextField.currentFrame][Fields.scopes].push(scope)
-                }
-                ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], scope)
-
+            const initializeVariableBindings = (
+                activationScope: Scope,
+                bindingScope: Scope,
+                name: string,
+                fn: any,
+                thisValue: any,
+                newTargetValue: any
+            ) => {
                 switch (functionType) {
                     case FunctionTypes.FunctionDeclaration:
                     case FunctionTypes.FunctionExpression:
@@ -169,37 +163,88 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     case FunctionTypes.SetAccessor:
                     case FunctionTypes.Constructor:
                     case FunctionTypes.DerivedConstructor:
-                        ctx[OpcodeContextField.defineVariable](scope, SpecialVariable.This, VariableType.Var, false)
-                        ctx[OpcodeContextField.initializeBindingValue](scope, SpecialVariable.This, self)
-                        ctx[OpcodeContextField.defineVariable](scope, SpecialVariable.NewTarget, VariableType.Var, false)
-                        ctx[OpcodeContextField.initializeBindingValue](scope, SpecialVariable.NewTarget, undefined)
-                        ctx[OpcodeContextField.writeScopeDebugProperty](scope, 'arguments', getArgumentObject(scope, fn))
+                        ctx[OpcodeContextField.defineVariable](
+                            activationScope,
+                            SpecialVariable.This,
+                            functionType === FunctionTypes.DerivedConstructor ? VariableType.Let : VariableType.Var,
+                            false
+                        )
+                        if (functionType !== FunctionTypes.DerivedConstructor || thisValue !== undefined) {
+                            ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.This, thisValue)
+                        }
+                        ctx[OpcodeContextField.defineVariable](activationScope, SpecialVariable.NewTarget, VariableType.Var, false)
+                        ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.NewTarget, newTargetValue)
+                        ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', getArgumentObject(bindingScope, fn))
                 }
 
                 for (const variable of variables) {
-                    ctx[OpcodeContextField.defineVariable](scope, variable[Fields.name], variable[Fields.type])
+                    ctx[OpcodeContextField.defineVariable](bindingScope, variable[Fields.name], variable[Fields.type])
                 }
 
-                bindFunctionSelfName(functionType, scope, name, fn, ctx)
+                bindFunctionSelfName(functionType, bindingScope, name, fn, ctx)
 
                 const restValues = hasRestParameter ? parameters.slice(restParameterIndex) : null
-                for (const [index, name] of argumentNames.entries()) {
+                for (const [index, parameterName] of argumentNames.entries()) {
                     ctx[OpcodeContextField.initializeBindingValue](
-                        scope,
-                        name,
+                        bindingScope,
+                        parameterName,
                         hasRestParameter && index === restParameterIndex
                             ? restValues
                             : parameters[index]
                     )
                 }
+            }
+
+            if (invokeType === InvokeType.Apply) {
+                const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+                const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
+                const self = ctx[OpcodeContextField.popCurrentFrameStack]()
+
+                let activationScope: Scope
+                let bindingScope: Scope
+
+                if (functionType === FunctionTypes.SourceFileInPlace) {
+                    activationScope = ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment]
+                        ?? ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.scopes])
+                        ?? ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+                    bindingScope = activationScope
+                    ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = activationScope
+                } else {
+                    if (hasParameterExpressions) {
+                        activationScope = getEmptyObject()
+                        bindingScope = getEmptyObject()
+                        ctx[OpcodeContextField.currentFrame][Fields.scopes].push(activationScope)
+                        ctx[OpcodeContextField.currentFrame][Fields.scopes].push(bindingScope)
+                        ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = activationScope
+                    } else {
+                        activationScope = getEmptyObject()
+                        bindingScope = activationScope
+                        ctx[OpcodeContextField.currentFrame][Fields.scopes].push(activationScope)
+                        ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = activationScope
+                    }
+                }
+                ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], bindingScope)
+                initializeVariableBindings(activationScope, bindingScope, name, fn, self, undefined)
             } else if (invokeType === InvokeType.Construct) {
                 const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
                 const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
                 const newTarget = ctx[OpcodeContextField.popCurrentFrameStack]<{ new(...args: any[]): any }>()
 
-                const scope: Scope = getEmptyObject()
-                ctx[OpcodeContextField.currentFrame][Fields.scopes].push(scope)
-                ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], scope)
+                let activationScope: Scope
+                let bindingScope: Scope
+                if (hasParameterExpressions) {
+                    activationScope = getEmptyObject()
+                    bindingScope = getEmptyObject()
+                    ctx[OpcodeContextField.currentFrame][Fields.scopes].push(activationScope)
+                    ctx[OpcodeContextField.currentFrame][Fields.scopes].push(bindingScope)
+                    ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = activationScope
+                } else {
+                    activationScope = getEmptyObject()
+                    bindingScope = activationScope
+                    ctx[OpcodeContextField.currentFrame][Fields.scopes].push(activationScope)
+                    ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = activationScope
+                }
+                ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], bindingScope)
 
                 switch (functionType) {
                     case FunctionTypes.MethodDeclaration:
@@ -209,39 +254,15 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     case FunctionTypes.GetAccessor:
                     case FunctionTypes.SetAccessor:
                         throw new TypeError('- not a constructor')
-                    case FunctionTypes.FunctionDeclaration:
-                    case FunctionTypes.FunctionExpression:
-                    case FunctionTypes.Constructor:
-                        ctx[OpcodeContextField.defineVariable](scope, SpecialVariable.This, VariableType.Var, false)
-                        ctx[OpcodeContextField.initializeBindingValue](scope, SpecialVariable.This, Object.create(newTarget.prototype))
-                        ctx[OpcodeContextField.defineVariable](scope, SpecialVariable.NewTarget, VariableType.Var, false)
-                        ctx[OpcodeContextField.initializeBindingValue](scope, SpecialVariable.NewTarget, newTarget)
-                        ctx[OpcodeContextField.writeScopeDebugProperty](scope, 'arguments', getArgumentObject(scope, fn))
-                        break
-                    case FunctionTypes.DerivedConstructor:
-                        ctx[OpcodeContextField.defineVariable](scope, SpecialVariable.This, VariableType.Let, false)
-                        ctx[OpcodeContextField.defineVariable](scope, SpecialVariable.NewTarget, VariableType.Var, false)
-                        ctx[OpcodeContextField.initializeBindingValue](scope, SpecialVariable.NewTarget, newTarget)
-                        ctx[OpcodeContextField.writeScopeDebugProperty](scope, 'arguments', getArgumentObject(scope, fn))
-                        break
                 }
-
-                for (const variable of variables) {
-                    ctx[OpcodeContextField.defineVariable](scope, variable[Fields.name], variable[Fields.type])
-                }
-
-                bindFunctionSelfName(functionType, scope, name, fn, ctx)
-
-                const restValues = hasRestParameter ? parameters.slice(restParameterIndex) : null
-                for (const [index, name] of argumentNames.entries()) {
-                    ctx[OpcodeContextField.initializeBindingValue](
-                        scope,
-                        name,
-                        hasRestParameter && index === restParameterIndex
-                            ? restValues
-                            : parameters[index]
-                    )
-                }
+                initializeVariableBindings(
+                    activationScope,
+                    bindingScope,
+                    name,
+                    fn,
+                    functionType === FunctionTypes.DerivedConstructor ? undefined : Object.create(newTarget.prototype),
+                    newTarget
+                )
             }
         }
             break
@@ -405,48 +426,48 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     if (state) {
                         const value = parameters[0]
 
-                        if (state.completed) {
-                            if (fnTarget === state.gen.throw) {
+                        if (state[Fields.completed]) {
+                            if (fnTarget === state[Fields.gen].throw) {
                                 throw value
                             }
                             ctx[OpcodeContextField.pushCurrentFrameStack]({ value: undefined, done: true })
                             return BREAK_COMMAND
                         }
 
-                        if (!state.started) {
-                            if (fnTarget === state.gen.throw) {
-                                state.completed = true
-                                state.stack = []
+                        if (!state[Fields.started]) {
+                            if (fnTarget === state[Fields.gen].throw) {
+                                state[Fields.completed] = true
+                                state[Fields.stack] = []
                                 throw value
                             }
-                            if (fnTarget === state.gen.return) {
-                                state.completed = true
-                                state.stack = []
+                            if (fnTarget === state[Fields.gen].return) {
+                                state[Fields.completed] = true
+                                state[Fields.stack] = []
                                 ctx[OpcodeContextField.pushCurrentFrameStack]({ value, done: true })
                                 return BREAK_COMMAND
                             }
                         }
 
-                        if (fnTarget === state.gen.throw) {
-                            state.pendingAction = { type: 'throw', value }
-                        } else if (fnTarget === state.gen.return) {
-                            state.pendingAction = { type: 'return', value }
+                        if (fnTarget === state[Fields.gen].throw) {
+                            state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: value }
+                        } else if (fnTarget === state[Fields.gen].return) {
+                            state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: value }
                         } else {
-                            state.pendingAction = null
+                            state[Fields.pendingAction] = null
                         }
 
-                        const wasStarted = state.started
-                        state.started = true
+                        const wasStarted = state[Fields.started]
+                        state[Fields.started] = true
 
-                        ;(state.stack[0] as any)[Fields.return] = ctx[OpcodeContextField.ptr]
-                        ctx[OpcodeContextField.stack].push(...state.stack)
-                        state.stack = []
+                        ;(state[Fields.stack][0] as any)[Fields.return] = ctx[OpcodeContextField.ptr]
+                        ctx[OpcodeContextField.stack].push(...state[Fields.stack])
+                        state[Fields.stack] = []
 
                         if (wasStarted) {
                             ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])[Fields.valueStack].push(value)
                         }
 
-                        ctx[OpcodeContextField.ptr] = state.ptr
+                        ctx[OpcodeContextField.ptr] = state[Fields.ptr]
                         ctx[OpcodeContextField.currentProgram] = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])[Fields.programSection]
                         return { [Fields.done]: false }
                     }
@@ -457,7 +478,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 const iterator = ctx[OpcodeContextField.createAsyncGeneratorFromExecution](
                     descriptor[Fields.programSection],
                     descriptor[Fields.offset],
-                    descriptor.bodyOffset,
+                    descriptor[Fields.bodyOffset],
                     descriptor[Fields.globalThis],
                     [...descriptor[Fields.scopes]],
                     {
@@ -473,7 +494,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 const iterator = ctx[OpcodeContextField.createGeneratorFromExecution](
                     descriptor[Fields.programSection],
                     descriptor[Fields.offset],
-                    descriptor.bodyOffset,
+                    descriptor[Fields.bodyOffset],
                     descriptor[Fields.globalThis],
                     [...descriptor[Fields.scopes]],
                     {

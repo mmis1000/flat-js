@@ -72,7 +72,8 @@ export const getExecution = (
     args: any[] = [],
     getDebugFunction: () => null | (() => void) = () => null,
     compileFunction: typeof import('../compiler').compile = (...args: any[]) => { throw new Error('not supported') },
-    functionRedirects: WeakMap<Function, Function> = new WeakMap()
+    functionRedirects: WeakMap<Function, Function> = new WeakMap(),
+    variableEnvironmentScope: Scope | null = null
 ) => {
     let currentProgram = program
 
@@ -92,7 +93,8 @@ export const getExecution = (
         [Fields.return]: -1,
         [Fields.programSection]: currentProgram,
         [Fields.globalThis]: globalThis,
-        [Fields.strict]: false
+        [Fields.strict]: false,
+        [Fields.variableEnvironment]: variableEnvironmentScope,
     }
 
     environments.add(initialFrame)
@@ -458,14 +460,14 @@ export const getExecution = (
         const baseFrames: Stack = scratchExecution[Fields.stack].slice()
 
         const state: GeneratorState = {
-            stack: baseFrames,
-            ptr: bodyOffset,
-            completed: false,
-            started: false,
-            pendingAction: null,
-            baseFrame: baseFrames[0],
-            gen: null,
-            execution: scratchExecution
+            [Fields.stack]: baseFrames,
+            [Fields.ptr]: bodyOffset,
+            [Fields.completed]: false,
+            [Fields.started]: false,
+            [Fields.pendingAction]: null,
+            [Fields.baseFrame]: baseFrames[0],
+            [Fields.gen]: null,
+            [Fields.execution]: scratchExecution
         }
 
         for (const f of baseFrames) {
@@ -476,36 +478,36 @@ export const getExecution = (
             method: 'next' | 'throw' | 'return',
             val?: unknown
         ): IteratorResult<unknown> => {
-            const exec = state.execution
+            const exec = state[Fields.execution]
             const stk = exec[Fields.stack]
 
-            if (!state.started) {
+            if (!state[Fields.started]) {
                 if (method === 'throw') {
-                    state.completed = true
-                    state.stack = []
+                    state[Fields.completed] = true
+                    state[Fields.stack] = []
                     throw val
                 }
                 if (method === 'return') {
-                    state.completed = true
-                    state.stack = []
+                    state[Fields.completed] = true
+                    state[Fields.stack] = []
                     return { value: val, done: true }
                 }
             }
 
             if (method === 'throw') {
-                state.pendingAction = { type: 'throw', value: val }
+                state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: val }
             } else if (method === 'return') {
-                state.pendingAction = { type: 'return', value: val }
+                state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: val }
             } else {
-                state.pendingAction = null
+                state[Fields.pendingAction] = null
             }
 
             stk.length = 0
-            stk.push(...state.stack)
-            exec[Fields.ptr] = state.ptr
+            stk.push(...state[Fields.stack])
+            exec[Fields.ptr] = state[Fields.ptr]
 
-            const wasStarted = state.started
-            state.started = true
+            const wasStarted = state[Fields.started]
+            state[Fields.started] = true
 
             if (wasStarted && method === 'next') {
                 exec[Fields.pushValue](val)
@@ -517,8 +519,8 @@ export const getExecution = (
                 return { value: res[Fields.value], done: false }
             }
             if (isResultDone(res)) {
-                state.completed = true
-                state.stack = []
+                state[Fields.completed] = true
+                state[Fields.stack] = []
                 const out = res[Fields.value]
                 if (isIteratorYieldDone(out)) {
                     return { value: out.value, done: out.done }
@@ -530,21 +532,21 @@ export const getExecution = (
 
         const gen: any = {
             next(_value?: unknown): IteratorResult<unknown> {
-                if (state.completed) return { value: undefined, done: true }
+                if (state[Fields.completed]) return { value: undefined, done: true }
                 return runHost('next', _value)
             },
             throw(error?: unknown): IteratorResult<unknown> {
-                if (state.completed) throw error
+                if (state[Fields.completed]) throw error
                 return runHost('throw', error)
             },
             return(value?: unknown): IteratorResult<unknown> {
-                if (state.completed) return { value, done: true }
+                if (state[Fields.completed]) return { value, done: true }
                 return runHost('return', value)
             },
             [Symbol.iterator]() { return gen }
         }
 
-        state.gen = gen
+        state[Fields.gen] = gen
 
         generatorStates.set(gen.next, state)
         generatorStates.set(gen.throw, state)
@@ -580,14 +582,14 @@ export const getExecution = (
         const baseFrames: Stack = scratchExecution[Fields.stack].slice()
 
         const state: GeneratorState = {
-            stack: baseFrames,
-            ptr: bodyOffset,
-            completed: false,
-            started: false,
-            pendingAction: null,
-            baseFrame: baseFrames[0],
-            gen: null,
-            execution: scratchExecution
+            [Fields.stack]: baseFrames,
+            [Fields.ptr]: bodyOffset,
+            [Fields.completed]: false,
+            [Fields.started]: false,
+            [Fields.pendingAction]: null,
+            [Fields.baseFrame]: baseFrames[0],
+            [Fields.gen]: null,
+            [Fields.execution]: scratchExecution
         }
 
         for (const f of baseFrames) {
@@ -598,10 +600,10 @@ export const getExecution = (
 
         const enqueueRequest = (method: 'next' | 'throw' | 'return', value?: unknown): Promise<IteratorResult<unknown>> => {
             const request = requestQueue.then(async () => {
-                const exec = state.execution
+                const exec = state[Fields.execution]
                 const stk = exec[Fields.stack]
 
-                if (state.completed) {
+                if (state[Fields.completed]) {
                     if (method === 'throw') {
                         throw value
                     }
@@ -611,33 +613,33 @@ export const getExecution = (
                     return { value: undefined, done: true }
                 }
 
-                if (!state.started) {
+                if (!state[Fields.started]) {
                     if (method === 'throw') {
-                        state.completed = true
-                        state.stack = []
+                        state[Fields.completed] = true
+                        state[Fields.stack] = []
                         throw value
                     }
                     if (method === 'return') {
-                        state.completed = true
-                        state.stack = []
+                        state[Fields.completed] = true
+                        state[Fields.stack] = []
                         return { value, done: true }
                     }
                 }
 
                 if (method === 'throw') {
-                    state.pendingAction = { type: 'throw', value }
+                    state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: value }
                 } else if (method === 'return') {
-                    state.pendingAction = { type: 'return', value }
+                    state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: value }
                 } else {
-                    state.pendingAction = null
+                    state[Fields.pendingAction] = null
                 }
 
                 stk.length = 0
-                stk.push(...state.stack)
-                exec[Fields.ptr] = state.ptr
+                stk.push(...state[Fields.stack])
+                exec[Fields.ptr] = state[Fields.ptr]
 
-                const wasStarted = state.started
-                state.started = true
+                const wasStarted = state[Fields.started]
+                state[Fields.started] = true
 
                 if (wasStarted && method === 'next') {
                     exec[Fields.pushValue](value)
@@ -649,8 +651,8 @@ export const getExecution = (
                         return { value: res[Fields.value], done: false }
                     }
                     if (isResultDone(res)) {
-                        state.completed = true
-                        state.stack = []
+                        state[Fields.completed] = true
+                        state[Fields.stack] = []
                         const out = res[Fields.value]
                         if (isIteratorYieldDone(out)) {
                             return { value: out.value, done: out.done }
@@ -685,7 +687,7 @@ export const getExecution = (
             [Symbol.asyncIterator]() { return gen }
         }
 
-        state.gen = gen
+        state[Fields.gen] = gen
 
         return gen
     }
@@ -750,7 +752,7 @@ export const getExecution = (
             [Fields.name]: name,
             [Fields.type]: type,
             [Fields.offset]: offset,
-            bodyOffset,
+            [Fields.bodyOffset]: bodyOffset,
             [Fields.scopes]: scopeClone,
             [Fields.programSection]: pr,
             [Fields.globalThis]: globalThis
@@ -773,14 +775,14 @@ export const getExecution = (
 
             if (isAsyncGeneratorType(type)) {
                 return createAsyncGeneratorFromExecution(
-                    pr, offset, des.bodyOffset, des[Fields.globalThis],
+                    pr, offset, des[Fields.bodyOffset], des[Fields.globalThis],
                     [...scopeClone], invokeData, args
                 )
             }
 
             if (isGeneratorType(type)) {
                 return createGeneratorFromExecution(
-                    pr, offset, des.bodyOffset, des[Fields.globalThis],
+                    pr, offset, des[Fields.bodyOffset], des[Fields.globalThis],
                     [...scopeClone], invokeData, args
                 )
             }
@@ -965,7 +967,8 @@ export const getExecution = (
             [],
             compileFunction,
             functionRedirects,
-            getDebugFunction
+            getDebugFunction,
+            includesLocalScope ? getCurrentFrame()[Fields.variableEnvironment] ?? null : null
         )
 
         return result
@@ -1016,14 +1019,14 @@ export const getExecution = (
                 const frame = currentFrame as FunctionFrame
 
                 const genState = frame[Fields.generator] as GeneratorState | undefined
-                const isGenBase = !!(genState && genState.baseFrame === frame)
+                const isGenBase = !!(genState && genState[Fields.baseFrame] === frame)
 
                 // exit
                 const returnAddr = frame[Fields.return]
 
                 if (isGenBase) {
-                    genState!.completed = true
-                    genState!.stack = []
+                    genState![Fields.completed] = true
+                    genState![Fields.stack] = []
                     stack.pop()
                     if (returnAddr < 0) {
                         returnsExternal = true
@@ -1115,11 +1118,11 @@ export const getExecution = (
                 case FrameType.Function: {
                     const fframe = currentFrame as FunctionFrame
                     const gs = fframe[Fields.generator] as GeneratorState | undefined
-                    if (gs && gs.baseFrame === fframe) {
+                    if (gs && gs[Fields.baseFrame] === fframe) {
                         // Error escapes the generator — mark completed and continue
                         // unwinding so it surfaces in the VM caller.
-                        gs.completed = true
-                        gs.stack = []
+                        gs[Fields.completed] = true
+                        gs[Fields.stack] = []
                     }
                     stack.pop()
                 }
@@ -1463,6 +1466,7 @@ export const getExecution = (
                 case OpCode.JumpIfAndKeep:
                 case OpCode.JumpIfNotAndKeep:
                 case OpCode.EnterScope:
+                case OpCode.EnterBodyScope:
                 case OpCode.EnterWith:
                 case OpCode.LeaveScope:
                 case OpCode.DeTDZ:
@@ -1661,9 +1665,21 @@ const run_ = (
     getDebugFunction: () => null | (() => void),
     evalResultInstead = false,
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
-    functionRedirects: WeakMap<Function, Function> = new WeakMap()
+    functionRedirects: WeakMap<Function, Function> = new WeakMap(),
+    variableEnvironmentScope: Scope | null = null
 ) => {
-    const execution = getExecution(program, entryPoint, globalThis, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+    const execution = getExecution(
+        program,
+        entryPoint,
+        globalThis,
+        scopes,
+        invokeData,
+        args,
+        getDebugFunction,
+        compileFunction,
+        functionRedirects,
+        variableEnvironmentScope
+    )
 
     let res
 
@@ -1690,7 +1706,8 @@ export const run = (
     args: any[] = [],
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
-    getDebugFunction: () => null | (() => void) = () => null
+    getDebugFunction: () => null | (() => void) = () => null,
+    variableEnvironmentScope: Scope | null = null
 ) => {
     return run_(
         program,
@@ -1707,6 +1724,7 @@ export const run = (
         getDebugFunction,
         true,
         compileFunction,
-        functionRedirects
+        functionRedirects,
+        variableEnvironmentScope
     )
 }

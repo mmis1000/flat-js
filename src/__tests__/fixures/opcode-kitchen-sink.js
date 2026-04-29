@@ -44,6 +44,11 @@ function directEvalSpread(parts) {
     return eval(...parts);
 }
 
+function bodyScopeActivationDemo(a = 1) {
+    var local = a + 1;
+    return local;
+}
+
 function callValue(fn) {
     return fn(1, 2);
 }
@@ -253,6 +258,7 @@ try {
 
 directEval('1 + 2');
 directEvalSpread(['1 + 2']);
+bodyScopeActivationDemo();
 callValue(function (a, b) { return a + b; });
 callValueSpread(function (a, b) { return a + b; }, [1, 2]);
 bindAndCall(function (a, b) { return this.base + a + b; }, { base: 5 });

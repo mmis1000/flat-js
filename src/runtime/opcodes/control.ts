@@ -23,15 +23,15 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
             const functionFrame = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack]) as FunctionFrame
             const returnAddr = functionFrame[Fields.return]
             const genState = functionFrame[Fields.generator] as GeneratorState | undefined
-            const isGenBase = !!(genState && genState.baseFrame === functionFrame)
+            const isGenBase = !!(genState && genState[Fields.baseFrame] === functionFrame)
 
             if (topWasFunction && !functionFrame[Fields.generator] && topResidue > 0) {
                 throw new Error('bad return')
             }
 
             if (isGenBase) {
-                genState!.completed = true
-                genState!.stack = []
+                genState![Fields.completed] = true
+                genState![Fields.stack] = []
                 ctx[OpcodeContextField.stack].pop()
 
                 if (returnAddr < 0) {

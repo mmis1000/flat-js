@@ -97,6 +97,56 @@ export function extractVariable(node: ts.Identifier | ts.ObjectBindingPattern | 
     return []
 }
 
+function bindingNameHasParameterExpressions(name: ts.BindingName): boolean {
+    if (ts.isIdentifier(name)) {
+        return false
+    }
+
+    if (ts.isArrayBindingPattern(name)) {
+        for (const element of name.elements) {
+            if (!ts.isBindingElement(element)) {
+                continue
+            }
+
+            if (element.initializer != null || bindingNameHasParameterExpressions(element.name)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    for (const element of name.elements) {
+        if (
+            element.initializer != null
+            || (element.propertyName != null && ts.isComputedPropertyName(element.propertyName))
+            || bindingNameHasParameterExpressions(element.name)
+        ) {
+            return true
+        }
+    }
+
+    return false
+}
+
+export function hasParameterExpressions(node: ts.FunctionLikeDeclarationBase | VariableRoot): boolean {
+    if (!ts.isFunctionLike(node)) {
+        return false
+    }
+
+    return node.parameters.some((parameter) =>
+        parameter.initializer != null
+        || bindingNameHasParameterExpressions(parameter.name)
+    )
+}
+
+export function getFunctionBodyScopeNode(node: ts.FunctionLikeDeclarationBase | VariableRoot): ts.Block | null {
+    if (!ts.isFunctionLike(node) || !('body' in node) || node.body == null || !ts.isBlock(node.body)) {
+        return null
+    }
+
+    return hasParameterExpressions(node) ? node.body : null
+}
+
 export function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, functions: Functions, scopes: Scopes) {
     function visit(current: ts.Node) {
         if (isScopeRoot(current)) {
@@ -119,6 +169,9 @@ export function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, func
                         ts.isAccessor(pair.node)
                     )
                 ) {
+                    if (getFunctionBodyScopeNode(pair.node)) {
+                        scopes.set(current, new Map())
+                    }
                     break
                 }
             }
@@ -137,14 +190,41 @@ export function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, func
 }
 
 export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Functions, scopes: Scopes) {
+    const getOwningFunctionBodyScope = (current: ts.Node) => {
+        const fn = findAncient(current, parentMap, (ancestor): ancestor is VariableRoot => functions.has(ancestor as VariableRoot)) as VariableRoot | undefined
+        if (fn == null) {
+            return null
+        }
+
+        const bodyScope = getFunctionBodyScopeNode(fn)
+        if (bodyScope == null) {
+            return null
+        }
+
+        let cursor: ts.Node | undefined = current
+        while (cursor != null) {
+            if (cursor === bodyScope) {
+                return bodyScope
+            }
+            if (cursor === fn) {
+                break
+            }
+            cursor = parentMap.get(cursor)?.node
+        }
+
+        return null
+    }
+
     function visit(current: ts.Node) {
         if (ts.isVariableDeclarationList(current)) {
             const variables = current.declarations.map((declaration) => extractVariable(declaration.name)).flat()
             const blockScoped = current.flags & ts.NodeFlags.BlockScoped
 
-            const block = blockScoped
+            const bodyScope = !blockScoped ? getOwningFunctionBodyScope(current) : null
+            const block = bodyScope
+                ?? (blockScoped
                 ? findAncient(current, parentMap, (ancestor) => scopes.has(ancestor))
-                : findAncient(current, parentMap, (ancestor) => functions.has(ancestor as VariableRoot))
+                : findAncient(current, parentMap, (ancestor) => functions.has(ancestor as VariableRoot)))
 
             if (block === undefined) {
                 throw new Error('unresolvable variable')
@@ -179,7 +259,8 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
         }
 
         if (ts.isFunctionDeclaration(current)) {
-            const parentFn = findAncient(current, parentMap, (ancestor) => (functions as Set<ts.Node>).has(ancestor))
+            const parentFn = getOwningFunctionBodyScope(current)
+                ?? findAncient(current, parentMap, (ancestor) => (functions as Set<ts.Node>).has(ancestor))
             if (parentFn === undefined) {
                 throw new Error('unresolvable variable')
             }

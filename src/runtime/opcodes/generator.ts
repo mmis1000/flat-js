@@ -2,6 +2,7 @@ import { OpCode } from "../../compiler"
 import {
     Fields,
     FrameType,
+    GeneratorDelegateState,
     GeneratorState,
     assertIteratorResult,
     generatorStates,
@@ -20,14 +21,14 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 throw new Error('yield outside of generator')
             }
 
-            state.ptr = ctx[OpcodeContextField.ptr]
+            state[Fields.ptr] = ctx[OpcodeContextField.ptr]
 
             let genStart = ctx[OpcodeContextField.stack].length
             while (genStart > 0 && ctx[OpcodeContextField.stack][genStart - 1][Fields.generator] === state) {
                 genStart--
             }
             const genFrames = ctx[OpcodeContextField.stack].splice(genStart)
-            state.stack = genFrames
+            state[Fields.stack] = genFrames
 
             if (ctx[OpcodeContextField.stack].length > 0) {
                 ctx[OpcodeContextField.ptr] = (genFrames[0] as any)[Fields.return]
@@ -45,23 +46,23 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
         }
         case OpCode.YieldResume: {
             const state = ctx[OpcodeContextField.currentFrame][Fields.generator] as GeneratorState | undefined
-            if (state && state.pendingAction) {
-                const action = state.pendingAction
-                state.pendingAction = null
-                if (action.type === 'throw') {
+            if (state && state[Fields.pendingAction]) {
+                const action = state[Fields.pendingAction]
+                state[Fields.pendingAction] = null
+                if (action[Fields.type] === 'throw') {
                     if (ctx[OpcodeContextField.currentFrame][Fields.type] === FrameType.Try) {
-                        ctx[OpcodeContextField.pushCurrentFrameStack](action.value)
+                        ctx[OpcodeContextField.pushCurrentFrameStack](action[Fields.value])
                         ctx[OpcodeContextField.initiateThrow]()
                         return BREAK_COMMAND
                     }
-                    throw action.value
+                    throw action[Fields.value]
                 }
                 if (ctx[OpcodeContextField.currentFrame][Fields.type] === FrameType.Try) {
-                    ctx[OpcodeContextField.pushCurrentFrameStack](action.value)
+                    ctx[OpcodeContextField.pushCurrentFrameStack](action[Fields.value])
                     ctx[OpcodeContextField.initiateReturn]()
                     return BREAK_COMMAND
                 }
-                ctx[OpcodeContextField.executeReturn](action.value)
+                ctx[OpcodeContextField.executeReturn](action[Fields.value])
                 return BREAK_COMMAND
             }
             break
@@ -69,7 +70,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
         case OpCode.YieldStar: {
             const frame = ctx[OpcodeContextField.currentFrame] as any
             const outerState = frame[Fields.generator] as GeneratorState | undefined
-            let delegate = frame[Fields.delegate] as { iter: any, phase: number, pendingMode?: 'next' | 'throw' | 'return' } | undefined
+            let delegate = frame[Fields.delegate] as GeneratorDelegateState | undefined
 
             const relayYield = (value: any): OpcodeHandlerResult => {
                 if (!outerState) {
@@ -81,13 +82,13 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                     }
                 }
 
-                outerState.ptr = ctx[OpcodeContextField.commandPtr]
+                outerState[Fields.ptr] = ctx[OpcodeContextField.commandPtr]
                 let genStart = ctx[OpcodeContextField.stack].length
                 while (genStart > 0 && ctx[OpcodeContextField.stack][genStart - 1][Fields.generator] === outerState) {
                     genStart--
                 }
                 const genFrames = ctx[OpcodeContextField.stack].splice(genStart)
-                outerState.stack = genFrames
+                outerState[Fields.stack] = genFrames
                 if (ctx[OpcodeContextField.stack].length > 0) {
                     ctx[OpcodeContextField.ptr] = (genFrames[0] as any)[Fields.return]
                     const callerFrame = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])
@@ -103,10 +104,10 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 }
             }
 
-            if (delegate && delegate.phase === 1) {
+            if (delegate && delegate[Fields.delegatePhase] === 1) {
                 const subResult = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
                 if (subResult && subResult.done) {
-                    const lastMode = delegate.pendingMode
+                    const lastMode = delegate[Fields.delegateMode]
                     frame[Fields.delegate] = null
                     if (lastMode === 'return') {
                         ctx[OpcodeContextField.executeReturn](subResult.value)
@@ -115,7 +116,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                     ctx[OpcodeContextField.pushCurrentFrameStack](subResult.value)
                     return BREAK_COMMAND
                 }
-                delegate.phase = 2
+                delegate[Fields.delegatePhase] = 2
                 return relayYield(subResult.value)
             }
 
@@ -126,16 +127,16 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
             if (!delegate) {
                 const iterable = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
                 iter = getIterator(iterable)
-                delegate = { iter, phase: 0 }
+                delegate = { [Fields.delegateIterator]: iter, [Fields.delegatePhase]: 0 }
                 frame[Fields.delegate] = delegate
                 sentVal = undefined
             } else {
-                iter = delegate.iter
+                iter = delegate[Fields.delegateIterator]
                 sentVal = ctx[OpcodeContextField.popCurrentFrameStack]()
-                if (outerState && outerState.pendingAction) {
-                    mode = outerState.pendingAction.type
-                    sentVal = outerState.pendingAction.value
-                    outerState.pendingAction = null
+                if (outerState && outerState[Fields.pendingAction]) {
+                    mode = outerState[Fields.pendingAction]![Fields.type]
+                    sentVal = outerState[Fields.pendingAction]![Fields.value]
+                    outerState[Fields.pendingAction] = null
                 }
             }
 
@@ -143,7 +144,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
             const subState = methodFn ? generatorStates.get(methodFn) : undefined
 
             if (subState) {
-                if (subState.completed) {
+                if (subState[Fields.completed]) {
                     frame[Fields.delegate] = null
                     if (mode === 'throw') {
                         throw sentVal
@@ -156,16 +157,16 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                     return BREAK_COMMAND
                 }
 
-                if (!subState.started) {
+                if (!subState[Fields.started]) {
                     if (mode === 'throw') {
-                        subState.completed = true
-                        subState.stack = []
+                        subState[Fields.completed] = true
+                        subState[Fields.stack] = []
                         frame[Fields.delegate] = null
                         throw sentVal
                     }
                     if (mode === 'return') {
-                        subState.completed = true
-                        subState.stack = []
+                        subState[Fields.completed] = true
+                        subState[Fields.stack] = []
                         frame[Fields.delegate] = null
                         ctx[OpcodeContextField.executeReturn](sentVal)
                         return BREAK_COMMAND
@@ -173,27 +174,27 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 }
 
                 if (mode === 'throw') {
-                    subState.pendingAction = { type: 'throw', value: sentVal }
+                    subState[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: sentVal }
                 } else if (mode === 'return') {
-                    subState.pendingAction = { type: 'return', value: sentVal }
+                    subState[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: sentVal }
                 } else {
-                    subState.pendingAction = null
+                    subState[Fields.pendingAction] = null
                 }
 
-                const wasStarted = subState.started
-                subState.started = true
+                const wasStarted = subState[Fields.started]
+                subState[Fields.started] = true
 
-                ;(subState.stack[0] as any)[Fields.return] = ctx[OpcodeContextField.commandPtr]
-                ctx[OpcodeContextField.stack].push(...subState.stack)
-                subState.stack = []
+                ;(subState[Fields.stack][0] as any)[Fields.return] = ctx[OpcodeContextField.commandPtr]
+                ctx[OpcodeContextField.stack].push(...subState[Fields.stack])
+                subState[Fields.stack] = []
 
                 if (wasStarted) {
                     ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])[Fields.valueStack].push(sentVal)
                 }
 
-                delegate.phase = 1
-                delegate.pendingMode = mode
-                ctx[OpcodeContextField.ptr] = subState.ptr
+                delegate[Fields.delegatePhase] = 1
+                delegate[Fields.delegateMode] = mode
+                ctx[OpcodeContextField.ptr] = subState[Fields.ptr]
                 ctx[OpcodeContextField.currentProgram] = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])[Fields.programSection]
                 return { [Fields.done]: false }
             }
@@ -234,7 +235,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 return BREAK_COMMAND
             }
 
-            delegate.phase = 2
+            delegate[Fields.delegatePhase] = 2
             return relayYield(result.value)
         }
     }

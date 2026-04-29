@@ -109,6 +109,17 @@ export const enum Fields {
     setPendingThrow,
     error,
     generator,
+    variableEnvironment,
+    bodyOffset,
+    completed,
+    started,
+    pendingAction,
+    baseFrame,
+    gen,
+    execution,
+    delegateIterator,
+    delegatePhase,
+    delegateMode,
 }
 
 interface BaseFrame {
@@ -119,6 +130,7 @@ interface BaseFrame {
     [Fields.strict]?: boolean
     [Fields.valueStack]: any[]
     [Fields.generator]?: any
+    [Fields.variableEnvironment]?: Scope | null
 }
 
 interface FunctionFrame extends BaseFrame {
@@ -299,7 +311,7 @@ type FunctionDescriptor = {
     [Fields.name]: string,
     [Fields.type]: FunctionTypes,
     [Fields.offset]: number,
-    bodyOffset: number,
+    [Fields.bodyOffset]: number,
     [Fields.scopes]: Scope[],
     [Fields.programSection]: number[],
     [Fields.globalThis]: any
@@ -327,15 +339,26 @@ const environments = new WeakSet() as unknown as RefinedEnvSet
 
 const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
 
+type PendingAction = {
+    [Fields.type]: 'throw' | 'return',
+    [Fields.value]: any,
+}
+
+type GeneratorDelegateState = {
+    [Fields.delegateIterator]: any,
+    [Fields.delegatePhase]: number,
+    [Fields.delegateMode]?: 'next' | 'throw' | 'return',
+}
+
 type GeneratorState = {
-    stack: Stack,
-    ptr: number,
-    completed: boolean,
-    started: boolean,
-    pendingAction: null | { type: 'throw' | 'return', value: any },
-    baseFrame: Frame | null,
-    gen: any,
-    execution: Execution
+    [Fields.stack]: Stack,
+    [Fields.ptr]: number,
+    [Fields.completed]: boolean,
+    [Fields.started]: boolean,
+    [Fields.pendingAction]: null | PendingAction,
+    [Fields.baseFrame]: Frame | null,
+    [Fields.gen]: any,
+    [Fields.execution]: Execution
 }
 const generatorStates = new WeakMap<any, GeneratorState>()
 
@@ -400,10 +423,12 @@ export type {
     Context,
     Execution,
     FunctionDescriptor,
+    GeneratorDelegateState,
     FunctionFrame,
     GeneratorState,
     InvokeParamApply,
     InvokeParamConstruct,
+    PendingAction,
     RefinedEnvSet,
     ScopeWithInternals,
     StaticVariableStore,

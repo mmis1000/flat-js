@@ -1,6 +1,6 @@
 import * as ts from 'typescript'
 
-import type { Functions, ParentMap, Scopes, VariableRoot } from '../analysis'
+import { getFunctionBodyScopeNode, hasParameterExpressions, type Functions, type ParentMap, type Scopes, type VariableRoot } from '../analysis'
 import { FunctionTypes, OpCode, StatementFlag } from '../shared'
 import { generateBindingInitialization } from './binding-patterns'
 import { createCodegenContext } from './context'
@@ -88,6 +88,8 @@ export function generateSegment(
     let bodyNodes: Op<OpCode>[]
 
     const functionNode = ts.isSourceFile(node) ? null : node
+    const hasParameterExpr = functionNode != null && hasParameterExpressions(functionNode)
+    const bodyScopeNode = functionNode == null ? null : getFunctionBodyScopeNode(functionNode)
     const restParameterIndex = functionNode?.parameters.findIndex((parameter) => parameter.dotDotDotToken != null) ?? -1
     const simpleParameterList = functionNode == null
         ? true
@@ -157,6 +159,20 @@ export function generateSegment(
     const bodyStart = markInternal(op(OpCode.Nop, 0)) as Op<OpCode> & { bodyStartMarker?: boolean }
     bodyStart.bodyStartMarker = true
 
+    const bodyScopeEnter = hasParameterExpr
+        ? markInternal(op(OpCode.EnterBodyScope))
+        : null
+    if (bodyScopeEnter != null && bodyScopeNode != null) {
+        bodyScopeEnter.scopeDebugNames = getScopeDebugNames(bodyScopeNode, scopes)
+    }
+
+    const bodyActivationNodes = bodyScopeEnter == null
+        ? []
+        : markInternals([
+            ...(bodyScopeNode != null ? generateVariableList(bodyScopeNode, scopes) : [op(OpCode.Literal, 2, [0])]),
+            bodyScopeEnter,
+        ])
+
     const functionDeclarationNodes = ctx.functionDeclarations.map((declaration) => [
         op(OpCode.GetRecord),
         op(OpCode.Literal, 2, [declaration.name?.text]),
@@ -175,6 +191,7 @@ export function generateSegment(
     if (ts.isSourceFile(node)) {
         entry.push(op(OpCode.Literal, 2, [0]))
         entry.push(op(OpCode.Literal, 2, [1]))
+        entry.push(op(OpCode.Literal, 2, [0]))
         entry.push(op(OpCode.Literal, 2, [-1]))
     } else {
         for (let index = node.parameters.length - 1; index >= 0; index--) {
@@ -182,6 +199,7 @@ export function generateSegment(
         }
         entry.push(op(OpCode.Literal, 2, [node.parameters.length]))
         entry.push(op(OpCode.Literal, 2, [simpleParameterList ? 1 : 0]))
+        entry.push(op(OpCode.Literal, 2, [hasParameterExpr ? 1 : 0]))
         entry.push(op(OpCode.Literal, 2, [restParameterIndex]))
     }
 
@@ -201,6 +219,7 @@ export function generateSegment(
     const results = [
         ...entry,
         ...parameterPrologue,
+        ...bodyActivationNodes,
         ...functionDeclarationNodes,
         bodyStart,
         ...bodyNodes

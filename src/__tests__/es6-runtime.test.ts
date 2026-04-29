@@ -449,6 +449,69 @@ test('destructured and default parameters keep arguments unmapped', () => {
     `)).toEqual([1, 2, 10, '3,4'])
 })
 
+test('parameter defaults cannot see body function bindings before body activation', () => {
+    expect(() => compileAndRun(`
+        {
+            const a = (b = __paramBodyFunction) => {
+                function __paramBodyFunction() {}
+                return b
+            }
+
+            a()
+        }
+    `)).toThrow(/__paramBodyFunction is not defined/)
+})
+
+test('parameter defaults cannot see body var bindings before body activation', () => {
+    expect(() => compileAndRun(`
+        {
+            const a = (b = __paramBodyVar) => {
+                var __paramBodyVar = 1
+                return b
+            }
+
+            a()
+        }
+    `)).toThrow(/__paramBodyVar is not defined/)
+})
+
+test('closures created during parameter defaults do not capture future body bindings', () => {
+    expect(() => compileAndRun(`
+        {
+            const a = (read = () => __paramClosureBodyFunction) => {
+                function __paramClosureBodyFunction() {}
+                return read()
+            }
+
+            a()
+        }
+    `)).toThrow(/__paramClosureBodyFunction is not defined/)
+})
+
+test('direct eval in parameter defaults writes var bindings into the function variable environment', () => {
+    expect(compileAndRun(`
+        {
+            const a = function (b1 = eval('var c = 1; c')) {
+                return [b1, c]
+            }
+
+            a()
+        }
+    `)).toEqual([1, 1])
+})
+
+test('later parameter defaults read eval-created vars before falling back to outer bindings', () => {
+    expect(compileAndRun(`
+        {
+            const c = 3;
+            const a = (b1 = eval('var c = 1; 0'), b2 = c + 1) => [b1, b2];
+            const result = a();
+
+            [result[0], result[1], c]
+        }
+    `)).toEqual([0, 2, 3])
+})
+
 test('catch binding patterns destructure the thrown value', () => {
     expect(compileAndRun(`
         try {

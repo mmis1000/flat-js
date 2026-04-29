@@ -18,7 +18,11 @@ runner(2)
 
     const enterPtrs = program
         .slice(0, info.codeLength)
-        .map((opcode, ptr) => opcode === OpCode.EnterFunction || opcode === OpCode.EnterScope ? ptr : -1)
+        .map((opcode, ptr) =>
+            opcode === OpCode.EnterFunction || opcode === OpCode.EnterScope || opcode === OpCode.EnterBodyScope
+                ? ptr
+                : -1
+        )
         .filter(ptr => ptr >= 0)
 
     expect(enterPtrs.length).toBeGreaterThan(0)

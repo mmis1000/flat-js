@@ -70,6 +70,11 @@ Reduce the `language` category failures in targeted batches:
     - iterator-closing semantics are fixed for destructuring initialization and generator suspension cases
     - strict destructuring early errors now cover reserved words, `yield`, optional-chain targets, and rest trailing commas
     - async generator destructuring parameters now run through a real async-generator path instead of a sync-generator fallback
+    - functions with parameter expressions now use one `EnterFunction` with split environments:
+      - a base function variable environment for `this` / `new.target` / `arguments` and direct-eval `var`
+      - a parameter environment for parameter bindings and parameter-default evaluation
+      - a later body-activation `EnterScope` so body `var` / hoisted `function` bindings stay invisible during parameter initialization
+    - direct eval inside parameter defaults now writes `var` bindings into the function variable environment, which later parameter defaults and body code can observe without exposing future body declarations too early
     - focused destructuring slices are green for intended-support roots:
       - `language/statements/variable/dstr/**`
       - `language/expressions/assignment/dstr/**`
@@ -80,6 +85,13 @@ Reduce the `language` category failures in targeted batches:
       - `language/statements/generators/dstr/**`
       - `language/expressions/async-generator/dstr/**`
       - `language/statements/async-generator/dstr/**`
+      - parameter-environment families:
+        - `scope-paramsbody-var-open/close`
+        - `scope-param-elem-var-open/close`
+        - `params-dflt-ref-arguments`
+        - `params-dflt-args-unmapped`
+        - `eval-param-env-with-prop-initializer`
+        - `eval-param-env-with-computed-key`
     - the only noted residual in these focused slices is out-of-scope class-static-block coverage in the variable-declaration summary
 
 - [ ] `missing-operators`
@@ -160,3 +172,29 @@ Reduce the `language` category failures in targeted batches:
   - no new `async-generator` destructuring regressions appeared in the full summary
   - the `TypeError: ... reading '6'` break/finally failures exposed by the stale-build scan are gone in the rebuilt scan
   - remaining `try` / `continue-in-try-catch` failures are still part of the next runtime-semantic cluster, not a regression from the completed destructuring batch
+- 2026-04-29: Fixed parameter/body environment separation for functions with parameter expressions across [analysis.ts](</M:/Playground/flat-js/src/compiler/analysis.ts:1>), [index.ts](</M:/Playground/flat-js/src/compiler/codegen/index.ts:1>), [context.ts](</M:/Playground/flat-js/src/compiler/codegen/context.ts:1>), [function.ts](</M:/Playground/flat-js/src/runtime/opcodes/function.ts:1>), [basic.ts](</M:/Playground/flat-js/src/runtime/opcodes/basic.ts:1>), and [execution.ts](</M:/Playground/flat-js/src/runtime/execution.ts:1>).
+  - `EnterFunction` now creates a base function variable environment plus a parameter environment, while the explicit body-activation `EnterScope` creates the body environment later.
+  - direct eval during parameter initialization now targets the base function variable environment instead of a speculative future body scope.
+  - added repo regressions in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) for:
+    - body `function` / `var` invisibility during parameter defaults
+    - closures created during parameter defaults
+    - eval-created vars seen by body code
+    - eval-created vars seen by later parameter defaults before outer bindings
+- 2026-04-29: Verified the parameter-environment fix with:
+  - `npm run build:tsc`
+  - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
+  - `npm test`
+  - focused metadata-aware Test262 rerun of:
+    - `scope-paramsbody-var-open/close`
+    - `scope-param-elem-var-open/close`
+    - `params-dflt-ref-arguments`
+    - `params-dflt-args-unmapped`
+    - `eval-param-env-with-prop-initializer`
+    - `eval-param-env-with-computed-key`
+  - result: `30` files / `48` strict-default scenarios / `0` failures
+- 2026-04-29: Rebuilt with `npm run build` and re-ran the full `language` scan after the parameter-environment fix.
+  - authoritative full-scan totals now are:
+    - intended scope failing files: `3585 -> 3536`
+    - out-of-scope failing files: `6627 -> 6627`
+    - total failing files: `10212 -> 10163`
+  - no new broad regressions appeared; the focused parameter-environment failures are gone from the full summary.

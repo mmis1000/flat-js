@@ -144,7 +144,7 @@ export const enum OpCode {
 
     /**
      * Initializes a function or source-file activation scope from the current call setup.
-     * Stack (bottom to top): `thisValue`, `fn`, `fnName`, `InvokeType.Apply`, argument * O, argumentCount, parameterName * N (reversed), parameterNameCount, restParameterIndex, [variableName, variableType] * M, variableCount, functionType
+     * Stack (bottom to top): `thisValue`, `fn`, `fnName`, `InvokeType.Apply`, argument * O, argumentCount, parameterName * N (reversed), parameterNameCount, simpleParameterList, hasParameterExpressions, restParameterIndex, [variableName, variableType] * M, variableCount, functionType
      * Result: no stack result.
      * Notes: Under `InvokeType.Construct`, the bottom value is `newTarget` instead of `thisValue`. `restParameterIndex` is `-1` when absent. This opcode binds parameters, locals, `this`, `new.target`, and debug scope state.
      */
@@ -155,6 +155,12 @@ export const enum OpCode {
      * Result: no stack result.
      */
     EnterScope,
+    /**
+     * Creates the function body scope after parameter initialization and makes it the active variable environment.
+     * Stack (bottom to top): [variableName, variableType] * M, variableCount
+     * Result: no stack result.
+     */
+    EnterBodyScope,
     /**
      * Creates a `with` object-environment scope from the provided value.
      * Stack (bottom to top): value

@@ -341,7 +341,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             }
         }
             break
-        case OpCode.EnterScope: {
+        case OpCode.EnterScope:
+        case OpCode.EnterBodyScope: {
             const variableCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const variables: VariableRecord[] = []
             for (let i = 0; i < variableCount; i++) {
@@ -352,6 +353,9 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             }
 
             const scope: Scope = getEmptyObject()
+            if (command === OpCode.EnterBodyScope) {
+                ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = scope
+            }
             ctx[OpcodeContextField.currentFrame][Fields.scopes].push(scope)
             ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], scope)
 
