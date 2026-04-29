@@ -18,14 +18,20 @@ export function getExpectedArgumentCount(node: ts.SignatureDeclarationBase): num
     return count
 }
 
-export function generateFunctionDefinition(node: ts.ArrowFunction | ts.FunctionExpression, name: string): Segment {
+export function generateFunctionDefinitionWithStackName(node: ts.FunctionLikeDeclarationBase): Segment {
     return [
-        op(OpCode.Literal, 2, [name]),
         op(OpCode.Literal, 2, [getExpectedArgumentCount(node)]),
         op(OpCode.NodeOffset, 2, [node]),
         op(OpCode.NodeOffset, 2, [node, 'bodyStart']),
         op(OpCode.NodeFunctionType, 2, [node]),
         op(OpCode.DefineFunction)
+    ]
+}
+
+export function generateFunctionDefinition(node: ts.ArrowFunction | ts.FunctionExpression, name: string): Segment {
+    return [
+        op(OpCode.Literal, 2, [name]),
+        ...generateFunctionDefinitionWithStackName(node)
     ]
 }
 

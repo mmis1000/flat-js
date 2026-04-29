@@ -1,18 +1,27 @@
 import * as ts from 'typescript'
 
 import { FunctionTypes, OpCode, SpecialVariable, VariableType } from '../../shared'
-import { getExpectedArgumentCount } from './functions'
+import { generateFunctionDefinitionWithStackName, getExpectedArgumentCount } from './functions'
 import { markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
+
+function getStaticPropertyName(name: ts.Identifier | ts.StringLiteral | ts.NumericLiteral): string {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+        return name.text
+    }
+    return String(Number(name.text))
+}
 
 export function generateClassValue(
     node: ts.ClassDeclaration | ts.ClassExpression,
     flag: number,
     ctx: CodegenContext,
-    nameOverride?: string
+    nameOverride?: string,
+    nameFromStack: boolean = false
 ): Segment {
     const className = nameOverride ?? node.name?.text ?? ''
+    const usesStackName = nameFromStack && node.name == null
     const extendsClause = node.heritageClauses?.find(
         (clause: ts.HeritageClause) => clause.token === ts.SyntaxKind.ExtendsKeyword
     )
@@ -42,8 +51,12 @@ export function generateClassValue(
     }
 
     if (ctorMember) {
+        if (usesStackName) {
+            res.push(op(OpCode.Duplicate))
+        } else {
+            res.push(op(OpCode.Literal, 2, [className]))
+        }
         res.push(
-            op(OpCode.Literal, 2, [className]),
             op(OpCode.Literal, 2, [getExpectedArgumentCount(ctorMember)]),
             op(OpCode.NodeOffset, 2, [ctorMember]),
             op(OpCode.NodeOffset, 2, [ctorMember, 'bodyStart']),
@@ -64,7 +77,7 @@ export function generateClassValue(
         res.push(op(OpCode.NullLiteral))
     }
 
-    res.push(op(OpCode.Literal, 2, [className]))
+    res.push(usesStackName ? op(OpCode.UndefinedLiteral) : op(OpCode.Literal, 2, [className]))
     res.push(op(OpCode.CreateClass))
 
     for (const member of node.members) {
@@ -85,20 +98,17 @@ export function generateClassValue(
 
             if (ts.isComputedPropertyName(member.name)) {
                 res.push(...ctx.generate(member.name.expression, flag))
+                res.push(op(OpCode.ToPropertyKey))
             } else if (ts.isIdentifier(member.name)) {
                 res.push(op(OpCode.Literal, 2, [member.name.text]))
             } else if (ts.isStringLiteral(member.name) || ts.isNumericLiteral(member.name)) {
-                res.push(...ctx.generate(member.name, flag))
+                res.push(op(OpCode.Literal, 2, [getStaticPropertyName(member.name)]))
             } else {
                 throw new Error('unsupported class member name')
             }
 
             res.push(op(OpCode.Duplicate))
-            res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(member)]))
-            res.push(op(OpCode.NodeOffset, 2, [member]))
-            res.push(op(OpCode.NodeOffset, 2, [member, 'bodyStart']))
-            res.push(op(OpCode.NodeFunctionType, 2, [member]))
-            res.push(op(OpCode.DefineFunction))
+            res.push(...generateFunctionDefinitionWithStackName(member))
 
             if (ts.isGetAccessorDeclaration(member)) {
                 res.push(op(OpCode.Literal, 2, [0]))

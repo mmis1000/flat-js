@@ -333,6 +333,25 @@ const isAsyncType = (t: FunctionTypes) =>
     t === FunctionTypes.AsyncArrowFunction ||
     t === FunctionTypes.AsyncMethod
 
+const formatFunctionNameKey = (name: PropertyKey): string => {
+    if (typeof name !== 'symbol') {
+        return String(name)
+    }
+
+    return name.description === undefined ? '' : `[${name.description}]`
+}
+
+const formatFunctionName = (name: PropertyKey, type?: FunctionTypes): string => {
+    const formattedName = formatFunctionNameKey(name)
+    if (type === FunctionTypes.GetAccessor) {
+        return `get ${formattedName}`
+    }
+    if (type === FunctionTypes.SetAccessor) {
+        return `set ${formattedName}`
+    }
+    return formattedName
+}
+
 const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
 
 const environments = new WeakSet() as unknown as RefinedEnvSet
@@ -388,6 +407,8 @@ export {
     decodeLiteralFromProgram,
     environments,
     functionDescriptors,
+    formatFunctionName,
+    formatFunctionNameKey,
     generatorStates,
     getEmptyObject,
     getIterator,

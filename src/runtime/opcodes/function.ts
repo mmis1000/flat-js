@@ -269,7 +269,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             const bodyOffset = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const offset = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const expectedArgumentCount = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<PropertyKey>()
             const fn = ctx[OpcodeContextField.defineFunction](
                 ctx[OpcodeContextField.currentFrame][Fields.globalThis],
                 ctx[OpcodeContextField.currentFrame][Fields.scopes],

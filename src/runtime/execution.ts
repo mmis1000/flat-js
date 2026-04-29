@@ -9,6 +9,7 @@ import {
     FunctionFrame,
     functionDescriptors,
     FunctionDescriptor,
+    formatFunctionName,
     generatorStates,
     GeneratorState,
     getEmptyObject,
@@ -731,14 +732,15 @@ export const getExecution = (
         })
     }
 
-    const defineFunction = (globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number, bodyOffset: number) => {
+    const defineFunction = (globalThis: any, scopes: Scope[], name: PropertyKey, type: FunctionTypes, offset: number, bodyOffset: number) => {
         // TODO: types
         const scopeClone = [...scopes]
 
         const pr = currentProgram
+        const functionName = formatFunctionName(name, type)
 
         const des: FunctionDescriptor = {
-            [Fields.name]: name,
+            [Fields.name]: functionName,
             [Fields.type]: type,
             [Fields.offset]: offset,
             [Fields.bodyOffset]: bodyOffset,
@@ -752,13 +754,13 @@ export const getExecution = (
                 ? {
                     [Fields.type]: InvokeType.Construct,
                     [Fields.function]: fn,
-                    [Fields.name]: name,
+                    [Fields.name]: functionName,
                     [Fields.newTarget]: new.target
                 }
                 : {
                     [Fields.type]: InvokeType.Apply,
                     [Fields.function]: fn,
-                    [Fields.name]: name,
+                    [Fields.name]: functionName,
                     [Fields.self]: this
                 }
 
@@ -789,7 +791,7 @@ export const getExecution = (
             )
         }
 
-        Object.defineProperty(fn, 'name', { value: name, configurable: true })
+        Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
 
         ;(fn as any).__pos__ = offset
 
@@ -836,12 +838,13 @@ export const getExecution = (
         return null
     }
 
-    const getValue = (ctx: any, name: string) => {
+    const getValue = (ctx: any, name: PropertyKey) => {
+        const bindingName = name as string
         if (!environments.has(ctx)) {
             if (isIdentifierReference(ctx)) {
                 const scope = ctx[IDENTIFIER_REFERENCE_SCOPE]
                 if (scope) {
-                    return getBindingValueChecked(scope, name)
+                    return getBindingValueChecked(scope, bindingName)
                 }
                 const env = ctx[IDENTIFIER_REFERENCE_FRAME]
                 const currentGlobal = env[Fields.globalThis]
@@ -851,18 +854,18 @@ export const getExecution = (
                 if (name in currentGlobal) {
                     return (currentGlobal as any)[name]
                 }
-                throw new ReferenceError(name + is_not_defined)
+                throw new ReferenceError(String(name) + is_not_defined)
             }
             if (isEnvironmentScopeObject(ctx)) {
-                return getBindingValueChecked(ctx, name)
+                return getBindingValueChecked(ctx, bindingName)
             }
             return ctx[name]
         } else {
             const env: Frame = ctx
-            const scope = findScope(env, name)
+            const scope = findScope(env, bindingName)
 
             if (scope) {
-                return getBindingValueChecked(scope, name)
+                return getBindingValueChecked(scope, bindingName)
             } else {
                 const currentGlobal = env[Fields.globalThis]
                 if (name === SpecialVariable.This) {
@@ -870,43 +873,44 @@ export const getExecution = (
                 } else if (name in currentGlobal) {
                     return (currentGlobal as any)[name]
                 } else {
-                    throw new ReferenceError(name + is_not_defined)
+                    throw new ReferenceError(String(name) + is_not_defined)
                 }
             }
         }
     }
 
-    const setValue = (ctx: any, name: string, value: any) => {
+    const setValue = (ctx: any, name: PropertyKey, value: any) => {
+        const bindingName = name as string
         if (!environments.has(ctx)) {
             if (isIdentifierReference(ctx)) {
                 const scope = ctx[IDENTIFIER_REFERENCE_SCOPE]
                 if (scope) {
-                    return setBindingValueChecked(scope, name, value)
+                    return setBindingValueChecked(scope, bindingName, value)
                 }
                 const env = ctx[IDENTIFIER_REFERENCE_FRAME]
                 if (env[Fields.strict]) {
-                    throw new ReferenceError(name + is_not_defined)
+                    throw new ReferenceError(String(name) + is_not_defined)
                 }
-                const currentGlobal = env[Fields.globalThis] as Record<string, any>
+                const currentGlobal = env[Fields.globalThis] as Record<PropertyKey, any>
                 currentGlobal[name] = value
                 return value
             }
             if (isEnvironmentScopeObject(ctx)) {
-                return setBindingValueChecked(ctx, name, value)
+                return setBindingValueChecked(ctx, bindingName, value)
             }
             try {
-                return writeBindingValue(ctx as Scope, name, value)
+                return writeBindingValue(ctx as Scope, bindingName, value)
             } catch (e) {
                 rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
             }
         } else {
             const env: Frame = ctx
-            const scope = findScope(env, name)
+            const scope = findScope(env, bindingName)
 
             if (scope) {
-                return setBindingValueChecked(scope, name, value)
+                return setBindingValueChecked(scope, bindingName, value)
             } else {
-                const currentGlobal = env[Fields.globalThis] as Record<string, any>
+                const currentGlobal = env[Fields.globalThis] as Record<PropertyKey, any>
                 currentGlobal[name] = value
                 return value
             }
@@ -1444,6 +1448,7 @@ export const getExecution = (
                 case OpCode.BAsteriskEqualStaticUnchecked:
                 case OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked:
                 case OpCode.DefineKeepCtx:
+                case OpCode.SetPrototypeKeepCtx:
                 case OpCode.Get:
                 case OpCode.GetKeepCtx:
                 case OpCode.ResolveScope:

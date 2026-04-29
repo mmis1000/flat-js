@@ -433,6 +433,42 @@ function validateDestructuringSyntax(sourceNode: ts.SourceFile, withStrict: bool
     visit(sourceNode, false)
 }
 
+function getStaticPropertyName(name: ts.PropertyName): string | null {
+    if (ts.isComputedPropertyName(name)) {
+        return null
+    }
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+        return name.text
+    }
+    if (ts.isNumericLiteral(name)) {
+        return String(Number(name.text))
+    }
+    return null
+}
+
+function validateObjectLiteralSyntax(sourceNode: ts.SourceFile) {
+    const visit = (node: ts.Node) => {
+        if (ts.isObjectLiteralExpression(node)) {
+            let protoSetterCount = 0
+            for (const property of node.properties) {
+                if (!ts.isPropertyAssignment(property)) {
+                    continue
+                }
+                if (getStaticPropertyName(property.name) === '__proto__') {
+                    protoSetterCount += 1
+                    if (protoSetterCount > 1) {
+                        throw new SyntaxError('duplicate __proto__ property')
+                    }
+                }
+            }
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
+}
+
 function toSourceRange(locationMap: Map<number, [number, number]>, start: number, end: number): [number, number, number, number] {
     const startPos = locationMap.get(start)!
     const endPos = locationMap.get(end)!
@@ -454,6 +490,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     const locationMap = createLocationMap(normalizedSrc)
 
     validateSyntax(sourceNode, locationMap)
+    validateObjectLiteralSyntax(sourceNode)
     validateDestructuringSyntax(sourceNode, withStrict)
 
     markParent(sourceNode, parentMap)

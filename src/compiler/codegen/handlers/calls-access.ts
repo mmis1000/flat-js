@@ -1,12 +1,56 @@
 import * as ts from 'typescript'
 
-import { FunctionTypes, OpCode, SpecialVariable } from '../../shared'
-import { getExpectedArgumentCount } from './functions'
+import { OpCode, SpecialVariable } from '../../shared'
+import { generateClassValue } from './classes'
+import { generateFunctionDefinitionWithStackName } from './functions'
 import { op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
 type ArrayLikeElement = ts.Expression | ts.SpreadElement | ts.OmittedExpression
+
+type ObjectPropertyKey = {
+    ops: Segment
+    computed: boolean
+    staticName?: string
+}
+
+function getStaticPropertyName(name: ts.Identifier | ts.StringLiteral | ts.NumericLiteral): string {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
+        return name.text
+    }
+    return String(Number(name.text))
+}
+
+function generateObjectPropertyKey(name: ts.PropertyName, flag: number, ctx: CodegenContext): ObjectPropertyKey {
+    if (ts.isComputedPropertyName(name)) {
+        return {
+            ops: [
+                ...ctx.generate(name.expression, flag),
+                op(OpCode.ToPropertyKey),
+            ],
+            computed: true,
+        }
+    }
+
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+        const staticName = getStaticPropertyName(name)
+        return {
+            ops: [op(OpCode.Literal, 2, [staticName])],
+            computed: false,
+            staticName,
+        }
+    }
+
+    throw new Error('not supported')
+}
+
+function unwrapParenthesizedExpression(node: ts.Expression): ts.Expression {
+    while (ts.isParenthesizedExpression(node)) {
+        node = node.expression
+    }
+    return node
+}
 
 function needsResolveScope(node: ts.Node, ctx: CodegenContext): boolean {
     let current: ts.Node | undefined = node
@@ -311,44 +355,49 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
                 throw new Error('property must have name')
             }
 
-            if (ts.isComputedPropertyName(item.name)) {
-                res.push(...ctx.generate(item.name.expression, flag))
-            } else if (ts.isIdentifier(item.name)) {
-                res.push(op(OpCode.Literal, 2, [item.name.text]))
-            } else if (ts.isStringLiteral(item.name) || ts.isNumericLiteral(item.name)) {
-                res.push(...ctx.generate(item.name, flag))
-            } else {
-                throw new Error('not supported')
+            const propertyKey = generateObjectPropertyKey(item.name, flag, ctx)
+            if (
+                ts.isPropertyAssignment(item)
+                && !propertyKey.computed
+                && propertyKey.staticName === '__proto__'
+            ) {
+                res.push(...ctx.generate(item.initializer, flag))
+                res.push(op(OpCode.SetPrototypeKeepCtx))
+                continue
             }
+
+            res.push(...propertyKey.ops)
 
             if (ts.isMethodDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
-                res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(item)]))
-                res.push(op(OpCode.NodeOffset, 2, [item]))
-                res.push(op(OpCode.NodeOffset, 2, [item, 'bodyStart']))
-                res.push(op(OpCode.NodeFunctionType, 2, [item]))
-                res.push(op(OpCode.DefineFunction))
+                res.push(...generateFunctionDefinitionWithStackName(item))
                 res.push(op(OpCode.DefineKeepCtx))
             } else if (ts.isGetAccessorDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
-                res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(item)]))
-                res.push(op(OpCode.NodeOffset, 2, [item]))
-                res.push(op(OpCode.NodeOffset, 2, [item, 'bodyStart']))
-                res.push(op(OpCode.NodeFunctionType, 2, [item]))
-                res.push(op(OpCode.DefineFunction))
+                res.push(...generateFunctionDefinitionWithStackName(item))
                 res.push(op(OpCode.Literal, 2, [1]))
                 res.push(op(OpCode.DefineGetter))
             } else if (ts.isSetAccessorDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
-                res.push(op(OpCode.Literal, 2, [getExpectedArgumentCount(item)]))
-                res.push(op(OpCode.NodeOffset, 2, [item]))
-                res.push(op(OpCode.NodeOffset, 2, [item, 'bodyStart']))
-                res.push(op(OpCode.NodeFunctionType, 2, [item]))
-                res.push(op(OpCode.DefineFunction))
+                res.push(...generateFunctionDefinitionWithStackName(item))
                 res.push(op(OpCode.Literal, 2, [1]))
                 res.push(op(OpCode.DefineSetter))
             } else if (ts.isPropertyAssignment(item)) {
-                res.push(...ctx.generate(item.initializer, flag))
+                const initializer = unwrapParenthesizedExpression(item.initializer)
+                if (ts.isArrowFunction(initializer) || (ts.isFunctionExpression(initializer) && initializer.name == null)) {
+                    res.push(op(OpCode.Duplicate))
+                    res.push(...generateFunctionDefinitionWithStackName(initializer))
+                } else if (ts.isClassExpression(initializer) && initializer.name == null) {
+                    res.push(...generateClassValue(
+                        initializer,
+                        flag,
+                        ctx,
+                        propertyKey.staticName,
+                        propertyKey.computed
+                    ))
+                } else {
+                    res.push(...ctx.generate(item.initializer, flag))
+                }
                 res.push(op(OpCode.DefineKeepCtx))
             } else {
                 throw new Error('not supported')

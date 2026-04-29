@@ -207,8 +207,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             break
         case OpCode.DefineKeepCtx: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
-            const target = ctx[OpcodeContextField.popCurrentFrameStack]<Record<string, any>>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<PropertyKey>()
+            const target = ctx[OpcodeContextField.popCurrentFrameStack]<Record<PropertyKey, any>>()
 
             Reflect.defineProperty(target, name, {
                 configurable: true,
@@ -217,7 +217,19 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 value,
             })
 
-            target[name] = value
+            ctx[OpcodeContextField.pushCurrentFrameStack](target)
+        }
+            break
+        case OpCode.SetPrototypeKeepCtx: {
+            const value = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const target = ctx[OpcodeContextField.popCurrentFrameStack]<object>()
+
+            if ((typeof value === 'object' && value !== null) || typeof value === 'function') {
+                Reflect.setPrototypeOf(target, value)
+            } else if (value === null) {
+                Reflect.setPrototypeOf(target, null)
+            }
+
             ctx[OpcodeContextField.pushCurrentFrameStack](target)
         }
             break

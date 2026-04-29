@@ -116,7 +116,7 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.setStaticVariableValueChecked](frame: Frame, depth: number, index: number, value: any): any
 
     [OpcodeContextField.createArgumentObject](): Record<string, any>
-    [OpcodeContextField.defineFunction](globalThis: any, scopes: Scope[], name: string, type: FunctionTypes, offset: number, bodyOffset: number): any
+    [OpcodeContextField.defineFunction](globalThis: any, scopes: Scope[], name: PropertyKey, type: FunctionTypes, offset: number, bodyOffset: number): any
     [OpcodeContextField.createGeneratorFromExecution](
         program: number[],
         offset: number,
@@ -146,8 +146,8 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.emulateFunctionConstructor](parameterValues: any[]): any
 
     [OpcodeContextField.findScope](ctx: Frame, name: string): Scope | null
-    [OpcodeContextField.getValue](ctx: any, name: string): any
-    [OpcodeContextField.setValue](ctx: any, name: string, value: any): any
+    [OpcodeContextField.getValue](ctx: any, name: PropertyKey): any
+    [OpcodeContextField.setValue](ctx: any, name: PropertyKey, value: any): any
 
     [OpcodeContextField.executeReturn](value: any): any
     [OpcodeContextField.executeThrow](value: any): any

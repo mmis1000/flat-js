@@ -550,6 +550,129 @@ test('array and object literals use the provided realm prototypes', () => {
     expect(result).toEqual([true, true, true])
 })
 
+test('object literal __proto__ data properties mutate only non-computed prototypes', () => {
+    expect(compileAndRun(`
+        const proto = { marker: 1 }
+        const value = { own: true }
+        const nullProto = { __proto__: null }
+        const objectProto = { __proto__: proto }
+        const primitiveProto = { __proto__: 1 }
+        const computedProto = { ['__proto__']: value }
+        const functionProto = { __proto__: function () {} };
+
+        [
+            Object.getPrototypeOf(nullProto) === null,
+            Object.getOwnPropertyDescriptor(nullProto, '__proto__') === undefined,
+            Object.getPrototypeOf(objectProto) === proto,
+            Object.getOwnPropertyDescriptor(objectProto, '__proto__') === undefined,
+            Object.getPrototypeOf(primitiveProto) === Object.prototype,
+            Object.getOwnPropertyDescriptor(primitiveProto, '__proto__') === undefined,
+            Object.prototype.hasOwnProperty.call(computedProto, '__proto__'),
+            computedProto.__proto__ === value,
+            Object.getPrototypeOf(functionProto).name
+        ]
+    `)).toEqual([true, true, true, true, true, true, true, true, ''])
+})
+
+test('duplicate non-computed __proto__ data properties are rejected', () => {
+    expect(() => compileAndRun(`
+        ({
+            __proto__: null,
+            other: null,
+            '__proto__': null,
+        })
+    `)).toThrow(SyntaxError)
+
+    expect(compileAndRun(`
+        var __proto__ = 2
+        var proto = {}
+        var obj = {
+            __proto__: proto,
+            ['__proto__']: 1,
+            __proto__,
+            __proto__() {},
+            get __proto__() { return 3 },
+            set __proto__(value) {},
+        };
+
+        [
+            Object.getPrototypeOf(obj) === proto,
+            Object.getOwnPropertyDescriptor(obj, '__proto__').get() === 3
+        ]
+    `)).toEqual([true, true])
+})
+
+test('computed object literal keys are coerced before value evaluation', () => {
+    expect(compileAndRun(`
+        const log = []
+        const key = {
+            toString() {
+                log.push('key')
+                return 'id'
+            }
+        }
+
+        const obj = {
+            [key]: (log.push('value'), 1),
+        };
+
+        [log.join(','), Object.keys(obj).join(','), obj.id]
+    `)).toEqual(['key,value', 'id', 1])
+})
+
+test('object property named evaluation covers anonymous functions and classes', () => {
+    expect(compileAndRun(`
+        const namedSym = Symbol('test262')
+        const anonSym = Symbol()
+        const obj = {
+            id: function () {},
+            arrow: () => {},
+            gen: function* () {},
+            cls: class {},
+            xId: (0, function () {}),
+            [anonSym]: function () {},
+            [namedSym]: class {},
+        };
+
+        [
+            obj.id.name,
+            obj.arrow.name,
+            obj.gen.name,
+            obj.cls.name,
+            obj.xId.name === 'xId',
+            obj[anonSym].name,
+            obj[namedSym].name
+        ]
+    `)).toEqual(['id', 'arrow', 'gen', 'cls', false, '', '[test262]'])
+})
+
+test('object method and accessor names use property keys', () => {
+    expect(compileAndRun(`
+        const namedSym = Symbol('desc')
+        const anonSym = Symbol()
+        const obj = {
+            id() {},
+            *gen() {},
+            get value() { return 1 },
+            set value(v) {},
+            [namedSym]() {},
+            get [anonSym]() { return 1 },
+        };
+
+        const valueDesc = Object.getOwnPropertyDescriptor(obj, 'value')
+        const anonDesc = Object.getOwnPropertyDescriptor(obj, anonSym);
+
+        [
+            obj.id.name,
+            obj.gen.name,
+            valueDesc.get.name,
+            valueDesc.set.name,
+            obj[namedSym].name,
+            anonDesc.get.name
+        ]
+    `)).toEqual(['id', 'gen', 'get value', 'set value', '[desc]', 'get '])
+})
+
 test('destructuring default initializers infer names for anonymous functions and classes', () => {
     expect(compileAndRun(`
         let [a = function(){}, b = () => {}, c = class {}, d = async function(){}, e = function*(){}] = []

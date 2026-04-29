@@ -277,6 +277,12 @@ export const enum OpCode {
      */
     DefineKeepCtx,
     /**
+     * Applies object-literal `__proto__:` prototype mutation and preserves that object.
+     * Stack (bottom to top): object, value
+     * Result: object
+     */
+    SetPrototypeKeepCtx,
+    /**
      * Reads a binding or property by name.
      * Stack (bottom to top): target, name
      * Result: value

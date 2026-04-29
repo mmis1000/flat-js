@@ -31,6 +31,7 @@ target.flag || target.count;
 /kitchen-sink/gi;
 [0, ...target.list, 9];
 ({
+    __proto__: null,
     shorthand: target,
     plain: 1,
     method(x) { return x + 1; },
