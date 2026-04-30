@@ -1,4 +1,4 @@
-import { SCOPE_DEBUG_PTR, SCOPE_FLAGS, SCOPE_STATIC_SLOTS, SCOPE_STATIC_STORE, TDZ_VALUE, type Scope, type ScopeDebugEntry, type ScopeWithInternals } from "./shared"
+import { Fields, SCOPE_DEBUG_PTR, SCOPE_FLAGS, SCOPE_STATIC_SLOTS, SCOPE_STATIC_STORE, TDZ_VALUE, type Scope, type ScopeDebugEntry, type ScopeWithInternals } from "./shared"
 
 const getScopeInternal = (scope: Scope) => scope as ScopeWithInternals
 
@@ -43,7 +43,7 @@ const readScopeBindingValueForDebug = (scope: Scope, name: string) => {
     const internal = getScopeInternal(scope)
     const slotIndex = internal[SCOPE_STATIC_SLOTS]?.[name]
     const value = slotIndex !== undefined
-        ? internal[SCOPE_STATIC_STORE]?.values[slotIndex]
+        ? internal[SCOPE_STATIC_STORE]?.[Fields.values][slotIndex]
         : scope[name]
     if (value === TDZ_VALUE) {
         throw new ReferenceError(`Cannot access '${name}' before initialization`)

@@ -144,8 +144,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
             const scope = ctx[OpcodeContextField.getStaticVariableScope](ctx[OpcodeContextField.currentFrame], depth)
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
-            store.values[index] = value
-            scope[store.names[index]] = value
+            store[Fields.values][index] = value
+            scope[store[Fields.names][index]] = value
             ctx[OpcodeContextField.pushCurrentFrameStack](value)
         }
             break
@@ -408,9 +408,9 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const scope = ctx[OpcodeContextField.getStaticVariableScope](ctx[OpcodeContextField.currentFrame], depth)
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
-            if (store.values[index] === TDZ_VALUE) {
-                store.values[index] = undefined
-                scope[store.names[index]] = undefined
+            if (store[Fields.values][index] === TDZ_VALUE) {
+                store[Fields.values][index] = undefined
+                scope[store[Fields.names][index]] = undefined
             }
         }
             break
@@ -429,8 +429,8 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const scope = ctx[OpcodeContextField.getStaticVariableScope](ctx[OpcodeContextField.currentFrame], depth)
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
-            store.flags[index] |= VariableFlags.Immutable
-            ctx[OpcodeContextField.setVariableFlag](scope, store.names[index], store.flags[index])
+            store[Fields.flags][index] |= VariableFlags.Immutable
+            ctx[OpcodeContextField.setVariableFlag](scope, store[Fields.names][index], store[Fields.flags][index])
         }
             break
     }

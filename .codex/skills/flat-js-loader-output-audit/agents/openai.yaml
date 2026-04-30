@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flat JS Loader Output Audit"
+  short_description: "Directly inspect generated Flat JS loaders for leaked runtime internals"
+  default_prompt: "Use $flat-js-loader-output-audit when checking rebuilt Flat JS loader output for runtime-internal property names, string-key leaks, or generated-file cleanup regressions."

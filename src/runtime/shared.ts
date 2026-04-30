@@ -168,6 +168,9 @@ export const enum Fields {
     delegateIterator,
     delegatePhase,
     delegateMode,
+    names,
+    flags,
+    values,
 }
 
 interface BaseFrame {
@@ -231,9 +234,9 @@ export const enum VariableFlags {
 }
 
 type StaticVariableStore = {
-    names: string[],
-    flags: number[],
-    values: any[]
+    [Fields.names]: string[],
+    [Fields.flags]: number[],
+    [Fields.values]: any[]
 }
 
 const SCOPE_FLAGS = Symbol()

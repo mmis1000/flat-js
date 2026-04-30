@@ -189,7 +189,7 @@ export const getExecution = (
         const internal = getScopeInternal(scope)
         let store = internal[SCOPE_STATIC_STORE]
         if (!store) {
-            store = { names: [], flags: [], values: [] }
+            store = { [Fields.names]: [], [Fields.flags]: [], [Fields.values]: [] }
             internal[SCOPE_STATIC_STORE] = store
         }
         return store
@@ -202,7 +202,7 @@ export const getExecution = (
         getVariableFlagMap(scope)[name] = flags
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (slotIndex !== undefined) {
-            getStaticVariableStore(scope).flags[slotIndex] = flags
+            getStaticVariableStore(scope)[Fields.flags][slotIndex] = flags
         }
     }
 
@@ -235,7 +235,7 @@ export const getExecution = (
 
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (slotIndex !== undefined) {
-            return getStaticVariableStore(scope).values[slotIndex]
+            return getStaticVariableStore(scope)[Fields.values][slotIndex]
         }
         return scope[name]
     }
@@ -255,7 +255,7 @@ export const getExecution = (
         }
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (success && slotIndex !== undefined) {
-            getStaticVariableStore(scope).values[slotIndex] = value
+            getStaticVariableStore(scope)[Fields.values][slotIndex] = value
         }
         return value
     }
@@ -341,11 +341,11 @@ export const getExecution = (
         if (trackStaticSlot) {
             const slotMap = getStaticVariableSlotMap(scope)
             store = getStaticVariableStore(scope)
-            slotIndex = store.values.length
+            slotIndex = store[Fields.values].length
             slotMap[name] = slotIndex
-            store.names.push(name)
-            store.flags.push(flags)
-            store.values.push(initialValue)
+            store[Fields.names].push(name)
+            store[Fields.flags].push(flags)
+            store[Fields.values].push(initialValue)
         }
 
         const defined = Reflect.defineProperty(scope, name, {
@@ -355,7 +355,7 @@ export const getExecution = (
             value: initialValue
         })
         if (!defined && store !== null && slotIndex !== null) {
-            store.values[slotIndex] = scope[name]
+            store[Fields.values][slotIndex] = scope[name]
         }
     }
 
@@ -387,7 +387,7 @@ export const getExecution = (
     const getStaticVariableValue = (frame: Frame, depth: number, index: number) => {
         const scope = getStaticVariableScope(frame, depth)
         const store = getStaticVariableStoreAt(scope)
-        return store.values[index]
+        return store[Fields.values][index]
     }
 
     const getStaticVariableValueChecked = (frame: Frame, depth: number, index: number) => {
@@ -401,22 +401,22 @@ export const getExecution = (
     const setStaticVariableValue = (frame: Frame, depth: number, index: number, value: any) => {
         const scope = getStaticVariableScope(frame, depth)
         const store = getStaticVariableStoreAt(scope)
-        store.values[index] = value
-        scope[store.names[index]] = value
+        store[Fields.values][index] = value
+        scope[store[Fields.names][index]] = value
         return value
     }
 
     const setStaticVariableValueChecked = (frame: Frame, depth: number, index: number, value: any) => {
         const scope = getStaticVariableScope(frame, depth)
         const store = getStaticVariableStoreAt(scope)
-        if (store.values[index] === TDZ_VALUE) {
+        if (store[Fields.values][index] === TDZ_VALUE) {
             throw new ReferenceError('Cannot access lexical binding before initialization')
         }
-        if (store.flags[index] & VariableFlags.Immutable) {
+        if (store[Fields.flags][index] & VariableFlags.Immutable) {
             throw new TypeError(is_a_constant)
         }
-        store.values[index] = value
-        scope[store.names[index]] = value
+        store[Fields.values][index] = value
+        scope[store[Fields.names][index]] = value
         return value
     }
 
@@ -814,8 +814,6 @@ export const getExecution = (
         }
 
         Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
-
-        ;(fn as any).__pos__ = offset
 
         functionDescriptors.set(fn, des)
 
