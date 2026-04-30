@@ -163,6 +163,15 @@ export function createCodegenContext(
                 return null
             }
 
+            if (
+                ts.isCatchClause(current)
+                && current.variableDeclaration != null
+                && ts.isIdentifier(current.variableDeclaration.name)
+                && current.variableDeclaration.name.text === name
+            ) {
+                return { depth, index: 0, type: VariableType.Var }
+            }
+
             if (current === root && hiddenExpressionBodyScopeDepth) {
                 depth += 1
             }
@@ -181,6 +190,9 @@ export function createCodegenContext(
                     return { depth, index, type: declaration.type }
                 }
                 depth++
+                if (!ts.isSourceFile(current) && functions.has(current as VariableRoot) && hasParameterExpressions(current as VariableRoot)) {
+                    depth++
+                }
             }
             depth += getHiddenRuntimeScopeDepth(current)
             current = parent

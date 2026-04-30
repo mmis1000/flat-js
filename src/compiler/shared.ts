@@ -194,6 +194,18 @@ export const enum OpCode {
      * Result: value, value
      */
     Duplicate,
+    /**
+     * Duplicates the value below the top stack value.
+     * Stack (bottom to top): value, top
+     * Result: value, top, value
+     */
+    DuplicateSecond,
+    /**
+     * Swaps the top two stack values.
+     * Stack (bottom to top): belowTop, top
+     * Result: top, belowTop
+     */
+    Swap,
 
     /**
      * Pushes the current environment record / frame handle.
@@ -647,6 +659,12 @@ export const enum OpCode {
      * Result: left % right
      */
     BPercent,
+    /**
+     * Evaluates `left ** right`.
+     * Stack (bottom to top): left, right
+     * Result: left ** right
+     */
+    BAsteriskAsterisk,
 
     /**
      * Evaluates `target[name] += value`.
@@ -738,7 +756,6 @@ export const enum OpCode {
      * Result: newValue
      */
     BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked,
-
     /**
      * Deletes a property or binding target.
      * Stack (bottom to top): target, name

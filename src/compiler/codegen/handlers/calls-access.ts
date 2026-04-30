@@ -3,7 +3,7 @@ import * as ts from 'typescript'
 import { OpCode, SpecialVariable } from '../../shared'
 import { generateClassValue } from './classes'
 import { generateFunctionDefinitionWithStackName } from './functions'
-import { op } from '../helpers'
+import { headOf, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -50,6 +50,43 @@ function unwrapParenthesizedExpression(node: ts.Expression): ts.Expression {
         node = node.expression
     }
     return node
+}
+
+function generateOptionalAccess(
+    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    flag: number,
+    ctx: CodegenContext
+): Segment | undefined {
+    if (node.questionDotToken == null) {
+        return undefined
+    }
+
+    const shortCircuit = [
+        op(OpCode.Nop, 0),
+        op(OpCode.Pop),
+        op(OpCode.UndefinedLiteral),
+    ]
+    const exit = [op(OpCode.Nop, 0)]
+    const nameOps = ts.isPropertyAccessExpression(node)
+        ? [op(OpCode.Literal, 2, [node.name.text])]
+        : node.argumentExpression == null
+            ? [op(OpCode.UndefinedLiteral)]
+            : ctx.generate(node.argumentExpression, flag)
+
+    return [
+        ...ctx.generate(node.expression, flag),
+        op(OpCode.NodeOffset, 2, [headOf(shortCircuit)]),
+        op(OpCode.DuplicateSecond),
+        op(OpCode.NullLiteral),
+        op(OpCode.BEqualsEquals),
+        op(OpCode.JumpIf),
+        ...nameOps,
+        op(OpCode.Get),
+        op(OpCode.NodeOffset, 2, [headOf(exit)]),
+        op(OpCode.Jump),
+        ...shortCircuit,
+        ...exit,
+    ]
 }
 
 function needsResolveScope(node: ts.Node, ctx: CodegenContext): boolean {
@@ -430,7 +467,7 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
     }
 
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-        return [
+        return generateOptionalAccess(node, flag, ctx) ?? [
             ...ctx.generateLeft(node, flag),
             op(OpCode.Get)
         ]

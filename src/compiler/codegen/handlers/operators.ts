@@ -20,6 +20,76 @@ function needsResolveScope(node: ts.Node, ctx: CodegenContext): boolean {
     return false
 }
 
+type CompoundAssignmentOpcode =
+    OpCode.BPlusEqual |
+    OpCode.BMinusEqual |
+    OpCode.BSlashEqual |
+    OpCode.BAsteriskEqual |
+    OpCode.BGreaterThanGreaterThanGreaterThanEqual
+
+type CompoundAssignmentBinaryOpcode =
+    OpCode.BPercent |
+    OpCode.BAmpersand |
+    OpCode.BBar |
+    OpCode.BCaret |
+    OpCode.BLessThanLessThan |
+    OpCode.BGreaterThanGreaterThan |
+    OpCode.BAsteriskAsterisk
+
+type StaticCompoundAssignmentOpcode =
+    OpCode.BPlusEqualStatic |
+    OpCode.BPlusEqualStaticUnchecked |
+    OpCode.BMinusEqualStatic |
+    OpCode.BMinusEqualStaticUnchecked |
+    OpCode.BSlashEqualStatic |
+    OpCode.BSlashEqualStaticUnchecked |
+    OpCode.BAsteriskEqualStatic |
+    OpCode.BAsteriskEqualStaticUnchecked |
+    OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic |
+    OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked
+
+const getCompoundAssignmentOpcode = (kind: ts.SyntaxKind): CompoundAssignmentOpcode | undefined => ({
+    [ts.SyntaxKind.PlusEqualsToken]: OpCode.BPlusEqual,
+    [ts.SyntaxKind.MinusEqualsToken]: OpCode.BMinusEqual,
+    [ts.SyntaxKind.SlashEqualsToken]: OpCode.BSlashEqual,
+    [ts.SyntaxKind.AsteriskEqualsToken]: OpCode.BAsteriskEqual,
+    [ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken]: OpCode.BGreaterThanGreaterThanGreaterThanEqual,
+} as Partial<Record<ts.SyntaxKind, CompoundAssignmentOpcode>>)[kind]
+
+const getCompoundAssignmentBinaryOpcode = (kind: ts.SyntaxKind): CompoundAssignmentBinaryOpcode | undefined => ({
+    [ts.SyntaxKind.PercentEqualsToken]: OpCode.BPercent,
+    [ts.SyntaxKind.AmpersandEqualsToken]: OpCode.BAmpersand,
+    [ts.SyntaxKind.BarEqualsToken]: OpCode.BBar,
+    [ts.SyntaxKind.CaretEqualsToken]: OpCode.BCaret,
+    [ts.SyntaxKind.LessThanLessThanEqualsToken]: OpCode.BLessThanLessThan,
+    [ts.SyntaxKind.GreaterThanGreaterThanEqualsToken]: OpCode.BGreaterThanGreaterThan,
+    [ts.SyntaxKind.AsteriskAsteriskEqualsToken]: OpCode.BAsteriskAsterisk,
+} as Partial<Record<ts.SyntaxKind, CompoundAssignmentBinaryOpcode>>)[kind]
+
+const getStaticCompoundAssignmentOpcode = (kind: ts.SyntaxKind, unchecked: boolean): StaticCompoundAssignmentOpcode | undefined => {
+    switch (kind) {
+        case ts.SyntaxKind.PlusEqualsToken:
+            return unchecked ? OpCode.BPlusEqualStaticUnchecked : OpCode.BPlusEqualStatic
+        case ts.SyntaxKind.MinusEqualsToken:
+            return unchecked ? OpCode.BMinusEqualStaticUnchecked : OpCode.BMinusEqualStatic
+        case ts.SyntaxKind.SlashEqualsToken:
+            return unchecked ? OpCode.BSlashEqualStaticUnchecked : OpCode.BSlashEqualStatic
+        case ts.SyntaxKind.AsteriskEqualsToken:
+            return unchecked ? OpCode.BAsteriskEqualStaticUnchecked : OpCode.BAsteriskEqualStatic
+        case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
+            return unchecked ? OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked : OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic
+        default:
+            return undefined
+    }
+}
+
+const generateDiscardReferenceKeepValue = (): Segment => [
+    op(OpCode.Swap),
+    op(OpCode.Pop),
+    op(OpCode.Swap),
+    op(OpCode.Pop),
+]
+
 export function generateOperators(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isConditionalExpression(node)) {
         const condition = ctx.generate(node.condition, flag)
@@ -127,6 +197,25 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
 
     if (ts.isBinaryExpression(node)) {
         switch (node.operatorToken.kind) {
+            case ts.SyntaxKind.QuestionQuestionToken: {
+                const left = ctx.generate(node.left, flag)
+                const right = ctx.generate(node.right, flag)
+                const exit = [op(OpCode.Nop, 0)]
+
+                return [
+                    ...left,
+                    op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                    op(OpCode.DuplicateSecond),
+                    op(OpCode.NullLiteral),
+                    op(OpCode.BEqualsEquals),
+                    op(OpCode.JumpIfNot),
+
+                    op(OpCode.Pop),
+                    ...right,
+
+                    ...exit
+                ]
+            }
             case ts.SyntaxKind.BarBarToken: {
                 const left = ctx.generate(node.left, flag)
                 const right = ctx.generate(node.right, flag)
@@ -167,12 +256,72 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
 
     if (ts.isBinaryExpression(node)) {
         const kind = node.operatorToken.kind
+        if (
+            kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken ||
+            kind === ts.SyntaxKind.BarBarEqualsToken ||
+            kind === ts.SyntaxKind.QuestionQuestionEqualsToken
+        ) {
+            const left = ctx.extractQuote(node.left)
+            if (
+                ts.isPropertyAccessExpression(left) ||
+                ts.isElementAccessExpression(left) ||
+                ts.isIdentifier(left) ||
+                left.kind === ts.SyntaxKind.ThisKeyword
+            ) {
+                const shouldResolveIdentifier = ts.isIdentifier(left)
+                const shortCircuit = [op(OpCode.Nop, 0), ...generateDiscardReferenceKeepValue()]
+                const exit = [op(OpCode.Nop, 0)]
+                const conditionOps =
+                    kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken
+                        ? [op(OpCode.DuplicateSecond), op(OpCode.JumpIfNot)]
+                        : kind === ts.SyntaxKind.BarBarEqualsToken
+                            ? [op(OpCode.DuplicateSecond), op(OpCode.JumpIf)]
+                            : [
+                                op(OpCode.DuplicateSecond),
+                                op(OpCode.NullLiteral),
+                                op(OpCode.BEqualsEquals),
+                                op(OpCode.JumpIfNot),
+                            ]
+                return [
+                    ...ctx.generateLeft(node.left, flag),
+                    ...(shouldResolveIdentifier ? [op(OpCode.ResolveScopeGetValue)] : [op(OpCode.GetKeepCtx)]),
+                    op(OpCode.NodeOffset, 2, [headOf(shortCircuit)]),
+                    ...conditionOps,
+                    op(OpCode.Pop),
+                    ...ctx.generate(node.right, flag),
+                    op(OpCode.Set),
+                    op(OpCode.NodeOffset, 2, [headOf(exit)]),
+                    op(OpCode.Jump),
+                    ...shortCircuit,
+                    ...exit
+                ]
+            }
+
+            return [
+                ...ctx.generate(left, flag),
+                op(OpCode.Literal, 2, ['Invalid left-hand side in assignment']),
+                op(OpCode.ThrowReferenceError)
+            ]
+        }
+    }
+
+    if (ts.isBinaryExpression(node)) {
+        const kind = node.operatorToken.kind
+        const compoundAssignmentOpcode = getCompoundAssignmentOpcode(kind)
+        const compoundAssignmentBinaryOpcode = getCompoundAssignmentBinaryOpcode(kind)
         switch (kind) {
             case ts.SyntaxKind.PlusEqualsToken:
             case ts.SyntaxKind.MinusEqualsToken:
             case ts.SyntaxKind.SlashEqualsToken:
             case ts.SyntaxKind.AsteriskEqualsToken:
             case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
+            case ts.SyntaxKind.PercentEqualsToken:
+            case ts.SyntaxKind.AmpersandEqualsToken:
+            case ts.SyntaxKind.BarEqualsToken:
+            case ts.SyntaxKind.CaretEqualsToken:
+            case ts.SyntaxKind.LessThanLessThanEqualsToken:
+            case ts.SyntaxKind.GreaterThanGreaterThanEqualsToken:
+            case ts.SyntaxKind.AsteriskAsteriskEqualsToken:
             case ts.SyntaxKind.EqualsToken: {
                 const left = ctx.extractQuote(node.left)
                 if (kind === ts.SyntaxKind.EqualsToken && (ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left))) {
@@ -190,24 +339,15 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                             ]
                         }
 
-                        return [
-                            ...ctx.generateStaticAccessOps(staticAccess),
-                            op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.GetStaticUncheckedKeepCtx : OpCode.GetStaticKeepCtx),
-                            ...ctx.generate(node.right, flag),
-                            op(
-                                kind === ts.SyntaxKind.PlusEqualsToken
-                                    ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BPlusEqualStaticUnchecked : OpCode.BPlusEqualStatic)
-                                    : kind === ts.SyntaxKind.MinusEqualsToken
-                                        ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BMinusEqualStaticUnchecked : OpCode.BMinusEqualStatic)
-                                        : kind === ts.SyntaxKind.SlashEqualsToken
-                                            ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BSlashEqualStaticUnchecked : OpCode.BSlashEqualStatic)
-                                            : kind === ts.SyntaxKind.AsteriskEqualsToken
-                                                ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BAsteriskEqualStaticUnchecked : OpCode.BAsteriskEqualStatic)
-                                                : kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken
-                                                    ? (ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.BGreaterThanGreaterThanGreaterThanEqualStaticUnchecked : OpCode.BGreaterThanGreaterThanGreaterThanEqualStatic)
-                                                    : abort('Why Am I here?')
-                            )
-                        ]
+                        const staticOpcode = getStaticCompoundAssignmentOpcode(kind, ctx.isStaticAccessUnchecked(staticAccess))
+                        if (staticOpcode !== undefined) {
+                            return [
+                                ...ctx.generateStaticAccessOps(staticAccess),
+                                op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.GetStaticUncheckedKeepCtx : OpCode.GetStaticKeepCtx),
+                                ...ctx.generate(node.right, flag),
+                                op(staticOpcode)
+                            ]
+                        }
                     }
                 }
 
@@ -218,6 +358,15 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                     left.kind === ts.SyntaxKind.ThisKeyword
                 ) {
                     const shouldResolveIdentifier = ts.isIdentifier(left)
+                    const assignmentOps =
+                        kind === ts.SyntaxKind.EqualsToken
+                            ? [op(OpCode.Set)]
+                            : compoundAssignmentOpcode !== undefined
+                                ? [op(compoundAssignmentOpcode)]
+                                : [
+                                    op(compoundAssignmentBinaryOpcode ?? abort('Why Am I here?')),
+                                    op(OpCode.Set),
+                                ]
                     return [
                         ...ctx.generateLeft(node.left, flag),
                         ...(kind === ts.SyntaxKind.EqualsToken
@@ -228,15 +377,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                                 ? [op(OpCode.ResolveScopeGetValue)]
                                 : [op(OpCode.GetKeepCtx)]),
                         ...ctx.generate(node.right, flag),
-                        op(
-                                kind === ts.SyntaxKind.EqualsToken ? OpCode.Set :
-                                kind === ts.SyntaxKind.PlusEqualsToken ? OpCode.BPlusEqual :
-                                    kind === ts.SyntaxKind.MinusEqualsToken ? OpCode.BMinusEqual :
-                                        kind === ts.SyntaxKind.SlashEqualsToken ? OpCode.BSlashEqual :
-                                            kind === ts.SyntaxKind.AsteriskEqualsToken ? OpCode.BAsteriskEqual :
-                                                kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken ? OpCode.BGreaterThanGreaterThanGreaterThanEqual :
-                                                    abort('Why Am I here?')
-                        )
+                        ...assignmentOps
                     ]
                 }
 
@@ -294,6 +435,8 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 ops.push(op(OpCode.BIn)); break
             case ts.SyntaxKind.AsteriskToken:
                 ops.push(op(OpCode.BAsterisk)); break
+            case ts.SyntaxKind.AsteriskAsteriskToken:
+                ops.push(op(OpCode.BAsteriskAsterisk)); break
             case ts.SyntaxKind.SlashToken:
                 ops.push(op(OpCode.BSlash)); break
             case ts.SyntaxKind.PercentToken:

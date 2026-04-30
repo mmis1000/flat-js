@@ -1454,6 +1454,8 @@ export const getExecution = (
                 case OpCode.Pop:
                 case OpCode.SetEvalResult:
                 case OpCode.Duplicate:
+                case OpCode.DuplicateSecond:
+                case OpCode.Swap:
                 case OpCode.GetRecord:
                 case OpCode.GetStatic:
                 case OpCode.GetStaticKeepCtx:
@@ -1576,6 +1578,7 @@ export const getExecution = (
                 case OpCode.BPlus:
                 case OpCode.BIn:
                 case OpCode.BAsterisk:
+                case OpCode.BAsteriskAsterisk:
                 case OpCode.BSlash:
                 case OpCode.BPercent:
                 case OpCode.PostFixPlusPLus:

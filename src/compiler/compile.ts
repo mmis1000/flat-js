@@ -559,6 +559,27 @@ function validateObjectLiteralSyntax(sourceNode: ts.SourceFile) {
     visit(sourceNode)
 }
 
+function validateCoalesceSyntax(sourceNode: ts.SourceFile) {
+    const isLogicalAndOr = (node: ts.Node) =>
+        ts.isBinaryExpression(node)
+        && (
+            node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+            || node.operatorToken.kind === ts.SyntaxKind.BarBarToken
+        )
+
+    const visit = (node: ts.Node) => {
+        if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+            if (isLogicalAndOr(node.left) || isLogicalAndOr(node.right)) {
+                throw new SyntaxError('cannot mix ?? with && or || without parentheses')
+            }
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
+}
+
 function toSourceRange(locationMap: Map<number, [number, number]>, start: number, end: number): [number, number, number, number] {
     const startPos = locationMap.get(start)!
     const endPos = locationMap.get(end)!
@@ -580,6 +601,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     const locationMap = createLocationMap(normalizedSrc)
 
     validateSyntax(sourceNode, locationMap)
+    validateCoalesceSyntax(sourceNode)
     validateObjectLiteralSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
@@ -648,6 +670,8 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
                     || item.op === OpCode.NodeFunctionType
                     || item.op === OpCode.NextEntry
                     || item.op === OpCode.Pop
+                    || item.op === OpCode.DuplicateSecond
+                    || item.op === OpCode.Swap
                     || item.op === OpCode.Jump
                     || item.op === OpCode.JumpIf
                     || item.op === OpCode.JumpIfAndKeep

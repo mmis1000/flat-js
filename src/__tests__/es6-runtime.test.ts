@@ -23,6 +23,96 @@ test('arrow rest parameters work without a synthetic prelude', () => {
     `)).toBe('a,b,c')
 })
 
+test('nullish coalescing short-circuits only null and undefined', () => {
+    expect(compileAndRun(`
+        let calls = 0
+        function rhs() {
+            calls += 1
+            return 9
+        }
+
+        [null ?? rhs(), undefined ?? rhs(), 0 ?? rhs(), false ?? rhs(), '' ?? rhs(), calls]
+    `)).toEqual([9, 9, 0, false, '', 2])
+
+    expect(() => compileAndRun('0 && 0 ?? true')).toThrow(SyntaxError)
+    expect(() => compileAndRun('0 ?? 0 || true')).toThrow(SyntaxError)
+    expect(compileAndRun('(0 && 0) ?? true')).toBe(0)
+    expect(compileAndRun('0 ?? (0 || true)')).toBe(0)
+})
+
+test('optional property and element access short-circuit nullish bases', () => {
+    expect(compileAndRun(`
+        null?.prop
+    `)).toBeUndefined()
+
+    expect(compileAndRun(`
+        let keyCalls = 0
+        const key = () => {
+            keyCalls += 1
+            return 'value'
+        }
+
+        [undefined?.[key()], keyCalls]
+    `)).toEqual([undefined, 0])
+
+    expect(compileAndRun(`
+        let keyCalls = 0
+        const key = () => {
+            keyCalls += 1
+            return 'value'
+        }
+
+        [({ value: 7 })?.[key()], keyCalls]
+    `)).toEqual([7, 1])
+
+    expect(compileAndRun(`
+        const slot = Symbol()
+        const read = (scope, name) => scope[slot]?.[name]
+
+        read({}, 'missing')
+    `)).toBeUndefined()
+})
+
+test('logical assignment evaluates the reference once and short-circuits correctly', () => {
+    expect(compileAndRun(`
+        let keyCalls = 0
+        let rhsCalls = 0
+        const obj = { a: 0, b: 1, c: null }
+        function key(name) {
+            keyCalls += 1
+            return name
+        }
+        function rhs(value) {
+            rhsCalls += 1
+            return value
+        }
+
+        obj[key('a')] &&= rhs(2);
+        obj[key('b')] &&= rhs(3);
+        obj[key('b')] ||= rhs(4);
+        obj[key('a')] ||= rhs(5);
+        obj[key('b')] ??= rhs(6);
+        obj[key('c')] ??= rhs(7);
+
+        [obj.a, obj.b, obj.c, keyCalls, rhsCalls]
+    `)).toEqual([5, 3, 7, 6, 3])
+})
+
+test('missing binary and compound operators evaluate through VM opcodes', () => {
+    expect(compileAndRun(`
+        let x = 5
+        x %= 3
+        x &= 3
+        x |= 4
+        x ^= 1
+        x <<= 2
+        x >>= 1
+        x **= 2;
+
+        [2 ** 3, x]
+    `)).toEqual([8, 196])
+})
+
 test('spread calls preserve direct eval semantics', () => {
     expect(compileAndRun(`
         const src = ['40 + 2']
@@ -512,6 +602,44 @@ test('later parameter defaults read eval-created vars before falling back to out
     `)).toEqual([0, 2, 3])
 })
 
+test('parameter-expression functions resolve captured outer block bindings', () => {
+    expect(compileAndRun(`
+        {
+            const add = (a, b) => a + b
+            const seed = 5
+            const expr = (value, fallback = seed) => add(value, fallback)
+            const block = (value, fallback = seed) => {
+                return add(value, fallback)
+            }
+
+            [expr(1), block(2)]
+        }
+    `)).toEqual([6, 7])
+
+    expect(compileAndRun(`
+        {
+            const read = () => 1
+            const parent = (unused = 0) => {
+                return {
+                    step(debug = false) {
+                        try {
+                            const tag = 1
+                            switch (tag) {
+                                case 1:
+                                    return read()
+                            }
+                        } catch (error) {
+                            return error && error.message || error
+                        }
+                    }
+                }.step()
+            }
+
+            parent()
+        }
+    `)).toBe(1)
+})
+
 test('catch binding patterns destructure the thrown value', () => {
     expect(compileAndRun(`
         try {
@@ -520,6 +648,20 @@ test('catch binding patterns destructure the thrown value', () => {
             [a, b]
         }
     `)).toEqual([1, 2])
+})
+
+test('simple catch bindings shadow parameter-expression scopes', () => {
+    expect(compileAndRun(`
+        const fn = (error = false) => {
+            try {
+                throw 'caught'
+            } catch (error) {
+                return error
+            }
+        }
+
+        fn()
+    `)).toBe('caught')
 })
 
 test('array and object literals use the provided realm prototypes', () => {

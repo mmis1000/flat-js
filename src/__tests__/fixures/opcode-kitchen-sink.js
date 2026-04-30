@@ -19,6 +19,13 @@ target.count -= 1;
 target.count /= 1;
 target.count *= 2;
 target.count >>>= 1;
+target.count %= 2;
+target.count &= 3;
+target.count |= 4;
+target.count ^= 1;
+target.count <<= 1;
+target.count >>= 1;
+target.count **= 2;
 target.count++;
 target.count--;
 ++target.count;
@@ -28,6 +35,10 @@ typeof target.count;
 typeof missingGlobal;
 target.flag && target.count;
 target.flag || target.count;
+target.missing ?? target.count;
+target.flag &&= true;
+target.flag ||= false;
+target.missing ??= 1;
 /kitchen-sink/gi;
 [0, ...target.list, 9];
 ({
@@ -282,6 +293,7 @@ throwNormally;
     plus: 1 + 2,
     minus: 4 - 1,
     multiply: 2 * 3,
+    exponent: 2 ** 3,
     divide: 8 / 2,
     modulo: 9 % 4,
     eq: 1 == '1',

@@ -233,6 +233,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
         case OpCode.BPlus:
         case OpCode.BIn:
         case OpCode.BAsterisk:
+        case OpCode.BAsteriskAsterisk:
         case OpCode.BSlash:
         case OpCode.BPercent: {
             const right = ctx[OpcodeContextField.popCurrentFrameStack]()
@@ -257,6 +258,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                 [OpCode.InstanceOf]: (lhs: any, rhs: any) => lhs instanceof rhs,
                 [OpCode.BIn]: (lhs: any, rhs: any) => lhs in rhs,
                 [OpCode.BAsterisk]: (lhs: any, rhs: any) => lhs * rhs,
+                [OpCode.BAsteriskAsterisk]: (lhs: any, rhs: any) => lhs ** rhs,
                 [OpCode.BSlash]: (lhs: any, rhs: any) => lhs / rhs,
                 [OpCode.BPercent]: (lhs: any, rhs: any) => lhs % rhs,
             }

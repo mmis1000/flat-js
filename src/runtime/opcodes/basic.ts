@@ -54,6 +54,20 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.Duplicate:
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.valueStack]))
             break
+        case OpCode.DuplicateSecond: {
+            const top = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const second = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.valueStack])
+            ctx[OpcodeContextField.pushCurrentFrameStack](top)
+            ctx[OpcodeContextField.pushCurrentFrameStack](second)
+        }
+            break
+        case OpCode.Swap: {
+            const top = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const second = ctx[OpcodeContextField.popCurrentFrameStack]()
+            ctx[OpcodeContextField.pushCurrentFrameStack](top)
+            ctx[OpcodeContextField.pushCurrentFrameStack](second)
+        }
+            break
         case OpCode.GetRecord:
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.currentFrame])
             break

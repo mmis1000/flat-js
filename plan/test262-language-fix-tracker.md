@@ -94,11 +94,25 @@ Reduce the `language` category failures in targeted batches:
         - `eval-param-env-with-computed-key`
     - the only noted residual in these focused slices is out-of-scope class-static-block coverage in the variable-declaration summary
 
-- [ ] `missing-operators`
+- [x] `missing-operators`
   - Primary signatures:
     - `Expected no error, got Error: unknown token AsteriskAsteriskToken`
     - `Expected no error, got Error: unknown token QuestionQuestionToken`
     - `Expected no error, got Error: unknown token ...EqualsToken`
+  - Previously confirmed compile failures now covered:
+    - nullish coalescing: `??`
+    - logical assignment: `??=`, `&&=`, `||=`
+    - exponentiation: `**`, `**=`
+    - remaining compound assignment: `%=` / `&=` / `|=` / `^=` / `<<=` / `>>=`
+  - Result:
+    - compile probe for the full missing-operator set is green
+    - `??` is implemented with generic stack shuffling plus existing equality/jump semantics; the coalesce Test262 slice is green after adding the required `??` / `&&` / `||` early error
+    - `**` is implemented as the missing binary primitive `BAsteriskAsterisk`; the exponentiation Test262 slice is green
+    - new compound assignments reuse existing binary opcodes plus `Set`, rather than adding one runtime opcode per operator
+    - logical assignment reuses `GetKeepCtx` / `ResolveScopeGetValue`, ordinary jumps, and generic stack shuffling so each reference is evaluated once
+    - focused tails still remain outside this compile-blocker batch:
+      - logical assignment: named-evaluation and early-error tails, plus out-of-scope unsupported class-feature cases
+      - compound assignment: invalid PutValue / early-error tails, plus out-of-scope unsupported class-feature cases
 
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
@@ -111,7 +125,8 @@ Reduce the `language` category failures in targeted batches:
     - host/module interaction exclusions: `57`
   - Actionable intended-support groups:
     - functions, parameters, eval, arguments env: `537` total (`375` runtime, `162` early)
-      - fix eval scope, mapped arguments, parameter/body environments, and directive strictness
+      - parameter/body environment separation is partially completed by `7751069`
+      - remaining work is eval scope tails, mapped arguments, and directive strictness
     - supported class constructors/methods/accessors/super: `546` total (`327` runtime, `219` early)
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
@@ -121,16 +136,21 @@ Reduce the `language` category failures in targeted batches:
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
     - lexical/global declaration early errors: `205` total (`43` runtime, `162` early)
       - fix redeclarations, global script declaration conflicts, and owned static checks
-    - object literal, property keys, named evaluation: `192` total (`115` runtime, `77` early)
-      - fix `__proto__`, computed key order, methods/accessors, and function/class name inference
-    - references, assignment, update/delete: `124` total (`72` runtime, `52` early)
-      - fix `PutValue`, strict unresolved references, update/delete, writable/reference semantics
+    - object literal, property keys, named evaluation: `192` total (`115` runtime, `77` early) - mostly completed / validation-only
+      - object literal property semantics were implemented by `eff9eeb`
+      - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
+    - references, assignment, update/delete: `124` total (`72` runtime, `52` early) - completed / validation-only
+      - reference update and delete semantics were implemented by `a929038`
+      - keep this group in focused regression checks when adjacent operator/control-flow work changes reference handling
     - RegExp runtime behavior: `7` total (`7` runtime, `0` early)
       - document separately from parser misses and inspect runtime-only regexp failures
   - Recommended order:
-    - environment/eval
-    - references/control-flow
-    - object/class/generator batches
+    - control-flow completion and iterator close
+    - eval/arguments/function environment tails
+    - supported class surface
+    - generators and async generators
+    - lexical/global early errors
+    - small runtime tails
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
@@ -248,3 +268,19 @@ Reduce the `language` category failures in targeted batches:
     - out-of-scope failing files: `6627 -> 6627`
     - total failing files: `10212 -> 10163`
   - no new broad regressions appeared; the focused parameter-environment failures are gone from the full summary.
+- 2026-04-30: Refreshed forward-looking tracker status after recent commits.
+  - `a929038` completed reference update and delete semantics, so that runtime-semantic subgroup is now validation-only.
+  - `eff9eeb` completed object literal property semantics, so that subgroup is mostly validation-only except for named-evaluation / class-adjacent tails.
+  - a compile probe still fails on the missing-operator set: `??`, `??=`, `&&=`, `||=`, `**`, `**=`, `%=` / `&=` / `|=` / `^=` / `<<=` / `>>=`.
+  - kept `missing-operators` first in the recommended order because these failures block generated loader self-compilation.
+- 2026-04-30: Completed the missing-operator compile-blocker batch without adding feature-specific jump or compound-assignment opcode families.
+  - added generic stack shuffling opcodes for reference-preserving short-circuit codegen and the missing binary primitive for `**`
+  - implemented `??`, `??=`, `&&=`, `||=`, `**`, `**=`, `%=` / `&=` / `|=` / `^=` / `<<=` / `>>=`
+  - added the required early error for unparenthesized `??` mixed with `&&` / `||`
+  - focused compile/runtime probe for the full missing-operator set is green
+  - focused Test262 results:
+    - `language/expressions/coalesce/**`: `0` failing files
+    - `language/expressions/exponentiation/**`: `0` failing files
+    - `language/expressions/logical-assignment/**`: residual `42` failing files (`21` intended tails, `21` out-of-scope unsupported class-feature cases)
+    - `language/expressions/compound-assignment/**`: residual `93` failing files (`45` intended tails, `48` out-of-scope unsupported class-feature cases)
+  - kept [test262-language-summary.md](</M:/Playground/flat-js/plan/test262-language-summary.md:1>) unchanged until the next fresh full `language` scan.
