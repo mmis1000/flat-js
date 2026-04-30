@@ -477,6 +477,64 @@ export default defineComponent({
             const ptr = execution[Fields.ptr]
             return this.getSourceMapForProgramPtr(prog, ptr)
         },
+        isSourcePointerInternal(programSection: number[] | undefined, ptr: number): boolean {
+            if (programSection === this.program) {
+                return !!this.debugInfo.internals[ptr]
+            }
+            if (programSection && hostPolyfillProgramSet.has(programSection)) {
+                return true
+            }
+            return true
+        },
+        findNextVisibleSourcePtr(programSection: number[] | undefined, ptr: number): number | null {
+            if (programSection !== this.program) {
+                return null
+            }
+            for (let index = ptr; index < this.debugInfo.sourceMap.length; index++) {
+                if (this.debugInfo.sourceMap[index] && !this.debugInfo.internals[index]) {
+                    return index
+                }
+            }
+            return null
+        },
+        getNextVisibleSourcePtr(execution: ReturnType<typeof getExecution>): number | null {
+            const stack = execution[Fields.stack]
+            if (!stack.length) {
+                return null
+            }
+            const top = stack[stack.length - 1]
+            const prog = top[Fields.programSection]
+            const ptr = execution[Fields.ptr]
+            if (this.getSourceMapForProgramPtr(prog, ptr) && !this.isSourcePointerInternal(prog, ptr)) {
+                return ptr
+            }
+            return this.findNextVisibleSourcePtr(prog, ptr)
+        },
+        isExecutionAtVisibleUserCode(execution: ReturnType<typeof getExecution>): boolean {
+            const stack = execution[Fields.stack]
+            if (!stack.length) {
+                return false
+            }
+            const top = stack[stack.length - 1]
+            const prog = top[Fields.programSection]
+            const ptr = execution[Fields.ptr]
+            return !!this.getSourceMapForProgramPtr(prog, ptr)
+                && !this.isSourcePointerInternal(prog, ptr)
+        },
+        advanceToNextVisibleUserCode(execution: ReturnType<typeof getExecution>): boolean {
+            let guardSteps = 0
+            while (!this.isExecutionAtVisibleUserCode(execution)) {
+                const result = execution[Fields.step](true)
+                if (result[Fields.done]) {
+                    return false
+                }
+                guardSteps++
+                if (guardSteps > 200000) {
+                    return false
+                }
+            }
+            return true
+        },
         getSelectedSourceMapAtPtr(execution: ReturnType<typeof getExecution> | null): [number, number, number, number] | undefined {
             if (!execution) {
                 return undefined
@@ -487,6 +545,9 @@ export default defineComponent({
                 this.debugPausePtr ?? execution[Fields.ptr],
                 this.disabledDebugProgramSections
             )
+            if (pointer && this.isSourcePointerInternal(pointer.programSection, pointer.ptr)) {
+                return undefined
+            }
             return pointer
                 ? this.getSourceMapForProgramPtr(pointer.programSection, pointer.ptr)
                 : undefined
@@ -587,6 +648,9 @@ export default defineComponent({
         selectDebugFrame(index: number | null) {
             this.selectedDebugFrameIndex = index
             this.flushDebugHighlightSync()
+            this.revealDebugHighlight()
+        },
+        revealDebugHighlight() {
             this.$nextTick(() => {
                 const editor = this.$refs.editor as ComponentPublicInstance & { revealHighlight?: () => void }
                 editor.revealHighlight?.()
@@ -977,12 +1041,16 @@ vmLastMovePoly`, { evalMode: true })
         },
         runAndPause() {
             if (!this.setupExecution()) return
+            if (this.execution) {
+                this.advanceToNextVisibleUserCode(this.execution)
+            }
             this.pause()
         },
         pause(debugPtr: number | null = null) {
-            this.debugPausePtr = debugPtr
+            this.debugPausePtr = debugPtr ?? (this.execution ? this.getNextVisibleSourcePtr(this.execution) : null)
             this.state = 'paused'
             this.flushDebugHighlightSync()
+            this.revealDebugHighlight()
         },
         async resume() {
             await this.runExecution()
