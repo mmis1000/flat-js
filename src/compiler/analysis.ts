@@ -22,6 +22,18 @@ export type Scopes = Map<ts.Node, Map<string, VariableDeclaration>>
 export type ScopeChild = Map<ts.Node, Set<ts.Node>>
 export type Functions = Set<VariableRoot>
 
+function setScopeVariable(scope: Map<string, VariableDeclaration>, name: string, declaration: VariableDeclaration) {
+    const existing = scope.get(name)
+    if (
+        existing?.type === VariableType.Parameter
+        && declaration.type === VariableType.Var
+    ) {
+        return
+    }
+
+    scope.set(name, declaration)
+}
+
 function abort(msg: string): never {
     throw new Error(msg)
 }
@@ -231,7 +243,7 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
             }
 
             for (const variable of variables) {
-                scopes.get(block)!.set(variable.text, {
+                setScopeVariable(scopes.get(block)!, variable.text, {
                     type: current.flags & ts.NodeFlags.Const ? VariableType.Const :
                         current.flags & ts.NodeFlags.Let ? VariableType.Let :
                             VariableType.Var
@@ -291,7 +303,7 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
                     throw new Error('unresolvable variable')
                 }
                 for (const variable of variables) {
-                    scope.set(variable.text, {
+                    setScopeVariable(scope, variable.text, {
                         type: VariableType.Parameter
                     })
                 }

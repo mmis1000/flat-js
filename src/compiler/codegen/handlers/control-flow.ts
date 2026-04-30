@@ -315,7 +315,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         }
 
         const hasVariables = ctx.scopes.get(node.caseBlock)!.size > 0
-        const connectedBodyHead = hasVariables ? generateEnterScope(node.caseBlock, ctx.scopes) : []
+        const connectedBodyHead = hasVariables ? generateEnterScope(node.caseBlock, ctx.scopes, ctx.getVariableRuntimeName) : []
         const connectedBodyRules: Op[] = []
         const connectedBody: Op[] = []
         const connectedBodyExit = op(OpCode.Nop, 0)

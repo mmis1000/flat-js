@@ -4,6 +4,8 @@ import { isScopeRoot, type Scopes } from '../analysis'
 import { OpCode, SpecialVariable } from '../shared'
 import type { Op } from './types'
 
+export type VariableRuntimeNameResolver = (scopeNode: ts.Node, name: string) => string
+
 export function abort(msg: string): never {
     throw new Error(msg)
 }
@@ -78,22 +80,22 @@ export function getScopeDebugNames(node: ts.Node, scopes: Scopes): string[] {
     return names
 }
 
-export function generateVariableList(node: ts.Node, scopes: Scopes): Op[] {
+export function generateVariableList(node: ts.Node, scopes: Scopes, getRuntimeName: VariableRuntimeNameResolver = (_node, name) => name): Op[] {
     const variables = scopes.get(node)!
 
     return markInternals([...variables].map(([name, type]) => [
-        op(OpCode.Literal, 2, [name]),
+        op(OpCode.Literal, 2, [getRuntimeName(node, name)]),
         op(OpCode.Literal, 2, [type.type])
     ]).flat().concat([
         op(OpCode.Literal, 2, [variables.size])
     ]))
 }
 
-export function generateEnterScope(node: ts.Node, scopes: Scopes): Op<OpCode>[] {
+export function generateEnterScope(node: ts.Node, scopes: Scopes, getRuntimeName?: VariableRuntimeNameResolver): Op<OpCode>[] {
     const enter = op(OpCode.EnterScope)
     enter.scopeDebugNames = getScopeDebugNames(node, scopes)
     const result = [
-        ...generateVariableList(node, scopes),
+        ...generateVariableList(node, scopes, getRuntimeName),
         enter
     ]
 

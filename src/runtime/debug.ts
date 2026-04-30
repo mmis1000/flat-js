@@ -1,3 +1,4 @@
+import { STATIC_SLOT_NAMELESS } from "../compiler/shared"
 import { Fields, SCOPE_DEBUG_PTR, SCOPE_FLAGS, SCOPE_STATIC_SLOTS, SCOPE_STATIC_STORE, TDZ_VALUE, type Scope, type ScopeDebugEntry, type ScopeWithInternals } from "./shared"
 
 const getScopeInternal = (scope: Scope) => scope as ScopeWithInternals
@@ -59,3 +60,30 @@ export const getScopeDebugEntries = (scope: Scope, debugNames: readonly string[]
             return [name, String(err), true]
         }
     })
+
+export const materializeScopeStaticBindings = (scope: Scope) => {
+    const store = getScopeInternal(scope)[SCOPE_STATIC_STORE]
+    if (store == null) {
+        return
+    }
+
+    for (let index = 0; index < store[Fields.names].length; index++) {
+        const name = store[Fields.names][index]!
+        if (name !== STATIC_SLOT_NAMELESS) {
+            Reflect.defineProperty(scope, name, {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    const value = store[Fields.values][index]
+                    if (value === TDZ_VALUE) {
+                        throw new ReferenceError(`Cannot access '${name}' before initialization`)
+                    }
+                    return value
+                },
+                set(value) {
+                    store[Fields.values][index] = value
+                },
+            })
+        }
+    }
+}

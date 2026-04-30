@@ -1,5 +1,6 @@
 export {
     TEXT_DADA_MASK,
+    STATIC_SLOT_NAMELESS,
     isSmallNumber,
     LiteralPoolKind,
     SpecialVariable,

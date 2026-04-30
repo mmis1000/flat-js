@@ -128,8 +128,9 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
 
         switch (node.operator) {
             case ts.SyntaxKind.PlusPlusToken:
-                if (ts.isIdentifier(node.operand)) {
-                    const staticAccess = ctx.tryResolveStaticAccess(node.operand, node.operand.text)
+                const plusOperand = ctx.extractQuote(node.operand)
+                if (ts.isIdentifier(plusOperand)) {
+                    const staticAccess = ctx.tryResolveStaticAccess(plusOperand, plusOperand.text)
                     if (staticAccess) {
                         return [
                             ...ctx.generateStaticAccessOps(staticAccess),
@@ -139,12 +140,13 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(plusOperand) && needsResolveScope(plusOperand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PrefixPlusPlus)
                 ]
             case ts.SyntaxKind.MinusMinusToken:
-                if (ts.isIdentifier(node.operand)) {
-                    const staticAccess = ctx.tryResolveStaticAccess(node.operand, node.operand.text)
+                const minusOperand = ctx.extractQuote(node.operand)
+                if (ts.isIdentifier(minusOperand)) {
+                    const staticAccess = ctx.tryResolveStaticAccess(minusOperand, minusOperand.text)
                     if (staticAccess) {
                         return [
                             ...ctx.generateStaticAccessOps(staticAccess),
@@ -154,7 +156,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(minusOperand) && needsResolveScope(minusOperand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PrefixMinusMinus)
                 ]
         }
@@ -476,8 +478,9 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
     if (ts.isPostfixUnaryExpression(node)) {
         switch (node.operator) {
             case ts.SyntaxKind.PlusPlusToken:
-                if (ts.isIdentifier(node.operand)) {
-                    const staticAccess = ctx.tryResolveStaticAccess(node.operand, node.operand.text)
+                const plusOperand = ctx.extractQuote(node.operand)
+                if (ts.isIdentifier(plusOperand)) {
+                    const staticAccess = ctx.tryResolveStaticAccess(plusOperand, plusOperand.text)
                     if (staticAccess) {
                         return [
                             ...ctx.generateStaticAccessOps(staticAccess),
@@ -487,12 +490,13 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(plusOperand) && needsResolveScope(plusOperand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PostFixPlusPLus)
                 ]
             case ts.SyntaxKind.MinusMinusToken:
-                if (ts.isIdentifier(node.operand)) {
-                    const staticAccess = ctx.tryResolveStaticAccess(node.operand, node.operand.text)
+                const minusOperand = ctx.extractQuote(node.operand)
+                if (ts.isIdentifier(minusOperand)) {
+                    const staticAccess = ctx.tryResolveStaticAccess(minusOperand, minusOperand.text)
                     if (staticAccess) {
                         return [
                             ...ctx.generateStaticAccessOps(staticAccess),
@@ -502,7 +506,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                 }
                 return [
                     ...ctx.generateLeft(node.operand, flag),
-                    ...(ts.isIdentifier(node.operand) && needsResolveScope(node.operand, ctx) ? [op(OpCode.ResolveScope)] : []),
+                    ...(ts.isIdentifier(minusOperand) && needsResolveScope(minusOperand, ctx) ? [op(OpCode.ResolveScope)] : []),
                     op(OpCode.PostFixMinusMinus)
                 ]
         }

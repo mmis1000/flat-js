@@ -20,6 +20,7 @@ export type SegmentOptions = {
     withPos?: boolean
     withEval?: boolean
     withStrict?: boolean
+    preserveRuntimeBindingNames?: boolean
 }
 
 export type StaticAccess = {

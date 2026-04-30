@@ -10,7 +10,7 @@ const ENTRY_FILES = [
 ]
 const COMPILER_SHARED_FILE = path.join(ROOT, 'src', 'compiler', 'shared.ts')
 const INLINE_COMPILER_SOURCE = './compiler/shared'
-const INLINE_COMPILER_BINDINGS = new Set(['TEXT_DADA_MASK', 'isSmallNumber', 'literalPoolWordMask'])
+const INLINE_COMPILER_BINDINGS = new Set(['STATIC_SLOT_NAMELESS', 'TEXT_DADA_MASK', 'isSmallNumber', 'literalPoolWordMask'])
 const INLINE_EXPORTS = new Set(['run'])
 const START_FLAG = '// [START_HERE]'
 

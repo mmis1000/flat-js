@@ -1,4 +1,6 @@
 export const TEXT_DADA_MASK = 0x80000000
+/** Runtime binding-name sentinel for static temp slots that are never resolved by name. */
+export const STATIC_SLOT_NAMELESS = ''
 
 export const isSmallNumber = (a: any): a is number => {
     return typeof a === 'number' && ((a | 0) === a) && ((a & TEXT_DADA_MASK) === 0)

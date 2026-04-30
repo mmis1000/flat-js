@@ -21,7 +21,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         const hasScope = ctx.scopes.has(node) && ctx.scopes.get(node)!.size > 0
 
         const entry0 = hasScope
-            ? generateEnterScope(node, ctx.scopes)
+            ? generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName)
             : [op(OpCode.Nop, 0)]
 
         const entry1 = initializer
@@ -68,7 +68,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             update0.push(
                 op(OpCode.Literal, 2, [copiedNames.length]),
                 ...generateLeaveScope(),
-                ...generateEnterScope(node, ctx.scopes),
+                ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
                 op(OpCode.GetRecord),
                 op(OpCode.SetMultiple)
             )
@@ -175,7 +175,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 ? node.initializer.declarations[0].name
                 : null
 
-        const enter = generateEnterScope(node, ctx.scopes)
+        const enter = generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName)
         const leave = generateLeaveScope()
 
         const getLhs = () => {
@@ -278,7 +278,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
             op(OpCode.Literal, 2, [1 + variableNames.length]),
             ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes),
+            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 
@@ -293,7 +293,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
             op(OpCode.Literal, 2, [1]),
             ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes),
+            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 
@@ -334,7 +334,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 ? node.initializer.declarations[0].name
                 : null
 
-        const enter = generateEnterScope(node, ctx.scopes)
+        const enter = generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName)
         const leave = generateLeaveScope()
 
         const getLhs = () => {
@@ -446,7 +446,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
             op(OpCode.Literal, 2, [1 + variableNames.length]),
             ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes),
+            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 
@@ -461,7 +461,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
             op(OpCode.Literal, 2, [1]),
             ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes),
+            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
             op(OpCode.GetRecord),
             op(OpCode.SetMultiple),
 

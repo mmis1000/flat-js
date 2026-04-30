@@ -1,4 +1,5 @@
 import { FunctionTypes, InvokeType, OpCode, ResolveType, SpecialVariable, TryCatchFinallyState, VariableType } from "../compiler"
+import { STATIC_SLOT_NAMELESS } from "../compiler/shared"
 import {
     bindInfo,
     environments,
@@ -128,6 +129,11 @@ export const getExecution = (
     }
 
     const getScopeInternal = (scope: Scope) => scope as ScopeWithInternals
+    const hasRuntimeBindingName = (name: string) => name !== STATIC_SLOT_NAMELESS
+    const hasMaterializedBindingAlias = (scope: Scope, name: string) =>
+        hasRuntimeBindingName(name) && Object.prototype.hasOwnProperty.call(scope, name)
+    const shouldMaterializeBindingAlias = (scope: Scope, trackStaticSlot: boolean) =>
+        !trackStaticSlot || scope === currentFrame[Fields.globalThis]
     const isWithScope = (scope: Scope) => getScopeInternal(scope)[SCOPE_WITH_OBJECT] !== undefined
     const getWithScopeObject = (scope: Scope) => getScopeInternal(scope)[SCOPE_WITH_OBJECT]!
     const isObjectLike = (value: unknown): value is object => (typeof value === 'object' && value !== null) || typeof value === 'function'
@@ -201,7 +207,9 @@ export const getExecution = (
         isWithScope(scope) ? undefined : getScopeInternal(scope)[SCOPE_FLAGS]?.[name]
 
     const setVariableFlag = (scope: Scope, name: string, flags: number) => {
-        getVariableFlagMap(scope)[name] = flags
+        if (hasRuntimeBindingName(name)) {
+            getVariableFlagMap(scope)[name] = flags
+        }
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (slotIndex !== undefined) {
             getStaticVariableStore(scope)[Fields.flags][slotIndex] = flags
@@ -251,11 +259,19 @@ export const getExecution = (
             return value
         }
 
+        const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
+        if (slotIndex !== undefined && scope !== currentFrame[Fields.globalThis]) {
+            getStaticVariableStore(scope)[Fields.values][slotIndex] = value
+            if (hasMaterializedBindingAlias(scope, name)) {
+                scope[name] = value
+            }
+            return value
+        }
+
         const success = Reflect.set(scope, name, value)
         if (!success && currentFrame[Fields.strict]) {
             throw new TypeError(`Cannot assign to read only property '${name}'`)
         }
-        const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (success && slotIndex !== undefined) {
             getStaticVariableStore(scope)[Fields.values][slotIndex] = value
         }
@@ -336,18 +352,27 @@ export const getExecution = (
     const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean, trackStaticSlot: boolean, configurable: boolean) => {
         const initialValue = tdz ? TDZ_VALUE : undefined
         const flags = immutable ? VariableFlags.Immutable : VariableFlags.None
+        const hasName = hasRuntimeBindingName(name)
 
-        getVariableFlagMap(scope)[name] = flags
+        if (hasName) {
+            getVariableFlagMap(scope)[name] = flags
+        }
         let store: StaticVariableStore | null = null
         let slotIndex: number | null = null
         if (trackStaticSlot) {
             const slotMap = getStaticVariableSlotMap(scope)
             store = getStaticVariableStore(scope)
             slotIndex = store[Fields.values].length
-            slotMap[name] = slotIndex
+            if (hasName) {
+                slotMap[name] = slotIndex
+            }
             store[Fields.names].push(name)
             store[Fields.flags].push(flags)
             store[Fields.values].push(initialValue)
+        }
+
+        if (!hasName || !shouldMaterializeBindingAlias(scope, trackStaticSlot)) {
+            return
         }
 
         const defined = Reflect.defineProperty(scope, name, {
@@ -404,7 +429,10 @@ export const getExecution = (
         const scope = getStaticVariableScope(frame, depth)
         const store = getStaticVariableStoreAt(scope)
         store[Fields.values][index] = value
-        scope[store[Fields.names][index]] = value
+        const name = store[Fields.names][index]
+        if (hasRuntimeBindingName(name) && (scope === frame[Fields.globalThis] || hasMaterializedBindingAlias(scope, name))) {
+            scope[name] = value
+        }
         return value
     }
 
@@ -418,7 +446,10 @@ export const getExecution = (
             throw new TypeError(is_a_constant)
         }
         store[Fields.values][index] = value
-        scope[store[Fields.names][index]] = value
+        const name = store[Fields.names][index]
+        if (hasRuntimeBindingName(name) && (scope === frame[Fields.globalThis] || hasMaterializedBindingAlias(scope, name))) {
+            scope[name] = value
+        }
         return value
     }
 

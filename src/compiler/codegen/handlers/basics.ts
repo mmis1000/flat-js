@@ -156,7 +156,7 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
         const variableCount = ctx.scopes.get(node)?.size ?? 0
         if (variableCount > 0) {
             return [
-                ...generateEnterScope(node, ctx.scopes),
+                ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
                 ...node.statements.map((statement) => ctx.generate(statement, flag)).flat(),
                 ...generateLeaveScope()
             ]

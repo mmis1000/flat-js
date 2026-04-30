@@ -620,7 +620,8 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
         const generated = generateSegment(item, scopes, parentMap, functions, evalTaintedFunctions, {
             withPos: range,
             withEval: (item.kind === ts.SyntaxKind.SourceFile) && evalMode,
-            withStrict
+            withStrict,
+            preserveRuntimeBindingNames: debug || range
         })
         program.push(generated)
         functionToSegment.set(item, generated)

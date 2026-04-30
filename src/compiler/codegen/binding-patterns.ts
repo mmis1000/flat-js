@@ -1,6 +1,6 @@
 import * as ts from 'typescript'
 
-import { OpCode, VariableType } from '../shared'
+import { OpCode, STATIC_SLOT_NAMELESS, VariableType } from '../shared'
 import { generateClassValue } from './handlers/classes'
 import { generateFunctionDefinition } from './handlers/functions'
 import { markInternals, op } from './helpers'
@@ -83,6 +83,11 @@ const shiftStaticDepths = (ops: Segment, delta: number): Segment => {
     return shifted
 }
 
+const shiftStaticAccess = (access: StaticAccess, delta: number): StaticAccess => ({
+    ...access,
+    depth: access.depth + delta,
+})
+
 const getTempValue = ({ index }: TempBinding): Segment => [
     op(OpCode.Literal, 2, [0]),
     op(OpCode.Literal, 2, [index]),
@@ -103,8 +108,8 @@ const generateSyntheticScopeEnter = (bindings: TempBinding[]): Segment => {
     }
 
     return markInternals([
-        ...[...bindings].reverse().flatMap(({ name }) => [
-            op(OpCode.Literal, 2, [name]),
+        ...[...bindings].reverse().flatMap(() => [
+            op(OpCode.Literal, 2, [STATIC_SLOT_NAMELESS]),
             op(OpCode.Literal, 2, [VariableType.Var]),
         ]),
         op(OpCode.Literal, 2, [bindings.length]),
@@ -216,10 +221,27 @@ const generateApplyDefault = (
 const generateBindingLeafInitialization = (
     target: ts.Identifier,
     sourceTemp: TempBinding,
-    _ctx: CodegenContext,
+    ctx: CodegenContext,
     options: BindingInitOptions,
     resolvedTargetTemp?: TempBinding
 ): Segment => {
+    const staticAccess = ctx.tryResolveStaticAccess(target, target.text)
+    if (staticAccess) {
+        const shiftedAccess = shiftStaticAccess(staticAccess, 1)
+        return [
+            ...getTempValue(sourceTemp),
+            ...ctx.generateStaticAccessOps(shiftedAccess),
+            op(OpCode.SetInitializedStatic),
+            op(OpCode.Pop),
+            ...(options.freezeConst
+                ? markInternals([
+                    ...ctx.generateStaticAccessOps(shiftedAccess),
+                    op(OpCode.FreezeVariableStatic),
+                ])
+                : []),
+        ]
+    }
+
     return [
         ...(resolvedTargetTemp ? getTempValue(resolvedTargetTemp) : [op(OpCode.GetRecord)]),
         op(OpCode.Literal, 2, [target.text]),
@@ -238,12 +260,18 @@ const generateBindingLeafInitialization = (
     ]
 }
 
-const captureBindingIdentifierTarget = (target: ts.Identifier, temp: TempBinding): Segment => setTempValue(temp, [
-    op(OpCode.GetRecord),
-    op(OpCode.Literal, 2, [target.text]),
-    op(OpCode.ResolveScope),
-    op(OpCode.Pop),
-])
+const captureBindingIdentifierTarget = (target: ts.Identifier, temp: TempBinding, ctx: CodegenContext): Segment => {
+    if (ctx.tryResolveStaticAccess(target, target.text)) {
+        return []
+    }
+
+    return setTempValue(temp, [
+        op(OpCode.GetRecord),
+        op(OpCode.Literal, 2, [target.text]),
+        op(OpCode.ResolveScope),
+        op(OpCode.Pop),
+    ])
+}
 
 const generateIteratorFromTemp = (sourceTemp: TempBinding): Segment => [
     ...getTempValue(sourceTemp),
@@ -471,7 +499,7 @@ function generateBindingPatternIntoTemp(
 
             if (element.dotDotDotToken) {
                 if (bindingIdentifier && bindingTargetTemp) {
-                    body.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp))
+                    body.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp, ctx))
                 }
                 body.push(...setTempValue(valueTemp, [op(OpCode.ArrayLiteral)]))
                 body.push(...generateArrayRestIntoTemp(iteratorTemp, entryTemp, doneTemp, temps.allocate('binding.restValue'), valueTemp))
@@ -484,7 +512,7 @@ function generateBindingPatternIntoTemp(
             }
 
             if (bindingIdentifier && bindingTargetTemp) {
-                body.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp))
+                body.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp, ctx))
             }
             body.push(...generateAdvanceIterator(iteratorTemp, entryTemp, doneTemp))
             body.push(...generateArrayElementValue(entryTemp, valueTemp, doneTemp))
@@ -528,7 +556,7 @@ function generateBindingPatternIntoTemp(
 
             if (element.dotDotDotToken) {
                 if (bindingIdentifier && bindingTargetTemp) {
-                    ops.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp))
+                    ops.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp, ctx))
                 }
                 const valueTemp = temps.allocate('binding.rest')
 
@@ -557,7 +585,7 @@ function generateBindingPatternIntoTemp(
 
             ops.push(...setTempValue(keyTemp, generatePropertyNameOps(propertyName, flag, ctx)))
             if (bindingIdentifier && bindingTargetTemp) {
-                ops.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp))
+                ops.push(...captureBindingIdentifierTarget(bindingIdentifier, bindingTargetTemp, ctx))
             }
             ops.push(...setTempValue(valueTemp, [
                 ...getTempValue(sourceTemp),
@@ -664,9 +692,10 @@ const generateAssignmentLeafInitialization = (
     if (ts.isIdentifier(rawTarget)) {
         const staticAccess = ctx.tryResolveStaticAccess(rawTarget, rawTarget.text)
         if (staticAccess) {
+            const shiftedAccess = shiftStaticAccess(staticAccess, 1)
             return [
                 ...getTempValue(sourceTemp),
-                ...ctx.generateStaticAccessOps(staticAccess),
+                ...ctx.generateStaticAccessOps(shiftedAccess),
                 op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.SetStaticUnchecked : OpCode.SetStatic),
                 op(OpCode.Pop),
             ]
@@ -688,7 +717,7 @@ const applyPreparedStaticAssignmentTarget = (
     ctx: CodegenContext
 ): Segment => [
     ...getTempValue(sourceTemp),
-    ...ctx.generateStaticAccessOps(staticAccess),
+    ...ctx.generateStaticAccessOps(shiftStaticAccess(staticAccess, 1)),
     op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.SetStaticUnchecked : OpCode.SetStatic),
     op(OpCode.Pop),
 ]

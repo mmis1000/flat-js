@@ -1,4 +1,5 @@
 import { OpCode, SetFlag } from "../../compiler"
+import { STATIC_SLOT_NAMELESS } from "../../compiler/shared"
 import {
     Context,
     Fields,
@@ -21,6 +22,17 @@ import {
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
 export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): void => {
+    const writeStaticAliasIfNeeded = (scope: Scope, name: string, value: unknown) => {
+        if (
+            name !== STATIC_SLOT_NAMELESS
+            && (
+                scope === ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+                || Object.prototype.hasOwnProperty.call(scope, name)
+            )
+        ) {
+            scope[name] = value
+        }
+    }
     const getResolvedBindingScope = (value: unknown): Scope | null => {
         if (value == null || typeof value !== 'object' || !(IDENTIFIER_REFERENCE_SCOPE in value)) {
             return null
@@ -159,7 +171,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const scope = ctx[OpcodeContextField.getStaticVariableScope](ctx[OpcodeContextField.currentFrame], depth)
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
             store[Fields.values][index] = value
-            scope[store[Fields.names][index]] = value
+            writeStaticAliasIfNeeded(scope, store[Fields.names][index], value)
             ctx[OpcodeContextField.pushCurrentFrameStack](value)
         }
             break
@@ -424,7 +436,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
             if (store[Fields.values][index] === TDZ_VALUE) {
                 store[Fields.values][index] = undefined
-                scope[store[Fields.names][index]] = undefined
+                writeStaticAliasIfNeeded(scope, store[Fields.names][index], undefined)
             }
         }
             break
@@ -444,7 +456,10 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const scope = ctx[OpcodeContextField.getStaticVariableScope](ctx[OpcodeContextField.currentFrame], depth)
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
             store[Fields.flags][index] |= VariableFlags.Immutable
-            ctx[OpcodeContextField.setVariableFlag](scope, store[Fields.names][index], store[Fields.flags][index])
+            const name = store[Fields.names][index]
+            if (name !== STATIC_SLOT_NAMELESS) {
+                ctx[OpcodeContextField.setVariableFlag](scope, name, store[Fields.flags][index])
+            }
         }
             break
     }

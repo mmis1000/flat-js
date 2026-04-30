@@ -228,8 +228,7 @@ import { ComponentPublicInstance, defineComponent } from 'vue'
 import Monaco from './components/monaco.vue'
 import Debugger from './components/debugger.vue'
 import GameCanvas from './components/game-canvas.vue'
-import { FrameType, Result, Stack } from '../src/runtime'
-import { Fields } from '../src/runtime'
+import { Fields, FrameType, materializeScopeStaticBindings, Result, Stack } from '../src/runtime'
 import { DebugInfo } from '../src/compiler'
 import { createSimulationSession, Sim, SimulationRunner, StageMode, TICKS_PER_SECOND } from './game/sim'
 import { CODE_SNIPPETS, CodeSnippet } from './game/code-snippets'
@@ -1120,17 +1119,34 @@ vmLastMovePoly`, { evalMode: true })
                     return
                 }
                 const redirects = this.vmHostRedirects ?? new WeakMap<Function, Function>()
-                const result = run(
-                    programData,
-                    0,
-                    fakeGlobalThis,
-                    [...ex[Fields.scopes]],
-                    undefined,
-                    [],
-                    compile,
-                    redirects,
-                    () => this.getDebugPauseCallback()
-                )
+                const replScopes = [...ex[Fields.scopes]]
+                const frame = ex[Fields.stack][ex[Fields.stack].length - 1]
+                const variableEnvironmentScope = frame?.[Fields.variableEnvironment] ?? null
+                const materializeReplScopes = () => {
+                    for (const scope of replScopes) {
+                        materializeScopeStaticBindings(scope)
+                    }
+                }
+                materializeReplScopes()
+                let result
+                try {
+                    result = run(
+                        programData,
+                        0,
+                        fakeGlobalThis,
+                        replScopes,
+                        undefined,
+                        [],
+                        compile,
+                        redirects,
+                        () => this.getDebugPauseCallback(),
+                        variableEnvironmentScope
+                    )
+                } finally {
+                    materializeReplScopes()
+                    this.updateDebugStackContainer(ex)
+                    this.refreshKey = Math.random()
+                }
                 this.result += result + '\n'
             } catch (err) {
                 this.printError(err)

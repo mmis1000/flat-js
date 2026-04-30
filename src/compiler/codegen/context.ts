@@ -1,7 +1,7 @@
 import * as ts from 'typescript'
 
-import { getFunctionBodyScopeNode, hasParameterExpressions, type Functions, type ParentMap, type Scopes, type VariableRoot } from '../analysis'
-import { OpCode, SpecialVariable, VariableType } from '../shared'
+import { extractVariable, getFunctionBodyScopeNode, hasParameterExpressions, type Functions, type ParentMap, type Scopes, type VariableRoot } from '../analysis'
+import { OpCode, SpecialVariable, STATIC_SLOT_NAMELESS, VariableType } from '../shared'
 import { getNameOfKind, op } from './helpers'
 import { dispatchGenerate } from './dispatch'
 import type { Op, Segment, SegmentOptions, StaticAccess } from './types'
@@ -25,6 +25,7 @@ export type CodegenContext = {
     generateIdentifierGet(node: ts.Identifier): Segment
     tryResolveStaticAccess(node: ts.Node, name: string): StaticAccess | null
     isStaticAccessUnchecked(access: StaticAccess): boolean
+    getVariableRuntimeName(scopeNode: ts.Node, name: string): string
     allocateInternalName(prefix?: string): string
 }
 
@@ -34,7 +35,7 @@ export function createCodegenContext(
     parentMap: ParentMap,
     functions: Functions,
     evalTaintedFunctions: Set<VariableRoot>,
-    { withPos = false, withEval = false, withStrict = false }: SegmentOptions = {}
+    { withPos = false, withEval = false, withStrict = false, preserveRuntimeBindingNames = false }: SegmentOptions = {}
 ): CodegenContext {
     const functionDeclarations: ts.FunctionDeclaration[] = []
     const nextOps = new Map<ts.Node, Op>()
@@ -42,6 +43,11 @@ export function createCodegenContext(
     let nextInternalNameId = 0
     const staticScopeSlotIndices = new Map<ts.Node, Map<string, number>>()
     const staticResolutionEnabled = !withEval && !evalTaintedFunctions.has(root)
+    const preserveAllRuntimeBindingNames = preserveRuntimeBindingNames
+        || withEval
+        || evalTaintedFunctions.has(root)
+        || containsWithStatement(root)
+    let preservedRuntimeBindingNames: Map<ts.Node, Set<string>> | null = null
     const rootHasParameterExpressions = !ts.isSourceFile(root) && hasParameterExpressions(root)
     const rootExpressionBody = rootHasParameterExpressions && root.body != null && !ts.isBlock(root.body)
         ? root.body
@@ -126,6 +132,163 @@ export function createCodegenContext(
         return 0
     }
 
+    function containsWithStatement(node: ts.Node) {
+        let hasWith = false
+
+        const visit = (current: ts.Node) => {
+            if (hasWith) {
+                return
+            }
+            if (ts.isWithStatement(current)) {
+                hasWith = true
+                return
+            }
+            current.forEachChild(visit)
+        }
+
+        visit(node)
+        return hasWith
+    }
+
+    function addRuntimeNamePreserve(map: Map<ts.Node, Set<string>>, scopeNode: ts.Node, name: string) {
+        let names = map.get(scopeNode)
+        if (!names) {
+            names = new Set()
+            map.set(scopeNode, names)
+        }
+        names.add(name)
+    }
+
+    function preserveRuntimeNameEverywhere(map: Map<ts.Node, Set<string>>, name: string) {
+        for (const [scopeNode, variables] of scopes) {
+            if (variables.has(name)) {
+                addRuntimeNamePreserve(map, scopeNode, name)
+            }
+        }
+    }
+
+    function preserveScopeRuntimeNames(map: Map<ts.Node, Set<string>>, scopeNode: ts.Node) {
+        for (const name of scopes.get(scopeNode)?.keys() ?? []) {
+            addRuntimeNamePreserve(map, scopeNode, name)
+        }
+    }
+
+    function preserveVariableNames(map: Map<ts.Node, Set<string>>, name: ts.BindingName) {
+        for (const variable of extractVariable(name)) {
+            preserveRuntimeNameEverywhere(map, variable.text)
+        }
+    }
+
+    function preserveAssignmentTargetNames(map: Map<ts.Node, Set<string>>, node: ts.Node) {
+        const rawNode = extractQuote(node)
+
+        if (ts.isIdentifier(rawNode)) {
+            preserveRuntimeNameEverywhere(map, rawNode.text)
+            return
+        }
+
+        if (ts.isArrayLiteralExpression(rawNode)) {
+            for (const element of rawNode.elements) {
+                if (ts.isSpreadElement(element)) {
+                    preserveAssignmentTargetNames(map, element.expression)
+                } else {
+                    preserveAssignmentTargetNames(map, element)
+                }
+            }
+            return
+        }
+
+        if (ts.isObjectLiteralExpression(rawNode)) {
+            for (const property of rawNode.properties) {
+                if (ts.isShorthandPropertyAssignment(property)) {
+                    preserveRuntimeNameEverywhere(map, property.name.text)
+                } else if (ts.isPropertyAssignment(property)) {
+                    preserveAssignmentTargetNames(map, property.initializer)
+                } else if (ts.isSpreadAssignment(property)) {
+                    preserveAssignmentTargetNames(map, property.expression)
+                }
+            }
+        }
+    }
+
+    function collectPreservedRuntimeBindingNames() {
+        const map = new Map<ts.Node, Set<string>>()
+
+        const visit = (current: ts.Node) => {
+            if (current !== root && functions.has(current as VariableRoot)) {
+                if (ts.isFunctionDeclaration(current) && current.name) {
+                    preserveRuntimeNameEverywhere(map, current.name.text)
+                }
+                return
+            }
+
+            if (ts.isVariableDeclaration(current) && !ts.isIdentifier(current.name)) {
+                preserveVariableNames(map, current.name)
+            }
+
+            if (ts.isFunctionDeclaration(current) && current.name) {
+                preserveRuntimeNameEverywhere(map, current.name.text)
+            }
+
+            if (ts.isClassDeclaration(current) && current.name) {
+                preserveRuntimeNameEverywhere(map, current.name.text)
+            }
+
+            if (ts.isForStatement(current) || ts.isForInStatement(current) || ts.isForOfStatement(current)) {
+                preserveScopeRuntimeNames(map, current)
+            }
+
+            if (
+                (ts.isForInStatement(current) || ts.isForOfStatement(current))
+                && ts.isVariableDeclarationList(current.initializer)
+            ) {
+                for (const declaration of current.initializer.declarations) {
+                    preserveVariableNames(map, declaration.name)
+                }
+            }
+
+            if (ts.isCatchClause(current) && current.variableDeclaration != null) {
+                preserveVariableNames(map, current.variableDeclaration.name)
+            }
+
+            if (ts.isBinaryExpression(current)) {
+                switch (current.operatorToken.kind) {
+                    case ts.SyntaxKind.AmpersandAmpersandEqualsToken:
+                    case ts.SyntaxKind.BarBarEqualsToken:
+                    case ts.SyntaxKind.QuestionQuestionEqualsToken:
+                    case ts.SyntaxKind.PercentEqualsToken:
+                    case ts.SyntaxKind.AmpersandEqualsToken:
+                    case ts.SyntaxKind.BarEqualsToken:
+                    case ts.SyntaxKind.CaretEqualsToken:
+                    case ts.SyntaxKind.LessThanLessThanEqualsToken:
+                    case ts.SyntaxKind.GreaterThanGreaterThanEqualsToken:
+                    case ts.SyntaxKind.AsteriskAsteriskEqualsToken:
+                        preserveAssignmentTargetNames(map, current.left)
+                        break
+                    case ts.SyntaxKind.EqualsToken:
+                        if (ts.isArrayLiteralExpression(extractQuote(current.left)) || ts.isObjectLiteralExpression(extractQuote(current.left))) {
+                            preserveAssignmentTargetNames(map, current.left)
+                        }
+                        break
+                }
+            }
+
+            if (ts.isDeleteExpression(current)) {
+                preserveAssignmentTargetNames(map, current.expression)
+            }
+
+            current.forEachChild(visit)
+        }
+
+        visit(root)
+        return map
+    }
+
+    function getPreservedRuntimeBindingNames() {
+        preservedRuntimeBindingNames ??= collectPreservedRuntimeBindingNames()
+        return preservedRuntimeBindingNames
+    }
+
     function canStaticResolveScope(scopeNode: ts.Node) {
         return !(ts.isSourceFile(scopeNode) && !withStrict)
     }
@@ -134,6 +297,29 @@ export function createCodegenContext(
         return access.type === VariableType.Var
             || access.type === VariableType.Function
             || access.type === VariableType.Parameter
+    }
+
+    function bindingNameAlwaysNeeded(name: string, type: VariableType) {
+        return name.startsWith('[')
+            || type === VariableType.Function
+            || type === VariableType.Parameter
+    }
+
+    function getVariableRuntimeName(scopeNode: ts.Node, name: string) {
+        if (preserveAllRuntimeBindingNames || !canStaticResolveScope(scopeNode)) {
+            return name
+        }
+
+        const declaration = scopes.get(scopeNode)?.get(name)
+        if (declaration == null || bindingNameAlwaysNeeded(name, declaration.type)) {
+            return name
+        }
+
+        if (getPreservedRuntimeBindingNames().get(scopeNode)?.has(name)) {
+            return name
+        }
+
+        return STATIC_SLOT_NAMELESS
     }
 
     function getStaticScopeSlotIndex(scopeNode: ts.Node, name: string): number | null {
@@ -292,6 +478,7 @@ export function createCodegenContext(
         generateIdentifierGet,
         tryResolveStaticAccess,
         isStaticAccessUnchecked,
+        getVariableRuntimeName,
         allocateInternalName,
     }
 

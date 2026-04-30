@@ -77,12 +77,13 @@ export function generateSegment(
     parentMap: ParentMap,
     functions: Functions,
     evalTaintedFunctions: Set<VariableRoot>,
-    { withPos = false, withEval = false, withStrict = false }: SegmentOptions = {}
+    { withPos = false, withEval = false, withStrict = false, preserveRuntimeBindingNames = false }: SegmentOptions = {}
 ): Segment {
     const ctx = createCodegenContext(node, scopes, parentMap, functions, evalTaintedFunctions, {
         withPos,
         withEval,
-        withStrict
+        withStrict,
+        preserveRuntimeBindingNames
     })
 
     let bodyNodes: Op<OpCode>[]
@@ -169,7 +170,7 @@ export function generateSegment(
     const bodyActivationNodes = bodyScopeEnter == null
         ? []
         : markInternals([
-            ...(bodyScopeNode != null ? generateVariableList(bodyScopeNode, scopes) : [op(OpCode.Literal, 2, [0])]),
+            ...(bodyScopeNode != null ? generateVariableList(bodyScopeNode, scopes, ctx.getVariableRuntimeName) : [op(OpCode.Literal, 2, [0])]),
             bodyScopeEnter,
         ])
 
@@ -203,7 +204,7 @@ export function generateSegment(
         entry.push(op(OpCode.Literal, 2, [restParameterIndex]))
     }
 
-    entry.push(...generateVariableList(node, scopes))
+    entry.push(...generateVariableList(node, scopes, ctx.getVariableRuntimeName))
     if (ts.isSourceFile(node) && !withStrict) {
         entry.push(op(OpCode.Literal, 2, [FunctionTypes.SourceFileInPlace]))
     } else {
