@@ -28,7 +28,7 @@
 </template>
 
 <script lang="ts">
-import Vue from 'vue'
+import { defineComponent, PropType } from 'vue'
 import { DebugInfo } from '../../src/compiler'
 import { Fields, getScopeDebugPtr, Scope, Stack } from '../../src/runtime'
 import { getLogicalDebugFrames, LogicalDebugFrame, resolveDebugFrameIndex } from '../debug-stack'
@@ -46,7 +46,7 @@ const getKey = (obj: any) => {
     return map.get(obj)!
 }
 
-export default Vue.extend({
+export default defineComponent({
     components: {
         DebuggerValue
     },
@@ -62,7 +62,7 @@ export default Vue.extend({
             default: 0
         },
         selectedFrameIndex: {
-            type: Number,
+            type: Number as PropType<number | null>,
             default: null
         },
         disabledProgramSections: {

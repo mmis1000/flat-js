@@ -7,7 +7,7 @@
     "build": "node ./scripts/build-runtime-inline.js",
     "build:tsc": "tsc --project ./src/tsconfig.json",
     "watch": "node ./scripts/build-runtime-inline.js --watch",
-    "serve-coverage": "npx serve ./coverage/lcov-report",
+    "serve-coverage": "python -m http.server 5000 --directory ./coverage/lcov-report",
     "test": "jest --runInBand",
     "test:slow": "node ./scripts/run-jest-with-env.js RUN_SLOW_TESTS=1",
     "test:bench": "node ./scripts/run-jest-with-env.js RUN_BENCHMARK_TESTS=1 src/__tests__/visual-step-benchmark.test.ts",
@@ -15,7 +15,8 @@
     "test262": "npm run build && test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 \"./node_modules/test262/test/harness/**/*.js\" \"./node_modules/test262/test/language/**/*.js\" \"./node_modules/test262/test/staging/**/*.js\"",
     "test262:smoke": "npm run build && test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 \"./node_modules/test262/test/language/literals/numeric/S7.8.3_A1.1_T1.js\"",
     "dev-web": "webpack serve --config webpack.config-dev.js",
-    "build-web": "webpack --config webpack.config.js",
+    "typecheck:web": "vue-tsc --project ./web/tsconfig.json --noEmit",
+    "build-web": "npm run typecheck:web && webpack --config webpack.config.js",
     "build-example": "npm run build && node ./lib/cli.js --strip-runtime --merge-opcodes-from ./src/__tests__/fixures/jquery.js --merge-opcodes-from ./src/__tests__/fixures/bad-code.js ./src/__tests__/fixures/loader.js > ./example/loader.js && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/bad-code.js > ./example/bad-code.bin.gz && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/jquery.js > ./example/jquery.bin.gz",
     "build-example:opcode-kitchen-sink": "npm run build && node ./lib/cli.js --strip-runtime ./src/__tests__/fixures/opcode-kitchen-sink.js > ./example/opcode-kitchen-sink-loader.js",
     "serve-web": "npx serve dist-web"
@@ -26,13 +27,14 @@
     "terser": "^5.7.0",
     "three": "^0.184.0",
     "typescript": "~5.6.0",
-    "vue": "^2.6.12"
+    "vue": "^3.5.33"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.13.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^25.6.0",
     "@types/three": "^0.184.0",
+    "@vue/compiler-sfc": "^3.5.33",
     "css-loader": "^5.2.4",
     "file-loader": "^6.2.0",
     "gh-pages": "^3.1.0",
@@ -47,9 +49,9 @@
     "test262-harness": "^10.0.0",
     "ts-jest": "^29.2.5",
     "ts-loader": "^9.0.0",
-    "vue-loader": "^15.9.6",
+    "vue-loader": "^17.4.2",
     "vue-style-loader": "^4.1.3",
-    "vue-template-compiler": "^2.6.12",
+    "vue-tsc": "^3.2.7",
     "webpack": "^5.34.0",
     "webpack-cli": "^4.6.0",
     "webpack-dev-server": "^3.11.2"

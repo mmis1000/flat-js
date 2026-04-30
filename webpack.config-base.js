@@ -1,5 +1,5 @@
 const HtmlWebpackPlugin = require('html-webpack-plugin')
-const VueLoaderPlugin = require('vue-loader/lib/plugin')
+const { VueLoaderPlugin } = require('vue-loader')
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 const path = require('path')

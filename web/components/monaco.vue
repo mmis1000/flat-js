@@ -4,14 +4,14 @@
 
 <script lang="ts">
 import * as monaco from 'monaco-editor';
-import Vue from 'vue'
+import { defineComponent } from 'vue'
 function withNonReactive<TData>(data: TData) {
     return <TNonReactive>() => data as TData & TNonReactive;
 }
 
-export default Vue.extend({
+export default defineComponent({
     props: {
-        value: {
+        modelValue: {
             type: String,
             default: ''
         },
@@ -47,7 +47,7 @@ export default Vue.extend({
         }
     },
     watch: {
-        value (newVal) {
+        modelValue (newVal) {
             const editor = this .editor
             const current = editor.getValue()
             if (current !== newVal) {
@@ -101,7 +101,7 @@ export default Vue.extend({
     mounted () {
         this.currentDecorations = []
         const editor = this.editor = monaco.editor.create(this.$refs.editor as any, {
-            value: this.value,
+            value: this.modelValue,
             language: 'javascript',
             scrollBeyondLastLine: false,
             automaticLayout: true,
@@ -110,8 +110,8 @@ export default Vue.extend({
 
         editor.onDidChangeModelContent(ev => {
             const value = editor.getValue()
-            if (value !== this.value) {
-                this.$emit('input', editor.getValue())
+            if (value !== this.modelValue) {
+                this.$emit('update:modelValue', editor.getValue())
             }
         })
 
@@ -145,13 +145,13 @@ export default Vue.extend({
     min-width: 0;
     min-height: 0;
 }
-::v-deep .inline-highlight {
+:deep(.inline-highlight) {
     position: relative;
     background: rgb(251, 255, 0);
     outline: 1px solid rgba(255, 0, 0, 0.3);
 }
 
-::v-deep .inline-highlight ~ .inline-highlight::before{
+:deep(.inline-highlight ~ .inline-highlight::before) {
     position: absolute;
     display: block;
     content: "";
@@ -162,7 +162,7 @@ export default Vue.extend({
     background: rgb(251, 255, 0);
 }
 
-::v-deep .breakpoint-glyph {
+:deep(.breakpoint-glyph) {
     width: 12px !important;
     height: 12px !important;
     margin-left: 4px;

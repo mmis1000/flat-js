@@ -1,5 +1,5 @@
 
 declare module '*.vue' {
-    var _: import('vue').Component;
-    export default  _;
+    const component: import('vue').DefineComponent<{}, {}, any>
+    export default component
 }

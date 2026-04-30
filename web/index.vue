@@ -82,7 +82,7 @@
                         <button v-if="state === 'paused'" class="run-button" @click="stepExecution(false)">Step</button>
                         <button v-if="state === 'paused'" class="run-button" @click="stepExecution(true)">Step in</button>
                         <button v-if="state === 'paused'" class="run-button" @click="stop">Kill</button>
-                        <button v-if="state === 'play'" class="run-button" @click="pause">Pause</button>
+                        <button v-if="state === 'play'" class="run-button" @click="pause()">Pause</button>
                         <button v-if="state === 'play'" class="run-button" @click="stop">Kill</button>
                     </div>
                 </div>
@@ -223,7 +223,7 @@
 
 <script lang="ts">
 import { compile, getExecution, run } from '../src'
-import Vue from 'vue'
+import { ComponentPublicInstance, defineComponent } from 'vue'
 import Monaco from './components/monaco.vue'
 import Debugger from './components/debugger.vue'
 import GameCanvas from './components/game-canvas.vue'
@@ -354,7 +354,7 @@ function sameSourceMapPos(
     )
 }
 
-export default Vue.extend({
+export default defineComponent({
     components: {
         Monaco,
         Debugger,
@@ -588,7 +588,7 @@ export default Vue.extend({
             this.selectedDebugFrameIndex = index
             this.flushDebugHighlightSync()
             this.$nextTick(() => {
-                const editor = this.$refs.editor as Vue & { revealHighlight?: () => void }
+                const editor = this.$refs.editor as ComponentPublicInstance & { revealHighlight?: () => void }
                 editor.revealHighlight?.()
             })
         },
@@ -1032,7 +1032,7 @@ vmLastMovePoly`, { evalMode: true })
             }
         }
     },
-    beforeDestroy() {
+    beforeUnmount() {
         this.releaseVmResources()
     },
 })

@@ -1,5 +1,5 @@
 import App from './index.vue'
-import Vue from 'vue'
+import { createApp } from 'vue'
 
 try {
     eval('console.log("CSP does not work")')
@@ -7,8 +7,4 @@ try {
     console.log("CSP do work")
 }
 
-new Vue({
-    el: document.getElementById('main')!,
-    data: {},
-    render: (h) => h(App)
-})
+createApp(App).mount(document.getElementById('main')!)

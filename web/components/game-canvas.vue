@@ -27,7 +27,7 @@
 </template>
 
 <script lang="ts">
-import Vue from 'vue'
+import { defineComponent, markRaw } from 'vue'
 import * as THREE from 'three'
 import {
     ActiveIntent,
@@ -60,6 +60,10 @@ type CanvasSurface = {
 
 function withNonReactive<TData>(data: TData) {
     return <TNonReactive>() => data as TData & TNonReactive
+}
+
+function raw<T extends object>(value: T): T {
+    return markRaw(value)
 }
 
 function getEffectiveDevicePixelRatio() {
@@ -139,7 +143,7 @@ function borderWalls(): Rect[] {
     ]
 }
 
-export default Vue.extend({
+export default defineComponent({
     name: 'GameCanvas',
     props: {
         sim: {
@@ -167,30 +171,30 @@ export default Vue.extend({
             resizeObserver: null as ResizeObserver | null,
             animationFrameId: 0,
             lastPixelRatio: 1,
-            raycaster: new THREE.Raycaster(),
+            raycaster: raw(new THREE.Raycaster()),
             floorGrid: null as THREE.GridHelper | null,
             arenaBoundsLine: null as THREE.Line | null,
-            wallGroup: new THREE.Group(),
-            targetGroup: new THREE.Group(),
-            discGroup: new THREE.Group(),
-            scanRayGroup: new THREE.Group(),
-            obstacleHitboxGroup: new THREE.Group(),
-            targetHitboxGroup: new THREE.Group(),
+            wallGroup: raw(new THREE.Group()),
+            targetGroup: raw(new THREE.Group()),
+            discGroup: raw(new THREE.Group()),
+            scanRayGroup: raw(new THREE.Group()),
+            obstacleHitboxGroup: raw(new THREE.Group()),
+            targetHitboxGroup: raw(new THREE.Group()),
             wallMeshes: [] as WallMeshEntry[],
-            activeOccluders: new Set<THREE.Mesh>(),
+            activeOccluders: raw(new Set<THREE.Mesh>()),
             lastObstacleKey: '',
             lastTargetKey: '',
-            obstacleWallMaterial: new THREE.MeshStandardMaterial({
+            obstacleWallMaterial: raw(new THREE.MeshStandardMaterial({
                 color: 0x0b8bd7,
                 roughness: 0.28,
                 metalness: 0.18,
-            }),
-            borderWallMaterial: new THREE.MeshStandardMaterial({
+            })),
+            borderWallMaterial: raw(new THREE.MeshStandardMaterial({
                 color: 0x0f557b,
                 roughness: 0.4,
                 metalness: 0.12,
-            }),
-            wallHologramMaterial: new THREE.MeshStandardMaterial({
+            })),
+            wallHologramMaterial: raw(new THREE.MeshStandardMaterial({
                 color: 0x67ebff,
                 transparent: true,
                 opacity: 0.2,
@@ -198,58 +202,58 @@ export default Vue.extend({
                 roughness: 0.2,
                 metalness: 0,
                 side: THREE.DoubleSide,
-            }),
-            targetGeo: new THREE.OctahedronGeometry(12),
-            targetMat: new THREE.MeshStandardMaterial({
+            })),
+            targetGeo: raw(new THREE.OctahedronGeometry(12)),
+            targetMat: raw(new THREE.MeshStandardMaterial({
                 color: 0x00ff88,
                 emissive: 0x00ff88,
                 emissiveIntensity: 0.72,
                 roughness: 0.12,
-            }),
-            discGeo: new THREE.CylinderGeometry(DISC_R * 1.14, DISC_R * 1.14, Math.max(1.8, DISC_R * 0.52), 28),
-            discMat: new THREE.MeshStandardMaterial({
+            })),
+            discGeo: raw(new THREE.CylinderGeometry(DISC_R * 1.14, DISC_R * 1.14, Math.max(1.8, DISC_R * 0.52), 28)),
+            discMat: raw(new THREE.MeshStandardMaterial({
                 color: 0xffc347,
                 emissive: 0xd16f10,
                 emissiveIntensity: 0.64,
                 roughness: 0.22,
                 metalness: 0.28,
-            }),
-            targetHitboxMaterial: new THREE.LineBasicMaterial({
+            })),
+            targetHitboxMaterial: raw(new THREE.LineBasicMaterial({
                 color: 0x22ff88,
                 transparent: true,
                 opacity: 0.72,
                 depthTest: false,
-            }),
-            obstacleHitboxMaterial: new THREE.LineBasicMaterial({
+            })),
+            obstacleHitboxMaterial: raw(new THREE.LineBasicMaterial({
                 color: 0xff5a36,
                 transparent: true,
                 opacity: 0.78,
                 depthTest: false,
-            }),
-            botHitboxMaterial: new THREE.LineBasicMaterial({
+            })),
+            botHitboxMaterial: raw(new THREE.LineBasicMaterial({
                 color: 0x67ebff,
                 transparent: true,
                 opacity: 0.8,
                 depthTest: false,
-            }),
+            })),
             botGroup: null as THREE.Group | null,
             botHitbox: null as THREE.LineSegments | null,
             moveIntentGroup: null as THREE.Group | null,
             rotateIntentArrow: null as THREE.ArrowHelper | null,
-            moveIntentRingMaterial: new THREE.MeshBasicMaterial({
+            moveIntentRingMaterial: raw(new THREE.MeshBasicMaterial({
                 color: 0x67ebff,
                 transparent: true,
                 opacity: 0.78,
                 depthWrite: false,
                 depthTest: false,
                 side: THREE.DoubleSide,
-            }),
-            moveIntentLineMaterial: new THREE.LineBasicMaterial({
+            })),
+            moveIntentLineMaterial: raw(new THREE.LineBasicMaterial({
                 color: 0x67ebff,
                 transparent: true,
                 opacity: 0.9,
                 depthTest: false,
-            }),
+            })),
         })()
     },
     computed: {
@@ -266,7 +270,7 @@ export default Vue.extend({
         this.init3D()
         this.animate()
     },
-    beforeDestroy() {
+    beforeUnmount() {
         this.destroy3D()
     },
     methods: {
@@ -277,12 +281,12 @@ export default Vue.extend({
                 return
             }
 
-            const scene = this.scene = new THREE.Scene()
-            scene.background = new THREE.Color(0x06131d)
-            scene.fog = new THREE.FogExp2(0x06131d, 0.0028)
+            const scene = this.scene = raw(new THREE.Scene())
+            scene.background = raw(new THREE.Color(0x06131d))
+            scene.fog = raw(new THREE.FogExp2(0x06131d, 0.0028))
 
-            const camera = this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 1600)
-            const renderer = this.renderer = new THREE.WebGLRenderer({ antialias: true })
+            const camera = this.camera = raw(new THREE.PerspectiveCamera(68, 1, 0.1, 1600))
+            const renderer = this.renderer = raw(new THREE.WebGLRenderer({ antialias: true }))
             this.lastPixelRatio = getEffectiveDevicePixelRatio()
             renderer.setPixelRatio(this.lastPixelRatio)
             renderer.setClearColor(0x06131d)
@@ -291,24 +295,24 @@ export default Vue.extend({
             renderer.domElement.style.height = '100%'
             container.appendChild(renderer.domElement)
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.54))
-            const hemi = new THREE.HemisphereLight(0x95dfff, 0x07111a, 0.92)
+            scene.add(raw(new THREE.AmbientLight(0xffffff, 0.54)))
+            const hemi = raw(new THREE.HemisphereLight(0x95dfff, 0x07111a, 0.92))
             scene.add(hemi)
-            const rim = new THREE.DirectionalLight(0x8edfff, 0.7)
+            const rim = raw(new THREE.DirectionalLight(0x8edfff, 0.7))
             rim.position.set(180, 240, 120)
             scene.add(rim)
-            this.playerLight = new THREE.PointLight(0x9ff6ff, 1.35, 340)
+            this.playerLight = raw(new THREE.PointLight(0x9ff6ff, 1.35, 340))
             scene.add(this.playerLight)
 
-            const floor = new THREE.Mesh(
+            const floor = raw(new THREE.Mesh(
                 new THREE.PlaneGeometry(ARENA_W, ARENA_H),
                 new THREE.MeshStandardMaterial({ color: 0x071019, roughness: 0.92 })
-            )
+            ))
             floor.rotation.x = -Math.PI / 2
             floor.position.set(ARENA_W / 2, 0, ARENA_H / 2)
             scene.add(floor)
 
-            this.floorGrid = new THREE.GridHelper(Math.max(ARENA_W, ARENA_H), 30, 0x0e4863, 0x07212f)
+            this.floorGrid = raw(new THREE.GridHelper(Math.max(ARENA_W, ARENA_H), 30, 0x0e4863, 0x07212f))
             this.floorGrid.position.set(ARENA_W / 2, 0.04, ARENA_H / 2)
             scene.add(this.floorGrid)
 
@@ -319,7 +323,7 @@ export default Vue.extend({
                 new THREE.Vector3(0, 0.06, ARENA_H),
                 new THREE.Vector3(0, 0.06, 0),
             ]
-            this.arenaBoundsLine = new THREE.Line(
+            this.arenaBoundsLine = raw(new THREE.Line(
                 new THREE.BufferGeometry().setFromPoints(boundsPoints),
                 new THREE.LineBasicMaterial({
                     color: 0x5fddff,
@@ -327,7 +331,7 @@ export default Vue.extend({
                     opacity: 0.18,
                     depthWrite: false,
                 })
-            )
+            ))
             scene.add(this.arenaBoundsLine)
 
             scene.add(this.wallGroup)
@@ -337,8 +341,8 @@ export default Vue.extend({
             scene.add(this.obstacleHitboxGroup)
             scene.add(this.targetHitboxGroup)
 
-            const botGroup = this.botGroup = new THREE.Group()
-            const chassis = new THREE.Mesh(
+            const botGroup = this.botGroup = raw(new THREE.Group())
+            const chassis = raw(new THREE.Mesh(
                 new THREE.CylinderGeometry(BOT_R * 1.02, BOT_R * 1.05, 6.4, 40),
                 new THREE.MeshStandardMaterial({
                     color: 0x86f2ff,
@@ -347,11 +351,11 @@ export default Vue.extend({
                     roughness: 0.34,
                     metalness: 0.16,
                 })
-            )
+            ))
             chassis.position.y = 3.2
             botGroup.add(chassis)
 
-            const lid = new THREE.Mesh(
+            const lid = raw(new THREE.Mesh(
                 new THREE.CylinderGeometry(BOT_R * 0.84, BOT_R * 0.88, 1.6, 36),
                 new THREE.MeshStandardMaterial({
                     color: 0xe8fdff,
@@ -360,11 +364,11 @@ export default Vue.extend({
                     roughness: 0.14,
                     metalness: 0.08,
                 })
-            )
+            ))
             lid.position.y = 6.5
             botGroup.add(lid)
 
-            const lidarBase = new THREE.Mesh(
+            const lidarBase = raw(new THREE.Mesh(
                 new THREE.CylinderGeometry(BOT_R * 0.28, BOT_R * 0.31, 1.8, 24),
                 new THREE.MeshStandardMaterial({
                     color: 0x0c1d28,
@@ -373,11 +377,11 @@ export default Vue.extend({
                     roughness: 0.4,
                     metalness: 0.42,
                 })
-            )
+            ))
             lidarBase.position.y = 8
             botGroup.add(lidarBase)
 
-            const lidarCap = new THREE.Mesh(
+            const lidarCap = raw(new THREE.Mesh(
                 new THREE.CylinderGeometry(BOT_R * 0.16, BOT_R * 0.16, 1.1, 18),
                 new THREE.MeshStandardMaterial({
                     color: 0xfff2bc,
@@ -386,11 +390,11 @@ export default Vue.extend({
                     roughness: 0.18,
                     metalness: 0.12,
                 })
-            )
+            ))
             lidarCap.position.y = 9.3
             botGroup.add(lidarCap)
 
-            const frontSensor = new THREE.Mesh(
+            const frontSensor = raw(new THREE.Mesh(
                 new THREE.BoxGeometry(8.8, 1.45, 3.4),
                 new THREE.MeshStandardMaterial({
                     color: 0x0d2030,
@@ -399,32 +403,32 @@ export default Vue.extend({
                     roughness: 0.28,
                     metalness: 0.34,
                 })
-            )
+            ))
             frontSensor.position.set(BOT_R * 0.74, 4.2, 0)
             frontSensor.rotation.y = Math.PI / 2
             botGroup.add(frontSensor)
 
-            const wheelMaterial = new THREE.MeshStandardMaterial({
+            const wheelMaterial = raw(new THREE.MeshStandardMaterial({
                 color: 0x091119,
                 roughness: 0.78,
                 metalness: 0.05,
-            })
+            }))
             for (const side of [-1, 1]) {
-                const wheel = new THREE.Mesh(
+                const wheel = raw(new THREE.Mesh(
                     new THREE.CylinderGeometry(2.7, 2.7, 3.2, 16),
                     wheelMaterial
-                )
+                ))
                 wheel.rotation.z = Math.PI / 2
                 wheel.position.set(0, 2.5, side * (BOT_R * 0.88))
                 botGroup.add(wheel)
             }
 
-            const brushMaterial = new THREE.LineBasicMaterial({
+            const brushMaterial = raw(new THREE.LineBasicMaterial({
                 color: 0xa8efff,
                 transparent: true,
                 opacity: 0.7,
-            })
-            const leftBrush = new THREE.LineSegments(
+            }))
+            const leftBrush = raw(new THREE.LineSegments(
                 new THREE.BufferGeometry().setFromPoints([
                     new THREE.Vector3(BOT_R * 0.72, 0.3, -BOT_R * 0.42),
                     new THREE.Vector3(BOT_R * 1.02, 0.3, -BOT_R * 0.72),
@@ -432,10 +436,10 @@ export default Vue.extend({
                     new THREE.Vector3(BOT_R * 1.1, 0.3, -BOT_R * 0.42),
                 ]),
                 brushMaterial
-            )
+            ))
             botGroup.add(leftBrush)
 
-            const rightBrush = new THREE.LineSegments(
+            const rightBrush = raw(new THREE.LineSegments(
                 new THREE.BufferGeometry().setFromPoints([
                     new THREE.Vector3(BOT_R * 0.72, 0.3, BOT_R * 0.42),
                     new THREE.Vector3(BOT_R * 1.02, 0.3, BOT_R * 0.72),
@@ -443,24 +447,24 @@ export default Vue.extend({
                     new THREE.Vector3(BOT_R * 1.1, 0.3, BOT_R * 0.42),
                 ]),
                 brushMaterial
-            )
+            ))
             botGroup.add(rightBrush)
 
             scene.add(botGroup)
 
-            this.botHitbox = new THREE.LineSegments(
+            this.botHitbox = raw(new THREE.LineSegments(
                 new THREE.EdgesGeometry(new THREE.CylinderGeometry(BOT_R, BOT_R, BOT_HITBOX_HEIGHT, 28, 1, true)),
                 this.botHitboxMaterial
-            )
+            ))
             this.botHitbox.position.y = BOT_HITBOX_HEIGHT / 2
             this.botHitbox.visible = false
             scene.add(this.botHitbox)
 
-            const moveIntentGroup = this.moveIntentGroup = new THREE.Group()
-            const ring = new THREE.Mesh(new THREE.RingGeometry(8, 11, 32), this.moveIntentRingMaterial)
+            const moveIntentGroup = this.moveIntentGroup = raw(new THREE.Group())
+            const ring = raw(new THREE.Mesh(new THREE.RingGeometry(8, 11, 32), this.moveIntentRingMaterial))
             ring.rotation.x = -Math.PI / 2
             moveIntentGroup.add(ring)
-            const cross = new THREE.LineSegments(
+            const cross = raw(new THREE.LineSegments(
                 new THREE.BufferGeometry().setFromPoints([
                     new THREE.Vector3(-14, 0, 0),
                     new THREE.Vector3(14, 0, 0),
@@ -468,20 +472,20 @@ export default Vue.extend({
                     new THREE.Vector3(0, 0, 14),
                 ]),
                 this.moveIntentLineMaterial
-            )
+            ))
             moveIntentGroup.add(cross)
             moveIntentGroup.visible = false
             moveIntentGroup.position.y = 0.24
             scene.add(moveIntentGroup)
 
-            this.rotateIntentArrow = new THREE.ArrowHelper(
+            this.rotateIntentArrow = raw(new THREE.ArrowHelper(
                 new THREE.Vector3(1, 0, 0),
                 new THREE.Vector3(),
                 INTENT_ARROW_LENGTH,
                 0xffbf3c,
                 10,
                 6
-            )
+            ))
             ;(this.rotateIntentArrow.line.material as THREE.Material).depthTest = false
             ;(this.rotateIntentArrow.cone.material as THREE.Material).depthTest = false
             this.rotateIntentArrow.visible = false
@@ -622,7 +626,7 @@ export default Vue.extend({
             for (const rect of [...obstacles, ...borderWalls()]) {
                 const isBorder = rect.x < 0 || rect.y < 0 || rect.x + rect.w > ARENA_W || rect.y + rect.h > ARENA_H
                 const material = isBorder ? this.borderWallMaterial : this.obstacleWallMaterial
-                const mesh = new THREE.Mesh(new THREE.BoxGeometry(rect.w, WALL_HEIGHT, rect.h), material)
+                const mesh = raw(new THREE.Mesh(new THREE.BoxGeometry(rect.w, WALL_HEIGHT, rect.h), material))
                 const center = new THREE.Vector3(rect.x + rect.w / 2, WALL_HEIGHT / 2, rect.y + rect.h / 2)
                 mesh.position.copy(center)
                 mesh.castShadow = false
@@ -631,10 +635,10 @@ export default Vue.extend({
                 this.wallMeshes.push({
                     mesh,
                     baseMaterial: material,
-                    box: new THREE.Box3().setFromCenterAndSize(
+                    box: raw(new THREE.Box3().setFromCenterAndSize(
                         center,
                         new THREE.Vector3(rect.w, WALL_HEIGHT, rect.h)
-                    ),
+                    )),
                 })
             }
         },
@@ -643,10 +647,10 @@ export default Vue.extend({
             clearGroup(this.obstacleHitboxGroup)
 
             for (const rect of obstacles) {
-                const lines = new THREE.LineSegments(
+                const lines = raw(new THREE.LineSegments(
                     new THREE.EdgesGeometry(new THREE.BoxGeometry(rect.w, WALL_HEIGHT, rect.h)),
                     this.obstacleHitboxMaterial
-                )
+                ))
                 lines.position.set(rect.x + rect.w / 2, WALL_HEIGHT / 2, rect.y + rect.h / 2)
                 this.obstacleHitboxGroup.add(lines)
             }
@@ -657,14 +661,14 @@ export default Vue.extend({
             this.targetGroup.clear()
 
             for (const target of targets) {
-                const crystal = new THREE.Mesh(this.targetGeo, this.targetMat)
+                const crystal = raw(new THREE.Mesh(this.targetGeo, this.targetMat))
                 crystal.position.set(target.x + target.w / 2, BOT_MODEL_HEIGHT, target.y + target.h / 2)
                 this.targetGroup.add(crystal)
 
-                const hitbox = new THREE.LineSegments(
+                const hitbox = raw(new THREE.LineSegments(
                     new THREE.EdgesGeometry(new THREE.BoxGeometry(target.w, BOT_MODEL_HEIGHT * 1.5, target.h)),
                     this.targetHitboxMaterial
-                )
+                ))
                 hitbox.position.set(target.x + target.w / 2, BOT_MODEL_HEIGHT * 0.75, target.y + target.h / 2)
                 this.targetHitboxGroup.add(hitbox)
             }
@@ -696,7 +700,7 @@ export default Vue.extend({
         updateDiscs(discs: Disc[]) {
             const activeDiscs = discs.filter(d => d.alive)
             while (this.discGroup.children.length < activeDiscs.length) {
-                this.discGroup.add(new THREE.Mesh(this.discGeo, this.discMat))
+                this.discGroup.add(raw(new THREE.Mesh(this.discGeo, this.discMat)))
             }
             this.discGroup.children.forEach((child, index) => {
                 const disc = activeDiscs[index]
@@ -731,7 +735,7 @@ export default Vue.extend({
                     depthWrite: false,
                     depthTest: false,
                 })
-                const line = new THREE.Line(geometry, material)
+                const line = raw(new THREE.Line(geometry, material))
                 // Ray endpoints are mutated in place, so stale bounds can incorrectly cull them.
                 line.frustumCulled = false
                 line.renderOrder = 12

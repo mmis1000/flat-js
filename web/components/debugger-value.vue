@@ -15,17 +15,17 @@
         </span>
         <div v-if="expand" class="properties">
             <div v-for="entry of childEntries" :key="JSON.stringify([entry[0], entry[1]])" :key1="JSON.stringify([entry[0], entry[1]])">
-                <debugger-value :isError="entry[0] === EntryType.stringKeyError || entry[0] === EntryType.symbolKeyError" :refreshKey="refreshKey" :displayKey="entry[1]" :value="entry[2]" />
+                <debugger-value :isError="entry[0] === EntryType.stringKeyError || entry[0] === EntryType.symbolKeyError" :refreshKey="refreshKey" :displayKey="String(entry[1])" :value="entry[2]" />
             </div>
         </div>
     </div>
 </template>
 
 <script lang="ts">
-import Vue from 'vue'
+import { defineComponent } from 'vue'
 import { getScopeDebugEntries, isRuntimeInternalKey } from '../../src/runtime'
 
-enum EntryType {
+export enum EntryType {
     stringKeyProp,
     stringKeyGetSet,
     stringKeyError,
@@ -35,7 +35,7 @@ enum EntryType {
     prototype
 }
 
-export default Vue.extend({
+export default defineComponent({
     name: 'DebuggerValue',
     props: {
         initialExpand: {
