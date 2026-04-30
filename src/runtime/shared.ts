@@ -188,6 +188,8 @@ interface FunctionFrame extends BaseFrame {
     [Fields.type]: FrameType.Function
     [Fields.return]: number,
     [Fields.invokeType]: InvokeType
+    [Fields.function]: unknown
+    [Fields.name]: string
 }
 
 interface TryFrame extends BaseFrame {

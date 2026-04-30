@@ -85,6 +85,17 @@ export default Vue.extend({
                     }))
                 ]
             )
+        },
+        revealHighlight () {
+            const highlight = this.highlights[0]
+            if (!highlight) {
+                return
+            }
+            const [r1, c1, r2, c2] = highlight
+            this.editor.revealRangeInCenterIfOutsideViewport(
+                new monaco.Range(r1, c1, r2, c2),
+                monaco.editor.ScrollType.Immediate
+            )
         }
     },
     mounted () {

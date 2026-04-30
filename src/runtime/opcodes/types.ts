@@ -12,6 +12,8 @@ import type {
 
 export const BREAK_COMMAND = Symbol()
 
+export type DebugCallback = (ptr?: number) => void
+
 export type OpcodeHandlerResult = Result | typeof BREAK_COMMAND | void
 
 export const enum OpcodeContextField {
@@ -87,7 +89,7 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.peak]<T>(arr: T[], offset?: number): T
     [OpcodeContextField.popCurrentFrameStack]<T = unknown>(): T
     [OpcodeContextField.pushCurrentFrameStack](arg: any): number
-    [OpcodeContextField.getDebugCallback](): null | (() => void)
+    [OpcodeContextField.getDebugCallback](): null | DebugCallback
 
     [OpcodeContextField.setScopeDebugPtr](scopePtr: number, scope: Scope): void
     [OpcodeContextField.rethrowNativeErrorInRealm](error: unknown, vmGlobal: any): never

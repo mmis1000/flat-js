@@ -2,9 +2,18 @@ import * as ts from 'typescript'
 
 import { OpCode, SpecialVariable, StatementFlag } from '../../shared'
 import { generateBindingInitialization } from '../binding-patterns'
+import { generateFunctionDefinition } from './functions'
 import { generateEnterScope, generateLeaveScope, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
+
+function generateNamedInitializer(initializer: ts.Expression, name: string, ctx: CodegenContext): Segment | undefined {
+    const rawInitializer = ctx.extractQuote(initializer)
+
+    if (ts.isArrowFunction(rawInitializer)) {
+        return generateFunctionDefinition(rawInitializer, name)
+    }
+}
 
 export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     switch (node.kind) {
@@ -60,13 +69,19 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
             const staticAccess = ctx.tryResolveStaticAccess(declaration.name, declaration.name.text)
 
             if (declaration.initializer) {
+                const initializer = generateNamedInitializer(
+                    declaration.initializer,
+                    declaration.name.text,
+                    ctx
+                ) ?? ctx.generate(declaration.initializer, flag)
+
                 if (staticAccess) {
-                    ops.push(...ctx.generate(declaration.initializer, flag))
+                    ops.push(...initializer)
                     ops.push(...ctx.generateStaticAccessOps(staticAccess))
                     ops.push(op(OpCode.SetInitializedStatic))
                 } else {
                     ops.push(...ctx.generateLeft(declaration.name, flag))
-                    ops.push(...ctx.generate(declaration.initializer, flag))
+                    ops.push(...initializer)
                     ops.push(op(OpCode.SetInitialized))
                 }
                 ops.push(op(OpCode.Pop))

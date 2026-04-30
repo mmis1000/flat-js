@@ -179,7 +179,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
         case OpCode.Debugger: {
             const debugFn = ctx[OpcodeContextField.getDebugCallback]()
             if (debugFn) {
-                debugFn()
+                debugFn(ctx[OpcodeContextField.commandPtr])
             } else {
                 debugger
             }

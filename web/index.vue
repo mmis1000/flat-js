@@ -32,7 +32,14 @@
                 </button>
             </div>
             <div v-show="!debugPaneCollapsed" class="pane-content">
-                <debugger :refreshKey="refreshKey" :stack-container="stackContainer" :debug-info="debugInfo" />
+                <debugger
+                    :refreshKey="refreshKey"
+                    :stack-container="stackContainer"
+                    :debug-info="debugInfo"
+                    :selected-frame-index="selectedDebugFrameIndex"
+                    :disabled-program-sections="disabledDebugProgramSections"
+                    @select-frame="selectDebugFrame"
+                />
             </div>
         </div>
         <div class="area-code pane">
@@ -81,6 +88,7 @@
                 </div>
             </div>
             <monaco
+                ref="editor"
                 class="pane-content"
                 v-model="text"
                 :readonly="state !== 'idle'"
@@ -225,6 +233,7 @@ import { DebugInfo } from '../src/compiler'
 import { createSimulationSession, Sim, SimulationRunner, StageMode, TICKS_PER_SECOND } from './game/sim'
 import { CODE_SNIPPETS, CodeSnippet } from './game/code-snippets'
 import { createTickWaiter } from './game/tick-waiter'
+import { getLogicalDebugFrames, getSelectedDebugFrameSourcePointer } from './debug-stack'
 
 function emptyDebugInfo(): DebugInfo {
     return {
@@ -364,6 +373,8 @@ export default Vue.extend({
             refreshKey: Math.random(),
             debugInfo: emptyDebugInfo(),
             highlights: <[number, number, number, number][]>[],
+            selectedDebugFrameIndex: null as number | null,
+            debugPausePtr: null as number | null,
             breakpointLines: [] as number[],
             sim: null as Sim | null,
             simRunner: null as SimulationRunner | null,
@@ -392,6 +403,9 @@ export default Vue.extend({
     computed: {
         snippetList(): CodeSnippet[] {
             return CODE_SNIPPETS
+        },
+        disabledDebugProgramSections(): ReadonlySet<number[]> {
+            return hostPolyfillProgramSet
         },
         avgTicksLabel(): string {
             const h = this.scoreHistory
@@ -440,6 +454,15 @@ export default Vue.extend({
                 }
             }
         },
+        getSourceMapForProgramPtr(programSection: number[] | undefined, ptr: number): [number, number, number, number] | undefined {
+            if (programSection === this.program) {
+                return this.debugInfo.sourceMap[ptr]
+            }
+            if (programSection && hostPolyfillProgramSet.has(programSection)) {
+                return undefined
+            }
+            return undefined
+        },
         /** `Fields.ptr` indexes the active frame's `programSection`; user code and host polyfills use different program buffers and source maps. */
         getSourceMapAtPtr(execution: ReturnType<typeof getExecution> | null): [number, number, number, number] | undefined {
             if (!execution) {
@@ -452,13 +475,21 @@ export default Vue.extend({
             const top = stack[stack.length - 1]
             const prog = top[Fields.programSection]
             const ptr = execution[Fields.ptr]
-            if (prog === this.program) {
-                return this.debugInfo.sourceMap[ptr]
-            }
-            if (hostPolyfillProgramSet.has(prog)) {
+            return this.getSourceMapForProgramPtr(prog, ptr)
+        },
+        getSelectedSourceMapAtPtr(execution: ReturnType<typeof getExecution> | null): [number, number, number, number] | undefined {
+            if (!execution) {
                 return undefined
             }
-            return undefined
+            const pointer = getSelectedDebugFrameSourcePointer(
+                execution[Fields.stack],
+                this.selectedDebugFrameIndex,
+                this.debugPausePtr ?? execution[Fields.ptr],
+                this.disabledDebugProgramSections
+            )
+            return pointer
+                ? this.getSourceMapForProgramPtr(pointer.programSection, pointer.ptr)
+                : undefined
         },
         getInternalsAtPtr(execution: ReturnType<typeof getExecution> | null): boolean {
             if (!execution) {
@@ -516,6 +547,8 @@ export default Vue.extend({
             this.program = []
             this.debugInfo = emptyDebugInfo()
             this.vmHostRedirects = null
+            this.selectedDebugFrameIndex = null
+            this.debugPausePtr = null
             this.stackContainer = { stack: [] as Stack }
             this.highlights = []
         },
@@ -524,6 +557,46 @@ export default Vue.extend({
             this.sim = null
             this.simRunner = null
         },
+        syncSelectedDebugFrame(stack: Stack) {
+            if (this.selectedDebugFrameIndex == null) {
+                return
+            }
+            const frames = getLogicalDebugFrames(stack, this.disabledDebugProgramSections)
+            if (
+                this.selectedDebugFrameIndex <= 0
+                || this.selectedDebugFrameIndex >= frames.length
+                || !frames[this.selectedDebugFrameIndex].selectable
+            ) {
+                this.selectedDebugFrameIndex = null
+            }
+        },
+        updateDebugStackContainer(execution: ReturnType<typeof getExecution>) {
+            const s = execution[Fields.stack]
+            this.syncSelectedDebugFrame(s)
+            this.stackContainer = { get stack () { return s } }
+        },
+        applyDebugHighlight(execution: ReturnType<typeof getExecution>) {
+            const pos = this.getSelectedSourceMapAtPtr(execution)
+            if (pos) {
+                const [r1, c1, r2, c2] = pos
+                this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
+            } else {
+                this.highlights = []
+            }
+        },
+        selectDebugFrame(index: number | null) {
+            this.selectedDebugFrameIndex = index
+            this.flushDebugHighlightSync()
+            this.$nextTick(() => {
+                const editor = this.$refs.editor as Vue & { revealHighlight?: () => void }
+                editor.revealHighlight?.()
+            })
+        },
+        getDebugPauseCallback() {
+            return (ptr?: number) => {
+                this.pause(typeof ptr === 'number' ? ptr : null)
+            }
+        },
         /** At most one Monaco highlight + debugger refresh per animation frame. */
         scheduleDebugHighlight() {
             if (this.highlightRafId) return
@@ -531,39 +604,25 @@ export default Vue.extend({
                 this.highlightRafId = 0
                 const execution = this.execution
                 if (!execution || this.state === 'idle') return
-                const pos = this.getSourceMapAtPtr(execution)
-                if (pos) {
-                    const [r1, c1, r2, c2] = pos
-                    this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
-                }
+                this.updateDebugStackContainer(execution)
+                this.applyDebugHighlight(execution)
                 this.refreshKey = Math.random()
-                const s = execution[Fields.stack]
-                this.stackContainer = { get stack () { return s } }
             })
         },
         flushDebugHighlightSync() {
             this.cancelDebugHighlightRaf()
             const execution = this.execution
             if (!execution) return
-            const pos = this.getSourceMapAtPtr(execution)
-            if (pos) {
-                const [r1, c1, r2, c2] = pos
-                this.highlights = [[r1 + 1, c1 + 1, r2 + 1, c2 + 1]]
-            }
+            this.updateDebugStackContainer(execution)
+            this.applyDebugHighlight(execution)
             this.refreshKey = Math.random()
-            const s = execution[Fields.stack]
-            this.stackContainer = { get stack () { return s } }
         },
         stepExecution(stepIn = false) {
             const execution = this.execution
             if (!execution) return
 
-            let stack = execution[Fields.stack]
-            this.stackContainer = {
-                get stack () {
-                    return stack
-                }
-            }
+            this.debugPausePtr = null
+            this.updateDebugStackContainer(execution)
 
             let result: Result
 
@@ -665,6 +724,7 @@ export default Vue.extend({
         },
         async runExecution() {
             const resumedFromPause = this.state === 'paused'
+            this.debugPausePtr = null
             this.state = 'play'
             const execution = this.execution
             const sim = this.sim
@@ -674,12 +734,7 @@ export default Vue.extend({
                 return
             }
 
-            let stack = execution[Fields.stack]
-            this.stackContainer = {
-                get stack () {
-                    return stack
-                }
-            }
+            this.updateDebugStackContainer(execution)
 
             let result: Result = { [Fields.done]: false } as any
 
@@ -797,6 +852,8 @@ export default Vue.extend({
         },
         setupExecution(): boolean {
             resetVmMathRandom()
+            this.selectedDebugFrameIndex = null
+            this.debugPausePtr = null
             const clear = () => { this.result = '' }
             const print = (val: any) => {
                 this.result += JSON.stringify(val, undefined, 2) + '\n'
@@ -848,7 +905,7 @@ export default Vue.extend({
 
             this.debugInfo = debugInfo
             this.program = programData
-            const hostRedirects = createVmHostRedirects(compile, () => () => this.pause(), fakeGlobalThis)
+            const hostRedirects = createVmHostRedirects(compile, () => this.getDebugPauseCallback(), fakeGlobalThis)
             this.vmHostRedirects = hostRedirects.redirects
 
             const [scanPolyProgram] = compile(`function vmScanPoly(rays) {
@@ -868,7 +925,7 @@ vmScanPoly`, { evalMode: true })
                 [],
                 compile,
                 hostRedirects.redirects,
-                () => () => this.pause()
+                () => this.getDebugPauseCallback()
             )
 
             const [lastMovePolyProgram] = compile(`function vmLastMovePoly() {
@@ -888,7 +945,7 @@ vmLastMovePoly`, { evalMode: true })
                 [],
                 compile,
                 hostRedirects.redirects,
-                () => () => this.pause()
+                () => this.getDebugPauseCallback()
             )
 
             this.execution = getExecution(
@@ -898,7 +955,7 @@ vmLastMovePoly`, { evalMode: true })
                 [{ print, clear, rotate, move, lastMoveDistance, shoot, scan, won, __proto__: null }],
                 undefined,
                 [],
-                () => () => this.pause(),
+                () => this.getDebugPauseCallback(),
                 compile,
                 hostRedirects.redirects
             )
@@ -922,7 +979,8 @@ vmLastMovePoly`, { evalMode: true })
             if (!this.setupExecution()) return
             this.pause()
         },
-        pause() {
+        pause(debugPtr: number | null = null) {
+            this.debugPausePtr = debugPtr
             this.state = 'paused'
             this.flushDebugHighlightSync()
         },
@@ -966,7 +1024,7 @@ vmLastMovePoly`, { evalMode: true })
                     [],
                     compile,
                     redirects,
-                    () => () => this.pause()
+                    () => this.getDebugPauseCallback()
                 )
                 this.result += result + '\n'
             } catch (err) {

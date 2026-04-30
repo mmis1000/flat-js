@@ -47,7 +47,7 @@ import { handleClassOpcode } from "./opcodes/class"
 import { handleControlOpcode } from "./opcodes/control"
 import { handleFunctionOpcode } from "./opcodes/function"
 import { handleGeneratorOpcode } from "./opcodes/generator"
-import { BREAK_COMMAND, OpcodeContextField, type RuntimeOpcodeContext } from "./opcodes/types"
+import { BREAK_COMMAND, OpcodeContextField, type DebugCallback, type RuntimeOpcodeContext } from "./opcodes/types"
 import { handleValueOpcode } from "./opcodes/value"
 
 export const getExecution = (
@@ -62,7 +62,7 @@ export const getExecution = (
         [Fields.self]: undefined
     },
     args: any[] = [],
-    getDebugFunction: () => null | (() => void) = () => null,
+    getDebugFunction: () => null | DebugCallback = () => null,
     compileFunction: typeof import('../compiler').compile = (...args: any[]) => { throw new Error('not supported') },
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
     variableEnvironmentScope: Scope | null = null
@@ -82,6 +82,8 @@ export const getExecution = (
             args.length
         ],
         [Fields.invokeType]: invokeData[Fields.type],
+        [Fields.function]: invokeData[Fields.function],
+        [Fields.name]: invokeData[Fields.name],
         [Fields.return]: -1,
         [Fields.programSection]: currentProgram,
         [Fields.globalThis]: globalThis,
@@ -1690,7 +1692,7 @@ const run_ = (
     scopes: Scope[],
     invokeData: InvokeParam,
     args: any[],
-    getDebugFunction: () => null | (() => void),
+    getDebugFunction: () => null | DebugCallback,
     evalResultInstead = false,
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
@@ -1734,7 +1736,7 @@ export const run = (
     args: any[] = [],
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
-    getDebugFunction: () => null | (() => void) = () => null,
+    getDebugFunction: () => null | DebugCallback = () => null,
     variableEnvironmentScope: Scope | null = null
 ) => {
     return run_(

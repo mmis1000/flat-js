@@ -673,6 +673,15 @@ test('object method and accessor names use property keys', () => {
     `)).toEqual(['id', 'gen', 'get value', 'set value', '[desc]', 'get '])
 })
 
+test('arrow binding initializers infer names from binding identifiers', () => {
+    expect(compileAndRun(`
+        const a = () => {}
+        const b = () => {}
+
+        [a.name, b.name]
+    `)).toEqual(['a', 'b'])
+})
+
 test('update expressions use ToNumeric and preserve prefix/postfix results', () => {
     expect(compileAndRun(`
         (() => {

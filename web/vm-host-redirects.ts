@@ -250,7 +250,7 @@ export type VmHostRedirectsBundle = {
  */
 export function createVmHostRedirects(
     compileFn: typeof compile,
-    getDebugFunction: () => null | (() => void),
+    getDebugFunction: () => null | ((ptr?: number) => void),
     globalThisForPolyfill: object
 ): VmHostRedirectsBundle {
     const list = compileHostPolyfills(compileFn)
