@@ -62,7 +62,8 @@ export const resolveDebugFrameIndex = (
 
 export const getLogicalDebugFrames = (
     stack: Stack,
-    disabledProgramSections: ReadonlySet<number[]> = new Set()
+    disabledProgramSections: ReadonlySet<number[]> = new Set(),
+    selectableProgramSections?: ReadonlySet<number[]>
 ): LogicalDebugFrame[] => {
     const oldestFirst: Omit<LogicalDebugFrame, 'parkedPtr' | 'functionName' | 'active' | 'selectable'>[] = []
     let current: Omit<LogicalDebugFrame, 'parkedPtr' | 'functionName' | 'active' | 'selectable'> | null = null
@@ -86,7 +87,11 @@ export const getLogicalDebugFrames = (
     const withDebugInfo = oldestFirst.map((frame, index) => ({
         ...frame,
         active: index === oldestFirst.length - 1,
-        selectable: !disabledProgramSections.has(frame.functionFrame[Fields.programSection]),
+        selectable: !disabledProgramSections.has(frame.functionFrame[Fields.programSection])
+            && (
+                selectableProgramSections == null
+                || selectableProgramSections.has(frame.functionFrame[Fields.programSection])
+            ),
         functionName: getFunctionFrameName(frame.functionFrame),
         parkedPtr: index === oldestFirst.length - 1
             ? undefined
@@ -99,22 +104,57 @@ export const getSelectedDebugFrameSourcePointer = (
     stack: Stack,
     selectedFrameIndex: number | null,
     currentPtr: number,
-    disabledProgramSections: ReadonlySet<number[]> = new Set()
+    disabledProgramSections: ReadonlySet<number[]> = new Set(),
+    selectableProgramSections?: ReadonlySet<number[]>
 ): DebugFrameSourcePointer | undefined => {
-    const frames = getLogicalDebugFrames(stack, disabledProgramSections)
+    return getSelectedDebugFrameSourcePointers(
+        stack,
+        selectedFrameIndex,
+        currentPtr,
+        disabledProgramSections,
+        selectableProgramSections
+    )[0]
+}
+
+export const getSelectedDebugFrameSourcePointers = (
+    stack: Stack,
+    selectedFrameIndex: number | null,
+    currentPtr: number,
+    disabledProgramSections: ReadonlySet<number[]> = new Set(),
+    selectableProgramSections?: ReadonlySet<number[]>
+): DebugFrameSourcePointer[] => {
+    const frames = getLogicalDebugFrames(stack, disabledProgramSections, selectableProgramSections)
     const index = resolveDebugFrameIndex(frames, selectedFrameIndex)
     if (index < 0) {
-        return undefined
+        return []
     }
 
+    const pointers: DebugFrameSourcePointer[] = []
     const frame = frames[index]
     const ptr = frame.active ? currentPtr : frame.parkedPtr
-    if (ptr == null || ptr < 0) {
-        return undefined
+    if (ptr != null && ptr >= 0) {
+        pointers.push({
+            programSection: frame.scopeFrame[Fields.programSection],
+            ptr,
+        })
     }
 
-    return {
-        programSection: frame.scopeFrame[Fields.programSection],
-        ptr,
+    for (let callerIndex = index + 1; callerIndex < frames.length; callerIndex++) {
+        const caller = frames[callerIndex]
+        if (!caller.selectable || caller.parkedPtr == null || caller.parkedPtr < 0) {
+            continue
+        }
+        if (pointers.some(pointer =>
+            pointer.programSection === caller.scopeFrame[Fields.programSection]
+            && pointer.ptr === caller.parkedPtr
+        )) {
+            continue
+        }
+        pointers.push({
+            programSection: caller.scopeFrame[Fields.programSection],
+            ptr: caller.parkedPtr,
+        })
     }
+
+    return pointers
 }

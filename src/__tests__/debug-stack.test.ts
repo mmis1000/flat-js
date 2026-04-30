@@ -1,6 +1,10 @@
 import { compile } from '../compiler'
 import { Fields, getExecution, getScopeDebugEntries, getScopeDebugPtr, run } from '../runtime'
-import { getLogicalDebugFrames, getSelectedDebugFrameSourcePointer } from '../../web/debug-stack'
+import {
+    getLogicalDebugFrames,
+    getSelectedDebugFrameSourcePointer,
+    getSelectedDebugFrameSourcePointers,
+} from '../../web/debug-stack'
 
 type SourceRange = [number, number, number, number]
 
@@ -92,6 +96,159 @@ caller(4)
     expect(callerPointer!.programSection).toBe(program)
     expect(callerPointer!.ptr).toBe(frames[0].functionFrame[Fields.return] - 1)
     expect(readRange(source, info.sourceMap[callerPointer!.ptr])).toContain('callee(blockLocal)')
+})
+
+test('source pointer candidates select topmost user frame instead of VM helper frame', () => {
+    const helperSource = `
+function vmScanPoly(rays) {
+    debugger
+    return rays
+}
+vmScanPoly
+`
+    const [helperProgram, helperInfo] = compile(helperSource, { range: true, evalMode: true })
+
+    const source = `
+function caller() {
+    return scan(9)
+}
+caller()
+`
+    const [program, info] = compile(source, { range: true })
+    let reachedDebugger = false
+    let debuggerPtr: number | undefined
+    const getDebugCallback = () => (ptr?: number) => {
+        reachedDebugger = true
+        debuggerPtr = ptr
+    }
+    const scan = run(
+        helperProgram,
+        0,
+        globalThis,
+        [{}],
+        undefined,
+        [],
+        compile,
+        undefined,
+        getDebugCallback
+    ) as Function
+    const execution = getExecution(
+        program,
+        0,
+        globalThis,
+        [{ scan }],
+        undefined,
+        [],
+        getDebugCallback,
+        compile
+    )
+
+    while (!reachedDebugger) {
+        const result = execution[Fields.step](true)
+        if (result[Fields.done]) {
+            throw new Error('debugger statement was not reached')
+        }
+    }
+
+    const selectableProgramSections = new Set([program])
+    const frames = getLogicalDebugFrames(
+        execution[Fields.stack],
+        new Set(),
+        selectableProgramSections
+    )
+    expect(frames[0].functionName).toBe('vmScanPoly')
+    expect(frames[0].selectable).toBe(false)
+    expect(frames[1].functionName).toBe('caller')
+    expect(frames[1].selectable).toBe(true)
+
+    const pointers = getSelectedDebugFrameSourcePointers(
+        execution[Fields.stack],
+        null,
+        debuggerPtr!,
+        new Set(),
+        selectableProgramSections
+    )
+
+    expect(pointers.length).toBeGreaterThanOrEqual(1)
+    expect(pointers[0]).toEqual({
+        programSection: program,
+        ptr: frames[0].functionFrame[Fields.return] - 1,
+    })
+    expect(readRange(source, info.sourceMap[pointers[0].ptr])).toContain('scan(9)')
+    expect(readRange(helperSource, helperInfo.sourceMap[debuggerPtr!])).toContain('debugger')
+})
+
+test('source pointer candidates fall back from VM helper frame to top-level call site', () => {
+    const helperSource = `
+function vmScanPoly(rays) {
+    debugger
+    return rays
+}
+vmScanPoly
+`
+    const [helperProgram] = compile(helperSource, { range: true, evalMode: true })
+
+    const source = `
+const rays = 9
+scan(rays)
+`
+    const [program, info] = compile(source, { range: true })
+    let reachedDebugger = false
+    let debuggerPtr: number | undefined
+    const getDebugCallback = () => (ptr?: number) => {
+        reachedDebugger = true
+        debuggerPtr = ptr
+    }
+    const scan = run(
+        helperProgram,
+        0,
+        globalThis,
+        [{}],
+        undefined,
+        [],
+        compile,
+        undefined,
+        getDebugCallback
+    ) as Function
+    const execution = getExecution(
+        program,
+        0,
+        globalThis,
+        [{ scan }],
+        undefined,
+        [],
+        getDebugCallback,
+        compile
+    )
+
+    while (!reachedDebugger) {
+        const result = execution[Fields.step](true)
+        if (result[Fields.done]) {
+            throw new Error('debugger statement was not reached')
+        }
+    }
+
+    const selectableProgramSections = new Set([program])
+    const frames = getLogicalDebugFrames(
+        execution[Fields.stack],
+        new Set(),
+        selectableProgramSections
+    )
+    expect(frames[0].functionName).toBe('vmScanPoly')
+    expect(frames[0].selectable).toBe(false)
+    expect(frames[1].functionName).toBe('')
+    expect(frames[1].selectable).toBe(true)
+
+    const pointers = getSelectedDebugFrameSourcePointers(
+        execution[Fields.stack],
+        null,
+        debuggerPtr!,
+        new Set(),
+        selectableProgramSections
+    )
+
+    expect(pointers[0].programSection).toBe(program)
+    expect(readRange(source, info.sourceMap[pointers[0].ptr])).toContain('scan(rays)')
 })
 
 test('logical debug frames show injected polyfill frames without allowing selection', () => {

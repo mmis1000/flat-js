@@ -38,6 +38,7 @@
                     :debug-info="debugInfo"
                     :selected-frame-index="selectedDebugFrameIndex"
                     :disabled-program-sections="disabledDebugProgramSections"
+                    :selectable-program-sections="selectableDebugProgramSections"
                     @select-frame="selectDebugFrame"
                 />
             </div>
@@ -233,7 +234,7 @@ import { DebugInfo } from '../src/compiler'
 import { createSimulationSession, Sim, SimulationRunner, StageMode, TICKS_PER_SECOND } from './game/sim'
 import { CODE_SNIPPETS, CodeSnippet } from './game/code-snippets'
 import { createTickWaiter } from './game/tick-waiter'
-import { getLogicalDebugFrames, getSelectedDebugFrameSourcePointer } from './debug-stack'
+import { getLogicalDebugFrames, getSelectedDebugFrameSourcePointers, resolveDebugFrameIndex } from './debug-stack'
 
 function emptyDebugInfo(): DebugInfo {
     return {
@@ -407,6 +408,9 @@ export default defineComponent({
         disabledDebugProgramSections(): ReadonlySet<number[]> {
             return hostPolyfillProgramSet
         },
+        selectableDebugProgramSections(): ReadonlySet<number[]> {
+            return new Set([this.program])
+        },
         avgTicksLabel(): string {
             const h = this.scoreHistory
             if (h.length === 0) return '—'
@@ -497,6 +501,17 @@ export default defineComponent({
             }
             return null
         },
+        findPreviousVisibleSourcePtr(programSection: number[] | undefined, ptr: number): number | null {
+            if (programSection !== this.program) {
+                return null
+            }
+            for (let index = Math.min(ptr, this.debugInfo.sourceMap.length - 1); index >= 0; index--) {
+                if (this.debugInfo.sourceMap[index] && !this.debugInfo.internals[index]) {
+                    return index
+                }
+            }
+            return null
+        },
         getNextVisibleSourcePtr(execution: ReturnType<typeof getExecution>): number | null {
             const stack = execution[Fields.stack]
             if (!stack.length) {
@@ -539,18 +554,36 @@ export default defineComponent({
             if (!execution) {
                 return undefined
             }
-            const pointer = getSelectedDebugFrameSourcePointer(
+            const frames = getLogicalDebugFrames(
+                execution[Fields.stack],
+                this.disabledDebugProgramSections,
+                this.selectableDebugProgramSections
+            )
+            const selectedFrame = frames[resolveDebugFrameIndex(frames, this.selectedDebugFrameIndex)]
+            const allowParkedFallback = !!selectedFrame && !selectedFrame.active
+            const pointers = getSelectedDebugFrameSourcePointers(
                 execution[Fields.stack],
                 this.selectedDebugFrameIndex,
                 this.debugPausePtr ?? execution[Fields.ptr],
-                this.disabledDebugProgramSections
+                this.disabledDebugProgramSections,
+                this.selectableDebugProgramSections
             )
-            if (pointer && this.isSourcePointerInternal(pointer.programSection, pointer.ptr)) {
-                return undefined
+            for (const pointer of pointers) {
+                const pos = this.getSourceMapForProgramPtr(pointer.programSection, pointer.ptr)
+                if (pos && !this.isSourcePointerInternal(pointer.programSection, pointer.ptr)) {
+                    return pos
+                }
+                if (allowParkedFallback) {
+                    const parkedPtr = this.findPreviousVisibleSourcePtr(pointer.programSection, pointer.ptr)
+                    const parkedPos = parkedPtr == null
+                        ? undefined
+                        : this.getSourceMapForProgramPtr(pointer.programSection, parkedPtr)
+                    if (parkedPos) {
+                        return parkedPos
+                    }
+                }
             }
-            return pointer
-                ? this.getSourceMapForProgramPtr(pointer.programSection, pointer.ptr)
-                : undefined
+            return undefined
         },
         getInternalsAtPtr(execution: ReturnType<typeof getExecution> | null): boolean {
             if (!execution) {
@@ -622,7 +655,11 @@ export default defineComponent({
             if (this.selectedDebugFrameIndex == null) {
                 return
             }
-            const frames = getLogicalDebugFrames(stack, this.disabledDebugProgramSections)
+            const frames = getLogicalDebugFrames(
+                stack,
+                this.disabledDebugProgramSections,
+                this.selectableDebugProgramSections
+            )
             if (
                 this.selectedDebugFrameIndex <= 0
                 || this.selectedDebugFrameIndex >= frames.length

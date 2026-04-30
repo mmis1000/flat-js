@@ -71,6 +71,10 @@ export default defineComponent({
                 return new Set()
             }
         },
+        selectableProgramSections: {
+            type: Object as () => ReadonlySet<number[]> | undefined,
+            default: undefined
+        },
         debugInfo: {
             type: Object as () => DebugInfo,
             default (): DebugInfo {
@@ -90,7 +94,11 @@ export default defineComponent({
     },
     computed: {
         stackFrames (): LogicalDebugFrame[] {
-            return getLogicalDebugFrames(this.stackContainer.stack, this.disabledProgramSections)
+            return getLogicalDebugFrames(
+                this.stackContainer.stack,
+                this.disabledProgramSections,
+                this.selectableProgramSections
+            )
         },
         activeFrameIndex (): number {
             return resolveDebugFrameIndex(this.stackFrames, this.selectedFrameIndex)
