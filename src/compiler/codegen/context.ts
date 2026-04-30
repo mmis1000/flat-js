@@ -80,8 +80,8 @@ export function createCodegenContext(
     }
 
     function extractQuote(node: ts.Node): ts.Node {
-        if (ts.isParenthesizedExpression(node)) {
-            return node.expression
+        while (ts.isParenthesizedExpression(node)) {
+            node = node.expression
         }
         return node
     }

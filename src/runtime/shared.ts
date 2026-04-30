@@ -58,6 +58,54 @@ const REGEXP = RegExp
 /** Intrinsic `Function` from this realm; used to detect `Function(...)` / `new Function(...)` like `eval`. */
 const HOST_FUNCTION = Object.getPrototypeOf(function () {}).constructor
 
+const isPrimitive = (value: unknown) =>
+    value === null || (typeof value !== 'object' && typeof value !== 'function')
+
+const toPrimitive = (value: unknown, hint: 'number' | 'string') => {
+    if (isPrimitive(value)) {
+        return value
+    }
+
+    const object = value as Record<PropertyKey, any>
+    const exoticToPrim = object[Symbol.toPrimitive]
+    if (exoticToPrim !== undefined) {
+        if (typeof exoticToPrim !== 'function') {
+            throw new TypeError('@@toPrimitive must be a function')
+        }
+        const result = exoticToPrim.call(value, hint)
+        if (isPrimitive(result)) {
+            return result
+        }
+        throw new TypeError('Cannot convert object to primitive value')
+    }
+
+    const methodNames = hint === 'string'
+        ? ['toString', 'valueOf']
+        : ['valueOf', 'toString']
+
+    for (const methodName of methodNames) {
+        const method = object[methodName]
+        if (typeof method === 'function') {
+            const result = method.call(value)
+            if (isPrimitive(result)) {
+                return result
+            }
+        }
+    }
+
+    throw new TypeError('Cannot convert object to primitive value')
+}
+
+const toPropertyKey = (value: unknown): PropertyKey => {
+    const key = toPrimitive(value, 'string')
+    return typeof key === 'symbol' ? key : String(key)
+}
+
+const toNumeric = (value: unknown): number | bigint => {
+    const numeric = toPrimitive(value, 'number')
+    return typeof numeric === 'bigint' ? numeric : Number(numeric)
+}
+
 export const enum FrameType {
     Function,
     Try
@@ -437,6 +485,8 @@ export {
     TEXT_DADA_MASK,
     IDENTIFIER_REFERENCE_FRAME,
     IDENTIFIER_REFERENCE_SCOPE,
+    toNumeric,
+    toPropertyKey,
 }
 
 export type {

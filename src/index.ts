@@ -24,8 +24,22 @@ const pinGlobalErrorConstructors = (global: any) => {
     }
 }
 
+const pinGlobalValueProperties = (global: any) => {
+    for (const name of ['Infinity', 'NaN', 'undefined']) {
+        if (Reflect.getOwnPropertyDescriptor(global, name) !== undefined) {
+            continue
+        }
+
+        const descriptor = Reflect.getOwnPropertyDescriptor(globalThis, name)
+        if (descriptor !== undefined) {
+            Reflect.defineProperty(global, name, descriptor)
+        }
+    }
+}
+
 export function compileAndRun(src: string, global: any = globalThis) {
     pinGlobalErrorConstructors(global)
+    pinGlobalValueProperties(global)
     const [programData] = compile(src, { evalMode: true })
     return run(programData, 0, global, [], undefined, [], compile)
 }

@@ -16,6 +16,7 @@ import {
     isSmallNumber,
     is_a_constant,
     is_not_defined,
+    toPropertyKey,
 } from "../shared"
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
@@ -25,6 +26,12 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             return null
         }
         return (value as { [IDENTIFIER_REFERENCE_SCOPE]: Scope | null })[IDENTIFIER_REFERENCE_SCOPE]
+    }
+    const toReferencePropertyKey = (target: unknown, name: unknown) => {
+        if (!environments.has(target) && target == null) {
+            throw new TypeError('Cannot convert undefined or null to object')
+        }
+        return toPropertyKey(name)
     }
 
     switch (command) {
@@ -95,7 +102,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.Set:
         case OpCode.SetKeepCtx: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<PropertyKey>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
 
             ctx[OpcodeContextField.setValue](target, name, value)
@@ -149,7 +156,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.BGreaterThanGreaterThanGreaterThanEqual: {
             const rightVal = ctx[OpcodeContextField.popCurrentFrameStack]()
             const leftValue = ctx[OpcodeContextField.popCurrentFrameStack]()
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<PropertyKey>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
             const exprs: Record<typeof command, (a: any, b: any) => any> = {
                 [OpCode.BPlusEqual]: (a, b) => a + b,
@@ -234,17 +241,18 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         }
             break
         case OpCode.Get: {
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]<PropertyKey>()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
             ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.getValue](target, name))
         }
             break
         case OpCode.GetKeepCtx: {
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
-            const value = ctx[OpcodeContextField.getValue](target, name)
+            const propertyKey = toReferencePropertyKey(target, name)
+            const value = ctx[OpcodeContextField.getValue](target, propertyKey)
             ctx[OpcodeContextField.pushCurrentFrameStack](target)
-            ctx[OpcodeContextField.pushCurrentFrameStack](name)
+            ctx[OpcodeContextField.pushCurrentFrameStack](propertyKey)
             ctx[OpcodeContextField.pushCurrentFrameStack](value)
         }
             break

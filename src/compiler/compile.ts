@@ -81,6 +81,37 @@ function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
     return false
 }
 
+function getStrictContext(node: ts.Node, inheritedStrict: boolean, withStrict: boolean): boolean {
+    if (inheritedStrict || withStrict) {
+        return true
+    }
+
+    if (ts.isClassLike(node)) {
+        return true
+    }
+
+    if (ts.isSourceFile(node)) {
+        return ts.isExternalModule(node) || hasUseStrictDirective(node.statements)
+    }
+
+    if (ts.isFunctionLike(node) && 'body' in node && node.body != null && ts.isBlock(node.body)) {
+        if (
+            ts.isMethodDeclaration(node)
+            || ts.isGetAccessorDeclaration(node)
+            || ts.isSetAccessorDeclaration(node)
+            || ts.isConstructorDeclaration(node)
+        ) {
+            return true
+        }
+
+        if (hasUseStrictDirective(node.body.statements)) {
+            return true
+        }
+    }
+
+    return false
+}
+
 const strictModeReservedWords = new Set([
     'implements',
     'interface',
@@ -360,39 +391,8 @@ function validateDestructuringSyntax(sourceNode: ts.SourceFile, withStrict: bool
             && parent.initializer === list
     }
 
-    const getStrictContext = (node: ts.Node, inheritedStrict: boolean) => {
-        if (inheritedStrict || withStrict) {
-            return true
-        }
-
-        if (ts.isClassLike(node)) {
-            return true
-        }
-
-        if (ts.isSourceFile(node)) {
-            return ts.isExternalModule(node) || hasUseStrictDirective(node.statements)
-        }
-
-        if (ts.isFunctionLike(node) && 'body' in node && node.body != null && ts.isBlock(node.body)) {
-            if (
-                ts.isMethodDeclaration(node)
-                || ts.isGetAccessorDeclaration(node)
-                || ts.isSetAccessorDeclaration(node)
-                || ts.isConstructorDeclaration(node)
-            ) {
-                return true
-            }
-
-            if (hasUseStrictDirective(node.body.statements)) {
-                return true
-            }
-        }
-
-        return false
-    }
-
     function visit(node: ts.Node, inheritedStrict: boolean) {
-        const strictContext = getStrictContext(node, inheritedStrict)
+        const strictContext = getStrictContext(node, inheritedStrict, withStrict)
 
         if (ts.isVariableDeclaration(node) && !ts.isIdentifier(node.name)) {
             validateBindingPattern(node.name, strictContext)
@@ -433,6 +433,62 @@ function validateDestructuringSyntax(sourceNode: ts.SourceFile, withStrict: bool
     visit(sourceNode, false)
 }
 
+function validateReferenceSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
+    const validateUpdateTarget = (target: ts.Expression, strictContext: boolean) => {
+        const rawTarget = unwrapParenthesizedExpression(target)
+
+        if (rawTarget.kind === ts.SyntaxKind.ThisKeyword) {
+            throwPatternSyntaxError('invalid update target')
+        }
+
+        if (ts.isMetaProperty(rawTarget)) {
+            throwPatternSyntaxError('invalid update target')
+        }
+
+        if (ts.isIdentifier(rawTarget)) {
+            if (strictContext && (rawTarget.text === 'eval' || rawTarget.text === 'arguments')) {
+                throwPatternSyntaxError(`invalid update target: ${rawTarget.text}`)
+            }
+            return
+        }
+
+        if (ts.isPropertyAccessExpression(rawTarget) || ts.isElementAccessExpression(rawTarget)) {
+            if (ts.isOptionalChain(rawTarget)) {
+                throwPatternSyntaxError('invalid update target')
+            }
+            return
+        }
+
+        throwPatternSyntaxError('invalid update target')
+    }
+
+    function visit(node: ts.Node, inheritedStrict: boolean) {
+        const strictContext = getStrictContext(node, inheritedStrict, withStrict)
+
+        if (ts.isDeleteExpression(node)) {
+            const expression = unwrapParenthesizedExpression(node.expression)
+            if (strictContext && ts.isIdentifier(expression)) {
+                throwPatternSyntaxError('delete of an unqualified identifier in strict mode')
+            }
+        }
+
+        if (
+            ts.isPrefixUnaryExpression(node)
+            && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)
+        ) {
+            validateUpdateTarget(node.operand, strictContext)
+        }
+
+        if (ts.isPostfixUnaryExpression(node)) {
+            validateUpdateTarget(node.operand, strictContext)
+        }
+
+        node.forEachChild((child) => visit(child, strictContext))
+    }
+
+    visit(sourceNode, false)
+}
+
 function getStaticPropertyName(name: ts.PropertyName): string | null {
     if (ts.isComputedPropertyName(name)) {
         return null
@@ -447,8 +503,42 @@ function getStaticPropertyName(name: ts.PropertyName): string | null {
 }
 
 function validateObjectLiteralSyntax(sourceNode: ts.SourceFile) {
+    const containsNode = (root: ts.Node, node: ts.Node) => {
+        let current: ts.Node | undefined = node
+        while (current != null) {
+            if (current === root) {
+                return true
+            }
+            current = current.parent
+        }
+        return false
+    }
+
+    const isInsideDestructuringAssignmentPattern = (node: ts.Node) => {
+        let current: ts.Node = node
+        while (current.parent != null) {
+            const parent = current.parent
+            if (
+                ts.isBinaryExpression(parent)
+                && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+                && containsNode(unwrapParenthesizedExpression(parent.left), node)
+            ) {
+                return true
+            }
+            if (
+                (ts.isForInStatement(parent) || ts.isForOfStatement(parent))
+                && !ts.isVariableDeclarationList(parent.initializer)
+                && containsNode(unwrapParenthesizedExpression(parent.initializer), node)
+            ) {
+                return true
+            }
+            current = parent
+        }
+        return false
+    }
+
     const visit = (node: ts.Node) => {
-        if (ts.isObjectLiteralExpression(node)) {
+        if (ts.isObjectLiteralExpression(node) && !isInsideDestructuringAssignmentPattern(node)) {
             let protoSetterCount = 0
             for (const property of node.properties) {
                 if (!ts.isPropertyAssignment(property)) {
@@ -491,6 +581,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
 
     validateSyntax(sourceNode, locationMap)
     validateObjectLiteralSyntax(sourceNode)
+    validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
 
     markParent(sourceNode, parentMap)

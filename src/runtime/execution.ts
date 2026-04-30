@@ -27,6 +27,7 @@ import {
     ResultDone,
     Scope,
     ScopeWithInternals,
+    StaticVariableStore,
     SCOPE_DEBUG_PTR,
     SCOPE_FLAGS,
     SCOPE_STATIC_SLOTS,
@@ -38,7 +39,8 @@ import {
     IDENTIFIER_REFERENCE_FRAME,
     IDENTIFIER_REFERENCE_SCOPE,
     IdentifierReference,
-    VariableFlags
+    VariableFlags,
+    toPropertyKey,
 } from "./shared"
 import { handleBasicOpcode } from "./opcodes/basic"
 import { handleClassOpcode } from "./opcodes/class"
@@ -240,13 +242,19 @@ export const getExecution = (
 
     const writeBindingValue = (scope: Scope, name: string, value: any) => {
         if (isWithScope(scope)) {
-            ;(getWithScopeObject(scope) as Record<string, any>)[name] = value
+            const success = Reflect.set(getWithScopeObject(scope), name, value)
+            if (!success && currentFrame[Fields.strict]) {
+                throw new TypeError(`Cannot assign to read only property '${name}'`)
+            }
             return value
         }
 
-        scope[name] = value
+        const success = Reflect.set(scope, name, value)
+        if (!success && currentFrame[Fields.strict]) {
+            throw new TypeError(`Cannot assign to read only property '${name}'`)
+        }
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
-        if (slotIndex !== undefined) {
+        if (success && slotIndex !== undefined) {
             getStaticVariableStore(scope).values[slotIndex] = value
         }
         return value
@@ -315,45 +323,59 @@ export const getExecution = (
 
     const deleteBinding = (scope: Scope, name: string) => {
         if (isWithScope(scope)) {
-            return delete (getWithScopeObject(scope) as Record<string, any>)[name]
+            return Reflect.deleteProperty(getWithScopeObject(scope), name)
+        }
+        if (scope === currentFrame[Fields.globalThis] && getVariableFlag(scope, name) === undefined) {
+            return Reflect.deleteProperty(scope, name)
         }
         return false
     }
 
-    const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean, trackStaticSlot: boolean) => {
+    const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean, trackStaticSlot: boolean, configurable: boolean) => {
         const initialValue = tdz ? TDZ_VALUE : undefined
         const flags = immutable ? VariableFlags.Immutable : VariableFlags.None
 
         getVariableFlagMap(scope)[name] = flags
+        let store: StaticVariableStore | null = null
+        let slotIndex: number | null = null
         if (trackStaticSlot) {
             const slotMap = getStaticVariableSlotMap(scope)
-            const store = getStaticVariableStore(scope)
-            const slotIndex = store.values.length
+            store = getStaticVariableStore(scope)
+            slotIndex = store.values.length
             slotMap[name] = slotIndex
             store.names.push(name)
             store.flags.push(flags)
             store.values.push(initialValue)
         }
 
-        Reflect.defineProperty(scope, name, {
-            configurable: true,
+        const defined = Reflect.defineProperty(scope, name, {
+            configurable,
+            enumerable: scope === currentFrame[Fields.globalThis],
             writable: true,
             value: initialValue
         })
+        if (!defined && store !== null && slotIndex !== null) {
+            store.values[slotIndex] = scope[name]
+        }
     }
 
     const defineVariable = (scope: Scope, name: string, type: VariableType, trackStaticSlot: boolean = true) => {
+        const configurable = !(scope === currentFrame[Fields.globalThis] && (
+            type === VariableType.Var ||
+            type === VariableType.Function
+        ))
+
         switch (type) {
             case VariableType.Const:
                 // seal it later
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable)
             case VariableType.Let:
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable)
             case VariableType.Function:
             case VariableType.Parameter:
             case VariableType.Var:
                 //don't have tdz
-                return defineVariableInternal(scope, name, false, false, trackStaticSlot)
+                return defineVariableInternal(scope, name, false, false, trackStaticSlot, configurable)
         }
     }
     const getStaticVariableScope = (frame: Frame, depth: number) =>
@@ -859,7 +881,10 @@ export const getExecution = (
             if (isEnvironmentScopeObject(ctx)) {
                 return getBindingValueChecked(ctx, bindingName)
             }
-            return ctx[name]
+            if (ctx == null) {
+                throw new TypeError('Cannot convert undefined or null to object')
+            }
+            return Reflect.get(Object(ctx), toPropertyKey(name))
         } else {
             const env: Frame = ctx
             const scope = findScope(env, bindingName)
@@ -899,7 +924,15 @@ export const getExecution = (
                 return setBindingValueChecked(ctx, bindingName, value)
             }
             try {
-                return writeBindingValue(ctx as Scope, bindingName, value)
+                if (ctx == null) {
+                    throw new TypeError('Cannot convert undefined or null to object')
+                }
+                const propertyKey = toPropertyKey(name)
+                const success = Reflect.set(Object(ctx), propertyKey, value)
+                if (!success && currentFrame[Fields.strict]) {
+                    throw new TypeError(`Cannot assign to read only property '${String(propertyKey)}'`)
+                }
+                return value
             } catch (e) {
                 rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
             }
@@ -910,6 +943,9 @@ export const getExecution = (
             if (scope) {
                 return setBindingValueChecked(scope, bindingName, value)
             } else {
+                if (env[Fields.strict]) {
+                    throw new ReferenceError(String(name) + is_not_defined)
+                }
                 const currentGlobal = env[Fields.globalThis] as Record<PropertyKey, any>
                 currentGlobal[name] = value
                 return value

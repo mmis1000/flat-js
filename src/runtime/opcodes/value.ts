@@ -4,14 +4,30 @@ import {
     Fields,
     Frame,
     getIterator,
-    is_not_defined,
     iteratorComplete,
     iteratorNext,
     environments,
+    toNumeric,
+    toPropertyKey,
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
 
 const templateObjectCache = new WeakMap<number[], WeakMap<object, any[]>>()
+
+const applyUpdate = (value: unknown, delta: 1 | -1) => {
+    const oldValue = toNumeric(value)
+    const newValue = typeof oldValue === 'bigint'
+        ? oldValue + BigInt(delta)
+        : oldValue + delta
+    return { oldValue, newValue }
+}
+
+const toReferencePropertyKey = (target: unknown, name: unknown) => {
+    if (!environments.has(target) && target == null) {
+        throw new TypeError('Cannot convert undefined or null to object')
+    }
+    return toPropertyKey(name)
+}
 
 const createRealmArray = (ctx: RuntimeOpcodeContext, values: any[] = []) => {
     const arr = [...values]
@@ -133,7 +149,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             break
         case OpCode.ToPropertyKey: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
-            ctx[OpcodeContextField.pushCurrentFrameStack](typeof value === 'symbol' ? value : String(value))
+            ctx[OpcodeContextField.pushCurrentFrameStack](toPropertyKey(value))
         }
             break
         case OpCode.TypeofReference: {
@@ -249,44 +265,39 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             break
         case OpCode.PostFixPlusPLus:
         case OpCode.PostFixMinusMinus: {
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Context>()
-            let old
-            let newVal
-            if (environments.has(target)) {
-                const scope = ctx[OpcodeContextField.findScope](target, name)
-                if (!scope) {
-                    throw new ReferenceError(name + is_not_defined)
-                }
-                old = ctx[OpcodeContextField.getBindingValueChecked](scope, name)
-                newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
-                ctx[OpcodeContextField.setBindingValueChecked](scope, name, newVal)
-            } else {
-                old = ctx[OpcodeContextField.getValue](target, name)
-                newVal = command === OpCode.PostFixPlusPLus ? old + 1 : old - 1
-                ctx[OpcodeContextField.setValue](target, name, newVal)
-            }
-            ctx[OpcodeContextField.pushCurrentFrameStack](old)
+            const propertyKey = toReferencePropertyKey(target, name)
+            const { oldValue, newValue } = applyUpdate(
+                ctx[OpcodeContextField.getValue](target, propertyKey),
+                command === OpCode.PostFixPlusPLus ? 1 : -1
+            )
+            ctx[OpcodeContextField.setValue](target, propertyKey, newValue)
+            ctx[OpcodeContextField.pushCurrentFrameStack](oldValue)
         }
             break
         case OpCode.PostFixPlusPLusStatic:
         case OpCode.PostFixMinusMinusStatic: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
-            const old = ctx[OpcodeContextField.getStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index)
-            const newVal = command === OpCode.PostFixPlusPLusStatic ? old + 1 : old - 1
-            ctx[OpcodeContextField.setStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index, newVal)
-            ctx[OpcodeContextField.pushCurrentFrameStack](old)
+            const { oldValue, newValue } = applyUpdate(
+                ctx[OpcodeContextField.getStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index),
+                command === OpCode.PostFixPlusPLusStatic ? 1 : -1
+            )
+            ctx[OpcodeContextField.setStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index, newValue)
+            ctx[OpcodeContextField.pushCurrentFrameStack](oldValue)
         }
             break
         case OpCode.PostFixPlusPLusStaticUnchecked:
         case OpCode.PostFixMinusMinusStaticUnchecked: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
-            const old = ctx[OpcodeContextField.getStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index)
-            const newVal = command === OpCode.PostFixPlusPLusStaticUnchecked ? old + 1 : old - 1
-            ctx[OpcodeContextField.setStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index, newVal)
-            ctx[OpcodeContextField.pushCurrentFrameStack](old)
+            const { oldValue, newValue } = applyUpdate(
+                ctx[OpcodeContextField.getStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index),
+                command === OpCode.PostFixPlusPLusStaticUnchecked ? 1 : -1
+            )
+            ctx[OpcodeContextField.setStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index, newValue)
+            ctx[OpcodeContextField.pushCurrentFrameStack](oldValue)
         }
             break
         case OpCode.PrefixUnaryPlus:
@@ -314,59 +325,62 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             break
         case OpCode.PrefixPlusPlus:
         case OpCode.PrefixMinusMinus: {
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]()
-            let newVal
-            if (environments.has(target)) {
-                const scope = ctx[OpcodeContextField.findScope](target, name)
-                if (!scope) {
-                    throw new ReferenceError(name + is_not_defined)
-                }
-                const currentValue = ctx[OpcodeContextField.getBindingValueChecked](scope, name)
-                newVal = command === OpCode.PrefixPlusPlus ? currentValue + 1 : currentValue - 1
-                ctx[OpcodeContextField.setBindingValueChecked](scope, name, newVal)
-            } else {
-                const currentValue = ctx[OpcodeContextField.getValue](target, name)
-                newVal = command === OpCode.PrefixPlusPlus ? currentValue + 1 : currentValue - 1
-                ctx[OpcodeContextField.setValue](target, name, newVal)
-            }
-            ctx[OpcodeContextField.pushCurrentFrameStack](newVal)
+            const propertyKey = toReferencePropertyKey(target, name)
+            const { newValue } = applyUpdate(
+                ctx[OpcodeContextField.getValue](target, propertyKey),
+                command === OpCode.PrefixPlusPlus ? 1 : -1
+            )
+            ctx[OpcodeContextField.setValue](target, propertyKey, newValue)
+            ctx[OpcodeContextField.pushCurrentFrameStack](newValue)
         }
             break
         case OpCode.PrefixPlusPlusStatic:
         case OpCode.PrefixMinusMinusStatic: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
-            const currentValue = ctx[OpcodeContextField.getStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index)
-            const newVal = command === OpCode.PrefixPlusPlusStatic ? currentValue + 1 : currentValue - 1
-            ctx[OpcodeContextField.setStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index, newVal)
-            ctx[OpcodeContextField.pushCurrentFrameStack](newVal)
+            const { newValue } = applyUpdate(
+                ctx[OpcodeContextField.getStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index),
+                command === OpCode.PrefixPlusPlusStatic ? 1 : -1
+            )
+            ctx[OpcodeContextField.setStaticVariableValueChecked](ctx[OpcodeContextField.currentFrame], depth, index, newValue)
+            ctx[OpcodeContextField.pushCurrentFrameStack](newValue)
         }
             break
         case OpCode.PrefixPlusPlusStaticUnchecked:
         case OpCode.PrefixMinusMinusStaticUnchecked: {
             const index = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const depth = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
-            const currentValue = ctx[OpcodeContextField.getStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index)
-            const newVal = command === OpCode.PrefixPlusPlusStaticUnchecked ? currentValue + 1 : currentValue - 1
-            ctx[OpcodeContextField.setStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index, newVal)
-            ctx[OpcodeContextField.pushCurrentFrameStack](newVal)
+            const { newValue } = applyUpdate(
+                ctx[OpcodeContextField.getStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index),
+                command === OpCode.PrefixPlusPlusStaticUnchecked ? 1 : -1
+            )
+            ctx[OpcodeContextField.setStaticVariableValue](ctx[OpcodeContextField.currentFrame], depth, index, newValue)
+            ctx[OpcodeContextField.pushCurrentFrameStack](newValue)
         }
             break
         case OpCode.Delete: {
-            const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
-            const target = ctx[OpcodeContextField.popCurrentFrameStack]<Record<string, any>>()
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const target = ctx[OpcodeContextField.popCurrentFrameStack]<Record<PropertyKey, any> | null | undefined>()
             if (!environments.has(target)) {
-                try {
-                    ctx[OpcodeContextField.pushCurrentFrameStack](delete target[name])
-                } catch (error) {
-                    ctx[OpcodeContextField.rethrowNativeErrorInRealm](error, ctx[OpcodeContextField.currentFrame][Fields.globalThis])
+                if (target == null) {
+                    throw new TypeError('Cannot convert undefined or null to object')
                 }
+                const propertyKey = toPropertyKey(name)
+                const deleted = Reflect.deleteProperty(Object(target), propertyKey)
+                if (!deleted && ctx[OpcodeContextField.currentFrame][Fields.strict]) {
+                    throw new TypeError(`Cannot delete property '${String(propertyKey)}'`)
+                }
+                ctx[OpcodeContextField.pushCurrentFrameStack](deleted)
             } else {
                 const env = target as Frame
-                const scope = ctx[OpcodeContextField.findScope](env, name)
+                const bindingName = typeof name === 'symbol' ? null : String(name)
+                const scope = bindingName == null
+                    ? null
+                    : ctx[OpcodeContextField.findScope](env, bindingName)
                 if (scope) {
-                    ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.deleteBinding](scope, name))
+                    ctx[OpcodeContextField.pushCurrentFrameStack](ctx[OpcodeContextField.deleteBinding](scope, bindingName!))
                 } else {
                     ctx[OpcodeContextField.pushCurrentFrameStack](true)
                 }

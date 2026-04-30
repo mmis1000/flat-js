@@ -673,6 +673,304 @@ test('object method and accessor names use property keys', () => {
     `)).toEqual(['id', 'gen', 'get value', 'set value', '[desc]', 'get '])
 })
 
+test('update expressions use ToNumeric and preserve prefix/postfix results', () => {
+    expect(compileAndRun(`
+        (() => {
+            let stringValue = '1'
+            let stringOld = stringValue++
+            let objectValue = { valueOf() { return 1.5 } }
+            let objectOld = objectValue++
+            let boolValue = false
+            let boolOld = boolValue++
+            let nullValue = null
+            let nullOld = nullValue--
+            let bigintValue = 1n
+            let bigintOld = bigintValue++
+            let parenthesized = '2'
+            let parenthesizedOld = (parenthesized)++
+
+            return [
+                stringOld, stringValue,
+                objectOld, objectValue,
+                boolOld, boolValue,
+                nullOld, nullValue,
+                bigintOld, bigintValue,
+                parenthesizedOld, parenthesized,
+            ]
+        })()
+    `)).toEqual([1, 2, 1.5, 2.5, 0, 1, 0, -1, 1n, 2n, 2, 3])
+
+    expect(compileAndRun(`
+        (() => {
+            let stringValue = '1'
+            let nanValue = 'x'
+            let bigintValue = 2n
+
+            return [
+                ++stringValue,
+                Number.isNaN(++nanValue),
+                --bigintValue,
+            ]
+        })()
+    `)).toEqual([2, true, 1n])
+})
+
+test('computed update and delete references coerce property keys once', () => {
+    expect(compileAndRun(`
+        (() => {
+            const log = []
+            const base = { 1: 1, gone: 2 }
+            const updateKey = {
+                toString() {
+                    log.push('update')
+                    return 1
+                }
+            }
+            const deleteKey = {
+                toString() {
+                    log.push('delete')
+                    return 'gone'
+                }
+            }
+
+            const old = base[updateKey]++
+            const deleted = delete base[deleteKey]
+
+            return [old, base[1], deleted, 'gone' in base, log.join(',')]
+        })()
+    `)).toEqual([1, 2, true, false, 'update,delete'])
+})
+
+test('computed assignment delays property-key coercion until after rhs evaluation', () => {
+    expect(compileAndRun(`
+        (() => {
+            const log = []
+            const base = {}
+            const key = {
+                toString() {
+                    log.push('key')
+                    return 'x'
+                }
+            }
+            function value() {
+                log.push('value')
+                return 5
+            }
+
+            base[key] = value()
+            return [base.x, log.join(',')]
+        })()
+    `)).toEqual([5, 'value,key'])
+
+    expect(compileAndRun(`
+        (() => {
+            const key = {
+                toString() {
+                    throw new RangeError('key')
+                }
+            }
+            function value() {
+                throw new TypeError('value')
+            }
+
+            try {
+                null[key] = value()
+            } catch (error) {
+                return error instanceof TypeError
+            }
+        })()
+    `)).toBe(true)
+})
+
+test('nullish update bases throw before key coercion after evaluating the key expression', () => {
+    expect(compileAndRun(`
+        (() => {
+            let called = false
+            const prop = {
+                toString() {
+                    called = true
+                    return 'x'
+                }
+            }
+
+            try {
+                ++null[prop]
+            } catch (error) {
+                return [error instanceof TypeError, called]
+            }
+        })()
+    `)).toEqual([true, false])
+
+    expect(compileAndRun(`
+        (() => {
+            let called = false
+            function prop() {
+                called = true
+                throw new RangeError('key')
+            }
+
+            try {
+                ++null[prop()]
+            } catch (error) {
+                return [error instanceof RangeError, called]
+            }
+        })()
+    `)).toEqual([true, true])
+})
+
+test('destructuring assignment allows duplicate __proto__ property names', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    expect(compileAndRun(`
+        var value = Object.defineProperty({}, '__proto__', { value: 123 })
+        var x
+        var y
+
+        ;({ __proto__: x, __proto__: y } = value);
+
+        [x, y]
+    `, vmGlobal)).toEqual([123, 123])
+})
+
+test('delete uses ECMAScript delete results for globals and properties', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    expect(compileAndRun(`
+        var declared = 1
+        implicit = 2
+        this.assigned = 3
+        Object.defineProperty(this, 'fixed', {
+            value: 4,
+            configurable: false,
+        })
+
+        const deleteDeclared = delete declared
+        const deleteDeclaredViaThis = delete this.declared
+        const deleteImplicit = delete implicit
+        const implicitType = typeof implicit
+        const deleteAssigned = delete this.assigned
+        const deleteFixed = delete this.fixed;
+
+        [
+            deleteDeclared,
+            deleteDeclaredViaThis,
+            deleteImplicit,
+            implicitType,
+            deleteAssigned,
+            deleteFixed,
+            'declared' in this,
+            'assigned' in this,
+        ]
+    `, vmGlobal)).toEqual([false, false, true, 'undefined', true, false, true, false])
+
+    expect(compileAndRun(`
+        [
+            delete NaN,
+            delete 'Test262'[100],
+        ]
+    `, vmGlobal)).toEqual([false, true])
+
+    expect(() => compileAndRun(`
+        (function() {
+            'use strict'
+            const obj = {}
+            Object.defineProperty(obj, 'x', {
+                value: 1,
+                configurable: false,
+            })
+            delete obj.x
+        })()
+    `)).toThrow(TypeError)
+})
+
+test('strict update re-checks unresolved globals during PutValue', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    expect(compileAndRun(`
+        Object.defineProperty(this, 'x', {
+            configurable: true,
+            get() {
+                delete this.x
+                return 2
+            }
+        })
+
+        let thrown = false
+        ;(function() {
+            'use strict'
+            try {
+                ++x
+            } catch (error) {
+                thrown = error instanceof ReferenceError
+            }
+        })();
+
+        [thrown, 'x' in this]
+    `, vmGlobal)).toEqual([true, false])
+})
+
+test('sloppy writes to readonly global value properties do not throw', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    expect(() => compileAndRun(`
+        var Infinity = 1
+        Infinity = 'changed'
+        var NaN = 2
+        NaN = 'changed'
+        var undefined = 3
+        undefined = 'changed'
+
+        1
+    `, vmGlobal)).not.toThrow()
+})
+
+test('strict delete and invalid update targets are early errors', () => {
+    expect(() => compileAndRun(`
+        'use strict'
+        delete target
+    `)).toThrow(SyntaxError)
+
+    expect(() => compileAndRun(`
+        this++
+    `)).toThrow(SyntaxError)
+
+    expect(() => compileAndRun(`
+        function f() {
+            new.target++
+        }
+    `)).toThrow(SyntaxError)
+
+    expect(() => compileAndRun(`
+        'use strict'
+        eval++
+    `)).toThrow(SyntaxError)
+
+    expect(() => compileAndRun(`
+        'use strict'
+        arguments--
+    `)).toThrow(SyntaxError)
+})
+
 test('destructuring default initializers infer names for anonymous functions and classes', () => {
     expect(compileAndRun(`
         let [a = function(){}, b = () => {}, c = class {}, d = async function(){}, e = function*(){}] = []
