@@ -136,6 +136,26 @@ Reduce the `language` category failures in targeted batches:
     - parser tails: `dstr/array-elem-init-in.js` and escaped `async` in the for-of head
     - out-of-scope explicit resource-management tail remains excluded
 
+- [x] `for-of-completion-iterator-close-and-lexical-scope`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - before this sub-batch: `34` failing files (`33` intended, `1` out of scope)
+    - after: `5` failing files (`4` intended, `1` out of scope)
+  - Fixed areas:
+    - direct eval completion values for loops now reset to `undefined` before loop execution instead of inheriting a prior expression value
+    - `for-of` abrupt exits now perform `IteratorClose` for `break`, outer `continue`, `return`, and `throw`, including return-method edge cases and throw-completion error suppression
+    - `for-of` head assignment and destructuring assignment errors close the active iterator, while `.value` getter errors from `IteratorValue` do not close it
+    - `continue` now uses the existing try/finally staged jump path instead of rejecting `continue` inside `try`, `catch`, or `finally`
+    - functions created inside destructuring default initializers no longer capture compiler temporary scopes
+    - `for-of` lexical declaration heads now evaluate the RHS in a distinct TDZ scope and create the real per-iteration environment afterward
+  - Remaining focused `for-of` failures:
+    - two resizable-arraybuffer typedarray tests where the thrown `TypeError` comes from the wrong realm
+    - two TypeScript parser-shape tails:
+      - `dstr/array-elem-init-in.js`
+      - `head-lhs-async-escaped.js`
+    - out-of-scope explicit resource-management tail:
+      - `head-using-bound-names-fordecl-tdz.js`
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -401,3 +421,12 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "switch rejects|sloppy switch duplicate|switch async and generator"`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/switch`
     - `npm test`
+- 2026-05-02: Reduced the focused `language/statements/for-of/**` slice to its current tail.
+  - completed direct-eval loop completion resets, `IteratorClose` for abrupt `for-of` exits, `continue` through `try` / `catch` / `finally`, and `for-of` lexical head TDZ/per-iteration scope separation
+  - focused `language/statements/for-of/**` rerun now records:
+    - `4` intended failures
+    - `1` out-of-scope explicit-resource-management failure
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/for-of-and-spread.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/for-of`

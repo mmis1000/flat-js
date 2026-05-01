@@ -1,9 +1,10 @@
 import * as ts from 'typescript'
 
+import { findAncient } from '../../analysis'
 import { OpCode, SpecialVariable, StatementFlag } from '../../shared'
 import { generateBindingInitialization } from '../binding-patterns'
 import { generateFunctionDefinition } from './functions'
-import { generateEnterScope, generateLeaveScope, markInternals, op } from '../helpers'
+import { generateEnterScope, generateIteratorClose, generateLeaveScope, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -13,6 +14,22 @@ function generateNamedInitializer(initializer: ts.Expression, name: string, ctx:
     if (ts.isArrowFunction(rawInitializer)) {
         return generateFunctionDefinition(rawInitializer, name)
     }
+}
+
+function findContainingForOfWithoutInnerTry(node: ts.Node, ctx: CodegenContext): ts.ForOfStatement | null {
+    const target = findAncient(node, ctx.parentMap, (ancestor) => {
+        if (ts.isTryStatement(ancestor) || ctx.functions.has(ancestor as any)) {
+            return true
+        }
+        return ts.isForOfStatement(ancestor)
+    })
+    return target != null && ts.isForOfStatement(target) ? target : null
+}
+
+function generateContainingForOfClose(node: ts.Node, ctx: CodegenContext, suppressErrors: boolean): Segment {
+    return findContainingForOfWithoutInnerTry(node, ctx) == null
+        ? []
+        : generateIteratorClose(suppressErrors)
 }
 
 export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
@@ -176,12 +193,14 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
         if (node.expression !== undefined) {
             return [
                 ...ctx.generate(node.expression, flag),
+                ...generateContainingForOfClose(node, ctx, false),
                 (flag & StatementFlag.TryCatchFlags) ? op(OpCode.ReturnInTryCatchFinally) : op(OpCode.Return)
             ]
         }
 
         return [
             op(OpCode.UndefinedLiteral),
+            ...generateContainingForOfClose(node, ctx, false),
             (flag & StatementFlag.TryCatchFlags) ? op(OpCode.ReturnInTryCatchFinally) : op(OpCode.Return)
         ]
     }

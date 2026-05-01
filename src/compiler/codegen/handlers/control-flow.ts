@@ -3,7 +3,7 @@ import * as ts from 'typescript'
 import { extractVariable, findAncient, isLexicalSwitchFunctionDeclaration } from '../../analysis'
 import { OpCode, SpecialVariable, StatementFlag, VariableType } from '../../shared'
 import { generateBindingInitialization } from '../binding-patterns'
-import { abort, headOf, op, generateEnterScope, generateLeaveScope } from '../helpers'
+import { headOf, op, generateEnterScope, generateIteratorClose, generateLeaveScope } from '../helpers'
 import { generateFunctionDefinitionWithStackName } from './functions'
 import type { CodegenContext } from '../context'
 import type { Op, Segment } from '../types'
@@ -44,6 +44,15 @@ function isAsyncModifier(modifier: ts.ModifierLike): boolean {
 
 function hasSyntheticRuntimeScope(node: ts.Node): boolean {
     return ts.isSwitchStatement(node) || ts.isWithStatement(node)
+}
+
+function shouldCloseContainingForOf(node: ts.Node, ctx: CodegenContext): boolean {
+    return findAncient(node, ctx.parentMap, (ancestor) => {
+        if (ts.isTryStatement(ancestor) || ctx.functions.has(ancestor as any)) {
+            return true
+        }
+        return ts.isForOfStatement(ancestor)
+    })?.kind === ts.SyntaxKind.ForOfStatement
 }
 
 function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
@@ -173,6 +182,9 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
     if (ts.isThrowStatement(node)) {
         const ops: Segment = []
         ops.push(...ctx.generate(node.expression, flag))
+        if (shouldCloseContainingForOf(node, ctx)) {
+            ops.push(...generateIteratorClose(true))
+        }
 
         if (flag & StatementFlag.TryCatchFlags) {
             ops.push(op(OpCode.ThrowInTryCatchFinally))
@@ -417,6 +429,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
     if (ts.isBreakStatement(node) && node.label != null) {
         let crossedTryCatch = 0
         let scopeCount = 0
+        let closesForOf = false
         const target = findAncient(node, ctx.parentMap, (ancestor) => {
             if ((ctx.scopes.get(ancestor)?.size ?? 0) > 0) {
                 scopeCount++
@@ -424,6 +437,10 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
             if (hasSyntheticRuntimeScope(ancestor)) {
                 scopeCount++
+            }
+
+            if (ts.isForOfStatement(ancestor)) {
+                closesForOf = true
             }
 
             if (ts.isLabeledStatement(ancestor) && ancestor.label.text === node.label!.text) {
@@ -453,6 +470,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
         if (crossedTryCatch === 0) {
             return [
+                ...(closesForOf ? generateIteratorClose(false) : []),
                 ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
                 op(OpCode.NodeOffset, 2, [nextNode]),
                 op(OpCode.Jump)
@@ -461,6 +479,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
         const exitStub: Op[] = [
             op(OpCode.Nop, 0),
+            ...(closesForOf ? generateIteratorClose(false) : []),
             ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
             op(OpCode.NodeOffset, 2, [nextNode]),
             op(OpCode.Jump)
@@ -479,6 +498,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
     if (ts.isBreakStatement(node) && node.label == null) {
         let crossedTryCatch = 0
         let scopeCount = 0
+        let closesForOf = false
         const target = findAncient(node, ctx.parentMap, (ancestor) => {
             if ((ctx.scopes.get(ancestor)?.size ?? 0) > 0) {
                 scopeCount++
@@ -486,6 +506,10 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
             if (hasSyntheticRuntimeScope(ancestor)) {
                 scopeCount++
+            }
+
+            if (ts.isForOfStatement(ancestor)) {
+                closesForOf = true
             }
 
             if (ctx.nextOps.has(ancestor)) {
@@ -514,6 +538,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
         if (crossedTryCatch === 0) {
             return [
+                ...(closesForOf ? generateIteratorClose(false) : []),
                 ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
                 op(OpCode.NodeOffset, 2, [nextNode]),
                 op(OpCode.Jump)
@@ -522,6 +547,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
         const exitStub: Op[] = [
             op(OpCode.Nop, 0),
+            ...(closesForOf ? generateIteratorClose(false) : []),
             ...new Array(scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
             op(OpCode.NodeOffset, 2, [nextNode]),
             op(OpCode.Jump)
@@ -538,7 +564,9 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
     }
 
     if (ts.isContinueStatement(node) && node.label != null) {
+        let crossedTryCatch = 0
         let scopeCount = 0
+        let crossedForOf: ts.ForOfStatement | null = null
         const target = findAncient(node, ctx.parentMap, (ancestor) => {
             if ((ctx.scopes.get(ancestor)?.size ?? 0) > 0) {
                 scopeCount++
@@ -548,11 +576,18 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                 scopeCount++
             }
 
+            if (ts.isForOfStatement(ancestor) && crossedForOf == null) {
+                crossedForOf = ancestor
+            }
+
             if (ts.isLabeledStatement(ancestor) && ancestor.label.text === node.label!.text) {
                 return true
             }
 
-            if (ts.isTryStatement(ancestor)) abort('Not support continue in try catch yet')
+            if (ts.isTryStatement(ancestor)) {
+                crossedTryCatch++
+                scopeCount = 0
+            }
 
             return false
         })
@@ -572,16 +607,35 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         }
 
         const loopHasScope = (ctx.scopes.get(loopTarget)?.size ?? 0) !== 0
+        const closesForOf = crossedForOf != null && loopTarget !== crossedForOf
 
-        return [
+        const continueOps: Segment = [
+            ...(closesForOf ? generateIteratorClose(false) : []),
             ...new Array(loopHasScope ? scopeCount - 1 : scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
             op(OpCode.NodeOffset, 2, [nextNode]),
             op(OpCode.Jump)
         ]
+
+        if (crossedTryCatch === 0) {
+            return continueOps
+        }
+
+        const exitStub: Op[] = [
+            op(OpCode.Nop, 0),
+            ...continueOps,
+        ]
+        return [
+            op(OpCode.Literal, 2, [crossedTryCatch]),
+            op(OpCode.NodeOffset, 2, [exitStub[0]]),
+            op(OpCode.BreakInTryCatchFinally),
+            ...exitStub,
+        ]
     }
 
     if (ts.isContinueStatement(node) && node.label == null) {
+        let crossedTryCatch = 0
         let scopeCount = 0
+        let crossedForOf: ts.ForOfStatement | null = null
         const target = findAncient(node, ctx.parentMap, (ancestor) => {
             if ((ctx.scopes.get(ancestor)?.size ?? 0) > 0) {
                 scopeCount++
@@ -591,11 +645,18 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                 scopeCount++
             }
 
+            if (ts.isForOfStatement(ancestor) && crossedForOf == null) {
+                crossedForOf = ancestor
+            }
+
             if (ctx.continueOps.has(ancestor)) {
                 return true
             }
 
-            if (ts.isTryStatement(ancestor)) abort('Not support continue in try catch yet')
+            if (ts.isTryStatement(ancestor)) {
+                crossedTryCatch++
+                scopeCount = 0
+            }
 
             return false
         })
@@ -610,11 +671,28 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         }
 
         const forHasScope = (ctx.scopes.get(target)?.size ?? 0) !== 0
+        const closesForOf = crossedForOf != null && target !== crossedForOf
 
-        return [
+        const continueOps: Segment = [
+            ...(closesForOf ? generateIteratorClose(false) : []),
             ...new Array(forHasScope ? scopeCount - 1 : scopeCount).fill(0).map(() => op(OpCode.LeaveScope)),
             op(OpCode.NodeOffset, 2, [nextNode]),
             op(OpCode.Jump)
+        ]
+
+        if (crossedTryCatch === 0) {
+            return continueOps
+        }
+
+        const exitStub: Op[] = [
+            op(OpCode.Nop, 0),
+            ...continueOps,
+        ]
+        return [
+            op(OpCode.Literal, 2, [crossedTryCatch]),
+            op(OpCode.NodeOffset, 2, [exitStub[0]]),
+            op(OpCode.BreakInTryCatchFinally),
+            ...exitStub,
         ]
     }
 }

@@ -111,3 +111,13 @@ export function generateLeaveScope(): Op<OpCode>[] {
         op(OpCode.LeaveScope)
     ])
 }
+
+export function generateIteratorClose(suppressErrors: boolean): Op<OpCode>[] {
+    return [
+        op(OpCode.GetRecord),
+        op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+        op(OpCode.Get),
+        op(OpCode.Literal, 2, [suppressErrors]),
+        op(OpCode.IteratorClose),
+    ]
+}

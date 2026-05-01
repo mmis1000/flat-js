@@ -813,7 +813,7 @@ export const getExecution = (
 
     const defineFunction = (globalThis: any, scopes: Scope[], name: PropertyKey, type: FunctionTypes, offset: number, bodyOffset: number) => {
         // TODO: types
-        const scopeClone = [...scopes]
+        const scopeClone = scopes.filter((scope) => getVariableFlag(scope, SpecialVariable.SyntheticScope) === undefined)
 
         const pr = currentProgram
         const functionName = formatFunctionName(name, type)
@@ -1613,6 +1613,7 @@ export const getExecution = (
                 case OpCode.GetPropertyIterator:
                 case OpCode.GetIterator:
                 case OpCode.IteratorNext:
+                case OpCode.IteratorClose:
                 case OpCode.NextEntry:
                 case OpCode.EntryIsDone:
                 case OpCode.EntryGetValue:

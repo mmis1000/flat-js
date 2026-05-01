@@ -25,6 +25,7 @@ export const enum SpecialVariable {
     SwitchValue = '[switch]',
     LoopIterator = '[iter]',
     IteratorEntry = '[entry]',
+    SyntheticScope = '[syntheticScope]',
     Super = '[super]',
     NewTarget = '[newTarget]',
 }
@@ -510,6 +511,13 @@ export const enum OpCode {
      * Result: iteratorEntry
      */
     IteratorNext,
+    /**
+     * Performs ECMAScript `IteratorClose` for a `for...of` iterator record.
+     * Stack (bottom to top): iteratorRecord, suppressErrors
+     * Result: no stack result.
+     * Notes: `suppressErrors` is true for throw completions, where close errors do not replace the original throw.
+     */
+    IteratorClose,
     /**
      * Advances an iterator and pushes its `IteratorResult`.
      * Stack (bottom to top): iterator

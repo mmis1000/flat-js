@@ -1,6 +1,6 @@
 import * as ts from 'typescript'
 
-import { OpCode, STATIC_SLOT_NAMELESS, VariableType } from '../shared'
+import { OpCode, SpecialVariable, STATIC_SLOT_NAMELESS, VariableType } from '../shared'
 import { generateClassValue } from './handlers/classes'
 import { generateFunctionDefinition } from './handlers/functions'
 import { markInternals, op } from './helpers'
@@ -107,12 +107,17 @@ const generateSyntheticScopeEnter = (bindings: TempBinding[]): Segment => {
         return []
     }
 
+    const records = [
+        ...bindings.map(() => STATIC_SLOT_NAMELESS),
+        SpecialVariable.SyntheticScope,
+    ]
+
     return markInternals([
-        ...[...bindings].reverse().flatMap(() => [
-            op(OpCode.Literal, 2, [STATIC_SLOT_NAMELESS]),
+        ...[...records].reverse().flatMap((name) => [
+            op(OpCode.Literal, 2, [name]),
             op(OpCode.Literal, 2, [VariableType.Var]),
         ]),
-        op(OpCode.Literal, 2, [bindings.length]),
+        op(OpCode.Literal, 2, [records.length]),
         op(OpCode.EnterScope),
     ])
 }

@@ -1,15 +1,43 @@
 import * as ts from 'typescript'
 
 import { extractVariable } from '../../analysis'
-import { OpCode, SetFlag, SpecialVariable } from '../../shared'
+import { OpCode, SetFlag, SpecialVariable, StatementFlag } from '../../shared'
 import { generateAssignmentPattern, generateBindingInitialization } from '../binding-patterns'
-import { headOf, markInternals, op, generateEnterScope, generateLeaveScope } from '../helpers'
+import { headOf, markInternals, op, generateEnterScope, generateIteratorClose, generateLeaveScope } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
 type LoopScopeCopyItem = {
     name: string
     flags: number
+}
+
+const generateLoopEvalResultReset = (flag: number): Segment =>
+    flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)
+        ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
+        : []
+
+function generateProtectedForOfEntryBinding(body: Segment, ctx: CodegenContext): Segment {
+    const catchName = ctx.allocateInternalName('forOf.error')
+    const catchEntry = op(OpCode.Nop, 0)
+    const exit = op(OpCode.Nop, 0)
+
+    return [
+        op(OpCode.NodeOffset, 2, [exit]),
+        op(OpCode.NodeOffset, 2, [catchEntry]),
+        op(OpCode.Literal, 2, [-1]),
+        op(OpCode.Literal, 2, [catchName]),
+        op(OpCode.InitTryCatch),
+        ...body,
+        op(OpCode.ExitTryCatchFinally),
+        catchEntry,
+        ...generateIteratorClose(true),
+        op(OpCode.GetRecord),
+        op(OpCode.Literal, 2, [catchName]),
+        op(OpCode.Get),
+        op(OpCode.Throw),
+        exit,
+    ]
 }
 
 function generateLoopScopeCopy(node: ts.Node, items: LoopScopeCopyItem[], ctx: CodegenContext): Segment {
@@ -53,6 +81,19 @@ function generateLoopScopeCopy(node: ts.Node, items: LoopScopeCopyItem[], ctx: C
         ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
         op(OpCode.GetRecord),
         op(OpCode.SetMultiple),
+    ]
+}
+
+function generateLoopScopeStaticAccess(node: ts.Node, name: string, ctx: CodegenContext): Segment {
+    const names = [...(ctx.scopes.get(node)?.keys() ?? [])].reverse()
+    const index = names.indexOf(name)
+    if (index < 0) {
+        throw new Error('missing loop scope binding: ' + name)
+    }
+
+    return [
+        op(OpCode.Literal, 2, [0]),
+        op(OpCode.Literal, 2, [index]),
     ]
 }
 
@@ -128,6 +169,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         const body = ctx.generate(node.statement, flag)
 
         return [
+            ...generateLoopEvalResultReset(flag),
             ...markInternals(entry0),
             ...entry1,
             ...conditionS,
@@ -162,6 +204,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         ]
 
         return [
+            ...generateLoopEvalResultReset(flag),
             continueOp,
             ...head,
             ...body,
@@ -186,6 +229,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         ]
 
         return [
+            ...generateLoopEvalResultReset(flag),
             ...body,
             continueOp,
             ...tail,
@@ -319,6 +363,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         ]
 
         return [
+            ...generateLoopEvalResultReset(flag),
             ...enter,
             ...head,
             ...condition,
@@ -366,8 +411,6 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 op(OpCode.GetRecord),
                 op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
                 op(OpCode.Get),
-                op(OpCode.Literal, 2, ['value']),
-                op(OpCode.Get),
             ]
 
             if (declarationName && !ts.isIdentifier(declarationName)) {
@@ -414,14 +457,26 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             ]
         }
 
-        const head = [
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            ...ctx.generate(node.expression, flag),
-            op(OpCode.GetIterator),
-            op(OpCode.Set),
-            op(OpCode.Pop)
-        ]
+        const head = hasVariable
+            ? [
+                ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
+                ...ctx.generate(node.expression, flag),
+                ...generateLeaveScope(),
+                op(OpCode.GetIterator),
+                ...enter,
+                ...generateLoopScopeStaticAccess(node, SpecialVariable.LoopIterator, ctx),
+                op(OpCode.SetInitializedStatic),
+                op(OpCode.Pop)
+            ]
+            : [
+                ...enter,
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
+                ...ctx.generate(node.expression, flag),
+                op(OpCode.GetIterator),
+                op(OpCode.Set),
+                op(OpCode.Pop)
+            ]
 
         const condition = [
             op(OpCode.NodeOffset, 2, [leave[0]]),
@@ -440,7 +495,16 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 op(OpCode.EntryIsDone),
             ],
             op(OpCode.JumpIf),
-            ...generateEntryBinding(),
+            op(OpCode.GetRecord),
+            op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+            op(OpCode.GetRecord),
+            op(OpCode.Literal, 2, [SpecialVariable.IteratorEntry]),
+            op(OpCode.Get),
+            op(OpCode.Literal, 2, ['value']),
+            op(OpCode.Get),
+            op(OpCode.Set),
+            op(OpCode.Pop),
+            ...generateProtectedForOfEntryBinding(generateEntryBinding(), ctx),
         ]
 
         const body = ctx.generate(node.statement, flag)
@@ -455,7 +519,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         ]
 
         return [
-            ...enter,
+            ...generateLoopEvalResultReset(flag),
             ...head,
             ...condition,
             ...body,

@@ -182,6 +182,287 @@ describe('for...of', () => {
         expect(result).toBe(23)
     })
 
+    test('direct eval for-of completion values follow the loop body', () => {
+        expect(compileAndRun(`eval('1; for (var a of []) { 2; }')`)).toBe(undefined)
+        expect(compileAndRun(`eval('1; for (var a of [0]) { }')`)).toBe(undefined)
+        expect(compileAndRun(`eval('1; for (var a of [0]) { 2; }')`)).toBe(2)
+        expect(compileAndRun(`eval('1; for (var a of [0]) { 2; break; }')`)).toBe(2)
+    })
+
+    test('abrupt for-of exits close iterators', () => {
+        const result = compileAndRun(`
+            var closes = 0;
+            function makeIterable() {
+                return {
+                    next: function() {
+                        return { done: false, value: 1 };
+                    },
+                    return: function() {
+                        closes += 1;
+                        return {};
+                    },
+                    [Symbol.iterator]: function() {
+                        return this;
+                    }
+                };
+            }
+
+            for (var a of makeIterable()) {
+                break;
+            }
+            outer: do {
+                for (var b of makeIterable()) {
+                    continue outer;
+                }
+            } while (false);
+            (function() {
+                for (var c of makeIterable()) {
+                    return;
+                }
+            }());
+            try {
+                for (var d of makeIterable()) {
+                    throw 0;
+                }
+            } catch (err) {}
+            closes;
+        `)
+        expect(result).toBe(4)
+    })
+
+    test('for-of continue works through try states', () => {
+        const result = compileAndRun(`
+            function* values() {
+                yield 1;
+                yield 1;
+            }
+            var hits = 0;
+
+            for (var a of values()) {
+                try {
+                    hits += 1;
+                    continue;
+                } catch (err) {}
+                hits += 100;
+            }
+            for (var b of values()) {
+                try {
+                    throw 0;
+                } catch (err) {
+                    hits += 1;
+                    continue;
+                }
+                hits += 100;
+            }
+            for (var c of values()) {
+                try {
+                    throw 0;
+                } catch (err) {
+                } finally {
+                    hits += 1;
+                    continue;
+                }
+                hits += 100;
+            }
+
+            hits;
+        `)
+        expect(result).toBe(6)
+    })
+
+    test('outer continue through try closes for-of iterator after finally', () => {
+        const result = compileAndRun(`
+            var closes = 0;
+            var finallyRuns = 0;
+            var iterable = {
+                next: function() {
+                    return { done: false, value: 1 };
+                },
+                return: function() {
+                    closes += 1;
+                    return {};
+                },
+                [Symbol.iterator]: function() {
+                    return this;
+                }
+            };
+            var loop = true;
+
+            outer:
+            while (loop) {
+                loop = false;
+                for (var value of iterable) {
+                    try {
+                        continue outer;
+                    } finally {
+                        finallyRuns += 1;
+                    }
+                }
+            }
+
+            [finallyRuns, closes];
+        `)
+        expect(result).toEqual([1, 1])
+    })
+
+    test('for-of lexical head keeps TDZ and iteration closures distinct', () => {
+        const result = compileAndRun(`
+            var probeBefore = function() { return x; };
+            let x = 'outside';
+            var probeExpr, probeDecl, probeBody;
+
+            for (
+                let [x, _, __ = probeDecl = function() { return x; }]
+                of
+                [['inside', probeExpr = function() { typeof x; }]]
+            )
+                probeBody = function() { return x; };
+
+            [
+                probeBefore(),
+                (function() {
+                    try {
+                        probeExpr();
+                        return 'no error';
+                    } catch (err) {
+                        return err.constructor.name;
+                    }
+                }()),
+                probeDecl(),
+                probeBody(),
+                x
+            ];
+        `)
+        expect(result).toEqual(['outside', 'ReferenceError', 'inside', 'inside', 'outside'])
+    })
+
+    test('for-of head expression closures capture the TDZ scope', () => {
+        const result = compileAndRun(`
+            let x = 'outside';
+            var probeDecl, probeExpr, probeBody;
+
+            for (
+                let [x, _ = probeDecl = function() { return x; }]
+                of
+                (probeExpr = function() { typeof x; }, [['inside']])
+            )
+                probeBody = function() { return x; };
+
+            [
+                (function() {
+                    try {
+                        probeExpr();
+                        return 'no error';
+                    } catch (err) {
+                        return err.constructor.name;
+                    }
+                }()),
+                probeDecl(),
+                probeBody(),
+                x
+            ];
+        `)
+        expect(result).toEqual(['ReferenceError', 'inside', 'inside', 'outside'])
+    })
+
+    test('for-of close errors replace non-throw completions only', () => {
+        expect(() => compileAndRun(`
+            var iterable = {
+                next: function() { return { done: false, value: 1 }; },
+                return: function() { return 0; },
+                [Symbol.iterator]: function() { return this; }
+            };
+            for (var value of iterable) {
+                break;
+            }
+        `)).toThrow(TypeError)
+
+        expect(() => compileAndRun(`
+            var iterable = {
+                next: function() { return { done: false, value: 1 }; },
+                return: 1,
+                [Symbol.iterator]: function() { return this; }
+            };
+            for (var value of iterable) {
+                throw new SyntaxError('body');
+            }
+        `)).toThrow(SyntaxError)
+    })
+
+    test('for-of closes iterator when head assignment throws', () => {
+        const result = compileAndRun(`
+            var closes = 0;
+            var target = {
+                set value(_) {
+                    throw new SyntaxError('setter');
+                }
+            };
+            var iterable = {
+                next: function() { return { done: false, value: 1 }; },
+                return: function() {
+                    closes += 1;
+                    return {};
+                },
+                [Symbol.iterator]: function() { return this; }
+            };
+            try {
+                for (target.value of iterable) {}
+            } catch (err) {}
+            closes;
+        `)
+        expect(result).toBe(1)
+    })
+
+    test('for-of closes iterator when destructuring head assignment throws', () => {
+        const result = compileAndRun(`
+            var closes = 0;
+            var target = {
+                set value(_) {
+                    throw new SyntaxError('setter');
+                }
+            };
+            var iterable = {
+                next: function() { return { done: false, value: [1] }; },
+                return: function() {
+                    closes += 1;
+                    return {};
+                },
+                [Symbol.iterator]: function() { return this; }
+            };
+            try {
+                for ([target.value] of iterable) {}
+            } catch (err) {}
+            closes;
+        `)
+        expect(result).toBe(1)
+    })
+
+    test('for-of does not close iterator when reading next value throws', () => {
+        const result = compileAndRun(`
+            var closes = 0;
+            var iterable = {
+                next: function() {
+                    return {
+                        done: false,
+                        get value() {
+                            throw new SyntaxError('value');
+                        }
+                    };
+                },
+                return: function() {
+                    closes += 1;
+                    return {};
+                },
+                [Symbol.iterator]: function() { return this; }
+            };
+            try {
+                for (var value of iterable) {}
+            } catch (err) {}
+            closes;
+        `)
+        expect(result).toBe(0)
+    })
+
     test('invalid for-of statement forms are syntax errors', () => {
         expect(() => compile(`for (var x of []) function f() {}`)).toThrow(SyntaxError)
         expect(() => compile(`for (var x of []) label: function f() {}`)).toThrow(SyntaxError)

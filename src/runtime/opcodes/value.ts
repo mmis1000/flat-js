@@ -5,6 +5,7 @@ import {
     Frame,
     getIterator,
     getIteratorRecord,
+    iteratorClose,
     iteratorRecordNext,
     iteratorComplete,
     iteratorNext,
@@ -210,6 +211,12 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
         case OpCode.IteratorNext: {
             const record = ctx[OpcodeContextField.popCurrentFrameStack]<IteratorRecord>()
             ctx[OpcodeContextField.pushCurrentFrameStack](iteratorRecordNext(record))
+        }
+            break
+        case OpCode.IteratorClose: {
+            const suppressErrors = ctx[OpcodeContextField.popCurrentFrameStack]<boolean>()
+            const record = ctx[OpcodeContextField.popCurrentFrameStack]<IteratorRecord>()
+            iteratorClose(record, suppressErrors)
         }
             break
         case OpCode.NextEntry: {

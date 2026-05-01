@@ -328,7 +328,7 @@ const getIteratorRecord = (iterable: unknown): IteratorRecord => {
     if (typeof next !== 'function') {
         throw new TypeError('iterator must have next method')
     }
-    return { iterator, next }
+    return { iterator, next, done: false }
 }
 
 const iteratorNext = (iterator: { next: unknown }, value?: unknown) => {
@@ -350,7 +350,35 @@ const iteratorRecordNext = (record: IteratorRecord, value?: unknown) => {
     if (result == null || typeof result !== 'object') {
         throw new TypeError('iterator result must be an object')
     }
+    if (Boolean((result as { done?: unknown }).done)) {
+        record.done = true
+    }
     return result
+}
+
+const iteratorClose = (record: IteratorRecord, suppressErrors: boolean) => {
+    if (record.done) {
+        return
+    }
+    record.done = true
+
+    try {
+        const returnMethod = (record.iterator as { return?: unknown }).return
+        if (returnMethod == null) {
+            return
+        }
+        if (typeof returnMethod !== 'function') {
+            throw new TypeError('iterator return method must be callable')
+        }
+        const result = returnMethod.call(record.iterator)
+        if (result == null || typeof result !== 'object') {
+            throw new TypeError('iterator return result must be an object')
+        }
+    } catch (error) {
+        if (!suppressErrors) {
+            throw error
+        }
+    }
 }
 
 const iteratorComplete = (result: { done?: unknown }) => Boolean(result.done)
@@ -372,6 +400,7 @@ type Context = Record<string, any> | Frame
 type IteratorRecord = {
     iterator: Iterator<unknown>
     next: Function
+    done: boolean
 }
 
 export type ScopeDebugEntry = [string, unknown, boolean]
@@ -503,6 +532,7 @@ export {
     isResultYield,
     isSmallNumber,
     iteratorComplete,
+    iteratorClose,
     iteratorNext,
     iteratorRecordNext,
     literalPoolCache,

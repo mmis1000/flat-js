@@ -23,8 +23,8 @@ test('compileAndRun: only ExpressionStatement affects result ', () => {
     expect(compileAndRun('var a = 42')).toBe(undefined)
 })
 
-test('compileAndRun: last ExpressionStatement affects result ', () => {
-    expect(compileAndRun('42; for (let i = 0; i < 5; i++);')).toBe(42)
+test('compileAndRun: loop statements with empty completion reset eval result ', () => {
+    expect(compileAndRun('42; for (let i = 0; i < 5; i++);')).toBe(undefined)
 })
 
 test('compileAndRun: finally does not affects result ', () => {
