@@ -1,11 +1,60 @@
 import * as ts from 'typescript'
 
 import { extractVariable } from '../../analysis'
-import { OpCode, SetFlag, SpecialVariable, VariableType } from '../../shared'
+import { OpCode, SetFlag, SpecialVariable } from '../../shared'
 import { generateAssignmentPattern, generateBindingInitialization } from '../binding-patterns'
-import { abort, headOf, markInternals, op, generateEnterScope, generateLeaveScope } from '../helpers'
+import { headOf, markInternals, op, generateEnterScope, generateLeaveScope } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
+
+type LoopScopeCopyItem = {
+    name: string
+    flags: number
+}
+
+function generateLoopScopeCopy(node: ts.Node, items: LoopScopeCopyItem[], ctx: CodegenContext): Segment {
+    const staticItems = items.map((item) => ({
+        ...item,
+        access: ctx.tryResolveStaticAccess(node, item.name),
+    }))
+
+    if (staticItems.every((item) => item.access != null)) {
+        return [
+            ...staticItems.flatMap(({ access }) => [
+                ...ctx.generateStaticAccessOps(access!),
+                op(ctx.isStaticAccessUnchecked(access!) ? OpCode.GetStaticUnchecked : OpCode.GetStatic),
+            ]),
+            ...generateLeaveScope(),
+            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
+            ...[...staticItems].reverse().flatMap(({ access, flags }) => [
+                ...ctx.generateStaticAccessOps(access!),
+                op(OpCode.SetInitializedStatic),
+                op(OpCode.Pop),
+                ...((flags & SetFlag.Freeze)
+                    ? [
+                        ...ctx.generateStaticAccessOps(access!),
+                        op(OpCode.FreezeVariableStatic),
+                    ]
+                    : []),
+            ]),
+        ]
+    }
+
+    return [
+        ...items.flatMap(({ name, flags }) => [
+            op(OpCode.Literal, 2, [name]),
+            op(OpCode.GetRecord),
+            op(OpCode.Literal, 2, [name]),
+            op(OpCode.Get),
+            op(OpCode.Literal, 2, [flags]),
+        ]),
+        op(OpCode.Literal, 2, [items.length]),
+        ...generateLeaveScope(),
+        ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
+        op(OpCode.GetRecord),
+        op(OpCode.SetMultiple),
+    ]
+}
 
 export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isForStatement(node)) {
@@ -50,28 +99,18 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         const update0: Segment = []
 
         if (hasScope && initializer && ts.isVariableDeclarationList(initializer)) {
-            const copiedNames: string[] = []
+            const copyItems: LoopScopeCopyItem[] = []
 
             for (const item of initializer.declarations) {
                 for (const name of extractVariable(item.name)) {
-                    copiedNames.push(name.text)
-                    update0.push(
-                        op(OpCode.Literal, 2, [name.text]),
-                        op(OpCode.GetRecord),
-                        op(OpCode.Literal, 2, [name.text]),
-                        op(OpCode.Get),
-                        op(OpCode.Literal, 2, [SetFlag.DeTDZ | ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0)])
-                    )
+                    copyItems.push({
+                        name: name.text,
+                        flags: SetFlag.DeTDZ | ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0),
+                    })
                 }
             }
 
-            update0.push(
-                op(OpCode.Literal, 2, [copiedNames.length]),
-                ...generateLeaveScope(),
-                ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
-                op(OpCode.GetRecord),
-                op(OpCode.SetMultiple)
-            )
+            update0.push(...generateLoopScopeCopy(node, copyItems, ctx))
         }
 
         const update1 = incrementor
@@ -270,43 +309,11 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
         const body = ctx.generate(node.statement, flag)
 
-        const continueOrLeave = hasVariable ? [
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.Get),
-
-            op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
-
-            ...variableNames.flatMap((name) => [
-                op(OpCode.Literal, 2, [name]),
-                op(OpCode.GetRecord),
-                op(OpCode.Literal, 2, [name]),
-                op(OpCode.Get),
-                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
-            ]),
-
-            op(OpCode.Literal, 2, [1 + variableNames.length]),
-            ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
-            op(OpCode.GetRecord),
-            op(OpCode.SetMultiple),
-
-            op(OpCode.NodeOffset, 2, [headOf(condition)]),
-            op(OpCode.Jump)
-        ] : [
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.Get),
-
-            op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
-            op(OpCode.Literal, 2, [1]),
-            ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
-            op(OpCode.GetRecord),
-            op(OpCode.SetMultiple),
-
+        const continueOrLeave = [
+            ...generateLoopScopeCopy(node, [
+                { name: SpecialVariable.LoopIterator, flags: SetFlag.DeTDZ },
+                ...(hasVariable ? variableNames.map((name) => ({ name, flags: SetFlag.DeTDZ })) : []),
+            ], ctx),
             op(OpCode.NodeOffset, 2, [headOf(condition)]),
             op(OpCode.Jump)
         ]
@@ -449,42 +456,11 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
         const body = ctx.generate(node.statement, flag)
 
-        const continueOrLeave = hasVariable ? [
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.Get),
-            op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
-
-            ...variableNames.flatMap((name) => [
-                op(OpCode.Literal, 2, [name]),
-                op(OpCode.GetRecord),
-                op(OpCode.Literal, 2, [name]),
-                op(OpCode.Get),
-                op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
-            ]),
-
-            op(OpCode.Literal, 2, [1 + variableNames.length]),
-            ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
-            op(OpCode.GetRecord),
-            op(OpCode.SetMultiple),
-
-            op(OpCode.NodeOffset, 2, [headOf(condition)]),
-            op(OpCode.Jump)
-        ] : [
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            op(OpCode.Get),
-            op(OpCode.Literal, 2, [SetFlag.DeTDZ]),
-
-            op(OpCode.Literal, 2, [1]),
-            ...generateLeaveScope(),
-            ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
-            op(OpCode.GetRecord),
-            op(OpCode.SetMultiple),
-
+        const continueOrLeave = [
+            ...generateLoopScopeCopy(node, [
+                { name: SpecialVariable.LoopIterator, flags: SetFlag.DeTDZ },
+                ...(hasVariable ? variableNames.map((name) => ({ name, flags: SetFlag.DeTDZ })) : []),
+            ], ctx),
             op(OpCode.NodeOffset, 2, [headOf(condition)]),
             op(OpCode.Jump)
         ]

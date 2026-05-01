@@ -174,12 +174,6 @@ export function createCodegenContext(
         }
     }
 
-    function preserveScopeRuntimeNames(map: Map<ts.Node, Set<string>>, scopeNode: ts.Node) {
-        for (const name of scopes.get(scopeNode)?.keys() ?? []) {
-            addRuntimeNamePreserve(map, scopeNode, name)
-        }
-    }
-
     function preserveVariableNames(map: Map<ts.Node, Set<string>>, name: ts.BindingName) {
         for (const variable of extractVariable(name)) {
             preserveRuntimeNameEverywhere(map, variable.text)
@@ -239,10 +233,6 @@ export function createCodegenContext(
 
             if (ts.isClassDeclaration(current) && current.name) {
                 preserveRuntimeNameEverywhere(map, current.name.text)
-            }
-
-            if (ts.isForStatement(current) || ts.isForInStatement(current) || ts.isForOfStatement(current)) {
-                preserveScopeRuntimeNames(map, current)
             }
 
             if (ts.isCatchClause(current) && current.variableDeclaration != null) {

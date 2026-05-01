@@ -286,6 +286,80 @@ print(read([['a', 1], ['b', 2]]))
     expect(out).toEqual(['a1b2'])
 })
 
+test('classic for block scoped copy omits runtime binding name', () => {
+    const out: any[] = []
+    const code = `
+function read() {
+    const fns = []
+    for (let loopIndex = 0; loopIndex < 3; loopIndex++) {
+        fns.push(() => loopIndex)
+    }
+    return fns[0]() + ':' + fns[1]() + ':' + fns[2]()
+}
+print(read())
+`
+    const strings = collectStringLiterals(code)
+    const [program] = compile(code)
+
+    expect(strings).not.toContain('loopIndex')
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual(['0:1:2'])
+})
+
+test('for-of block scoped copy omits runtime binding name', () => {
+    const out: any[] = []
+    const code = `
+function read(values) {
+    const fns = []
+    for (let loopValue of values) {
+        fns.push(() => loopValue)
+    }
+    return fns[0]() + ':' + fns[1]()
+}
+print(read([2, 4]))
+`
+    const strings = collectStringLiterals(code)
+    const [program] = compile(code)
+
+    expect(strings).not.toContain('loopValue')
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual(['2:4'])
+})
+
+test('for-of destructuring per-iteration copy keeps binding pattern behavior', () => {
+    const out: any[] = []
+    const [program] = compile(`
+function read(values) {
+    const fns = []
+    for (let [loopFirst, loopSecond] of values) {
+        fns.push(() => loopFirst + loopSecond)
+    }
+    return fns[0]() + ':' + fns[1]()
+}
+print(read([[1, 2], [3, 4]]))
+`)
+
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual(['3:7'])
+})
+
+test('with scopes keep dynamic loop copy fallback working', () => {
+    const out: any[] = []
+    const [program] = compile(`
+function read() {
+    with ({}) {
+        for (let loopIndex = 0; loopIndex < 2; loopIndex++) {
+            print(loopIndex)
+        }
+    }
+}
+read()
+`)
+
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }], undefined, [], compile)
+    expect(out).toEqual([0, 1])
+})
+
 test('range builds preserve static local names for scope materialization', () => {
     const strings = collectStringLiterals(`
 function outer() {
