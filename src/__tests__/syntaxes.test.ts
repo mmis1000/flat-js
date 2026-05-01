@@ -53,8 +53,10 @@ const syntaxes = [
     ['LabeledStatement let newline block', 'if (false) { label: let // ASI\n{} }'],
     ['LabeledStatement let newline identifier', 'if (false) { label: let // ASI\nvalue = 1 }'],
     ['IfStatement let newline block', 'if (false) let // ASI\n{}'],
+    ['IfStatement sloppy direct function body', 'if (true) function f() {}'],
     ['WithStatement', 'with ({ value: 1 }) { value }'],
     ['Catch destructuring', 'try { throw value } catch ({ a, b }) { a + b }'],
+    ['Catch block sloppy if function sharing catch parameter', 'try {} catch (e) { if (false) function e() {} }'],
     ['ForOf assignment pattern head', 'for ([a, b] of pairs) { a + b }'],
     ['Nested Scope', `
     let a = 0;
@@ -94,5 +96,30 @@ test('DoStatement declaration body is a syntax error', () => {
 test('WhileStatement labelled function body is a syntax error', () => {
     expect(() => {
         compiler.compile('while (false) label: function f() {}')
+    }).toThrow(SyntaxError)
+})
+
+test.each([
+    ['class body', 'if (true) class C {}'],
+    ['async function body', 'if (true) async function f() {}'],
+    ['generator body', 'if (true) function* g() {}'],
+    ['strict direct function body', '"use strict"; if (true) function f() {}'],
+    ['labelled function body', 'if (false) label: function f() {}'],
+    ['let array newline body', 'if (false) let\n[value] = []'],
+])('IfStatement %s is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})
+
+test('Catch block function redeclaring catch parameter is a syntax error', () => {
+    expect(() => {
+        compiler.compile('try {} catch (e) { function e() {} }')
+    }).toThrow(SyntaxError)
+})
+
+test('Catch block labelled function redeclaring catch parameter is a syntax error', () => {
+    expect(() => {
+        compiler.compile('try {} catch (e) { label: function e() {} }')
     }).toThrow(SyntaxError)
 })

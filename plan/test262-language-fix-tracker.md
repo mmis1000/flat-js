@@ -192,6 +192,19 @@ Reduce the `language` category failures in targeted batches:
     - the loop statement-body validator now covers `WhileStatement` and `DoStatement`, matching the existing `for` / `for-in` / `for-of` single-body declaration checks
     - declaration-shaped bodies are rejected for `function`, async function, generator, async generator, class, `let`, `const`, labeled function, and `let [` ASI forms that TypeScript accepts but Test262 marks parse-negative
 
+- [x] `if-and-catch-statement-body-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scans:
+    - `language/statements/if/**`: `43` failing files -> `7`
+    - `language/statements/try/**`: `8` failing files -> `7`
+  - Fixed areas:
+    - `if` statement bodies now reject declaration-shaped statement-position forms while preserving the sloppy Annex B direct `FunctionDeclaration` exception
+    - strict-mode direct `if (...) function f() {}` bodies, async/generator function declarations, class declarations, lexical declarations, labeled functions, and `let [` newline bodies now throw `SyntaxError`
+    - catch blocks now reject direct lexical declarations, including direct and labeled function declarations, that redeclare a catch parameter
+  - Remaining focused failures:
+    - `if`: the seven `cptn-*` completion-value tests
+    - `try`: completion-value tests plus the catch block lexical-scope runtime tail
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -204,7 +217,7 @@ Reduce the `language` category failures in targeted batches:
       - host/module interaction exclusions: `57`
     - after the 2026-05-02 compiler-only parse-negative refresh:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `225`
+      - actionable early-error files still not caught as `SyntaxError`: `188`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
@@ -218,9 +231,9 @@ Reduce the `language` category failures in targeted batches:
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `269` total (`261` runtime, `8` early)
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
-    - control-flow completion and iterator close: `125` total (`88` runtime, `37` early)
+    - control-flow completion and iterator close: `88` total (`88` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
-      - the remaining early-error tail is now concentrated in `if` single-body declaration forms and `try`/`catch` function declaration position checks
+      - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
     - lexical/global declaration early errors: `132` total (`43` runtime, `89` early)
       - fix redeclarations, global script declaration conflicts, and owned static checks
     - object literal, property keys, named evaluation: `126` total (`115` runtime, `11` early) - mostly completed / validation-only
@@ -244,7 +257,7 @@ Reduce the `language` category failures in targeted batches:
     - current compiler-only parse-negative refresh: `39`
     - documented Node/browser web-compat call-assignment target path: `4`
     - invalid RegExp literals, modifiers, and named-group spellings still accepted by TypeScript: `35`
-    - strict reserved words, optional-chain invalid targets, invalid loop declaration heads, directive/ASI forms, and invalid statement-body declarations are now either caught by TypeScript diagnostics or covered by custom validators, except for the actionable `if` / `try` tails listed above
+    - strict reserved words, optional-chain invalid targets, invalid loop declaration heads, directive/ASI forms, and invalid statement-body declarations are now either caught by TypeScript diagnostics or covered by custom validators
   - Host/module interaction exclusions:
     - keep these out of `runtime-semantic-cluster` because they require host/module machinery, not script runtime fixes
     - module parse/instantiation/evaluation: `33`
@@ -504,3 +517,14 @@ Reduce the `language` category failures in targeted batches:
   - actionable early-error files now total `225` across the runtime-semantic groups
   - non-actionable TypeScript/parser-delegation files now total `39`: `4` call-assignment web-compat cases and `35` RegExp grammar gaps
   - the full broad `language` summary was not regenerated in this pass; runtime counts in the group table still come from the last completed broad scan
+- 2026-05-02: Cleared the `if` / `try` statement-position declaration early-error tail.
+  - added Annex B-aware `if` body validation and catch-parameter lexical redeclaration validation in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - focused `language/statements/if/**` rerun now records `7` runtime completion-value failures and no early-error failures
+  - focused `language/statements/try/**` rerun now records `7` runtime/scope failures and no early-error failures
+  - adjusted the refreshed actionable early-error count from `225` to `188`
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `npm run build`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/if`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/try`

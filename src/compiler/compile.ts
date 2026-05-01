@@ -522,6 +522,10 @@ function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
     return current
 }
 
+function hasLabeledStatementWrapper(statement: ts.Statement): boolean {
+    return ts.isLabeledStatement(statement)
+}
+
 function isInvalidSingleStatementBody(statement: ts.Statement): boolean {
     const item = unwrapLabeledStatementItem(statement)
 
@@ -530,6 +534,24 @@ function isInvalidSingleStatementBody(statement: ts.Statement): boolean {
     }
 
     return ts.isClassDeclaration(item) || ts.isFunctionDeclaration(item)
+}
+
+function isInvalidIfStatementBody(statement: ts.Statement, strictContext: boolean): boolean {
+    const item = unwrapLabeledStatementItem(statement)
+
+    if (ts.isVariableStatement(item)) {
+        return !!(item.declarationList.flags & ts.NodeFlags.BlockScoped)
+    }
+
+    if (ts.isClassDeclaration(item)) {
+        return true
+    }
+
+    if (ts.isFunctionDeclaration(item)) {
+        return strictContext || hasLabeledStatementWrapper(statement) || isNonAnnexBFunctionDeclaration(item)
+    }
+
+    return false
 }
 
 function validateBindingPattern(pattern: ts.BindingName, strictContext: boolean) {
@@ -852,6 +874,25 @@ function validateLoopSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
     visit(sourceNode, false)
 }
 
+function validateIfStatementSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
+    const visit = (node: ts.Node, inheritedStrict: boolean) => {
+        const strictContext = getStrictContext(node, inheritedStrict, withStrict)
+
+        if (ts.isIfStatement(node)) {
+            if (
+                isInvalidIfStatementBody(node.thenStatement, strictContext)
+                || (node.elseStatement != null && isInvalidIfStatementBody(node.elseStatement, strictContext))
+            ) {
+                throw new SyntaxError('invalid if statement body')
+            }
+        }
+
+        node.forEachChild((child) => visit(child, strictContext))
+    }
+
+    visit(sourceNode, false)
+}
+
 function getStaticPropertyName(name: ts.PropertyName): string | null {
     if (ts.isComputedPropertyName(name)) {
         return null
@@ -1022,6 +1063,51 @@ function validateSwitchDeclarationSyntax(sourceNode: ts.SourceFile, withStrict: 
     visit(sourceNode, false)
 }
 
+function validateCatchDeclarationSyntax(sourceNode: ts.SourceFile) {
+    const collectDirectLexicallyDeclaredNames = (statement: ts.Statement): string[] => {
+        const item = unwrapLabeledStatementItem(statement)
+
+        if (ts.isVariableStatement(item) && item.declarationList.flags & ts.NodeFlags.BlockScoped) {
+            return item.declarationList.declarations.flatMap((declaration) =>
+                extractVariable(declaration.name).map((identifier) => identifier.text)
+            )
+        }
+
+        if (ts.isClassDeclaration(item) && item.name != null) {
+            return [item.name.text]
+        }
+
+        if (ts.isFunctionDeclaration(item) && item.name != null) {
+            return [item.name.text]
+        }
+
+        return []
+    }
+
+    const visit = (node: ts.Node) => {
+        if (ts.isCatchClause(node) && node.variableDeclaration != null) {
+            const catchNames = new Set(extractVariable(node.variableDeclaration.name).map((identifier) => identifier.text))
+            const lexicalNames = new Set<string>()
+
+            for (const statement of node.block.statements) {
+                for (const name of collectDirectLexicallyDeclaredNames(statement)) {
+                    lexicalNames.add(name)
+                }
+            }
+
+            for (const name of catchNames) {
+                if (lexicalNames.has(name)) {
+                    throw new SyntaxError('catch parameter conflicts with lexical declaration')
+                }
+            }
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
+}
+
 function toSourceRange(locationMap: Map<number, [number, number]>, start: number, end: number): [number, number, number, number] {
     const startPos = locationMap.get(start)!
     const endPos = locationMap.get(end)!
@@ -1049,6 +1135,8 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
     validateLoopSyntax(sourceNode, withStrict)
+    validateIfStatementSyntax(sourceNode, withStrict)
+    validateCatchDeclarationSyntax(sourceNode)
     validateSwitchDeclarationSyntax(sourceNode, withStrict)
 
     markParent(sourceNode, parentMap)
