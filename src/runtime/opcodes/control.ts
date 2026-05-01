@@ -106,6 +106,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                 [Fields.break]: 0,
                 [Fields.depth]: 0,
                 [Fields.variable]: catchName,
+                [Fields.savedEvalResult]: undefined,
                 [Fields.exit]: exitAddr,
                 [Fields.programSection]: ctx[OpcodeContextField.currentProgram],
                 [Fields.globalThis]: ctx[OpcodeContextField.currentFrame][Fields.globalThis],
@@ -138,6 +139,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
 
             switch (prevState) {
                 case TryCatchFinallyState.Finally:
+                    ctx[OpcodeContextField.evalResult] = frame[Fields.savedEvalResult]
                     switch (prevResolveType) {
                         case ResolveType.normal:
                             ctx[OpcodeContextField.stack].pop()
@@ -162,6 +164,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                         frame[Fields.state] = TryCatchFinallyState.Finally
                         frame[Fields.resolveType] = ResolveType.normal
                         frame[Fields.value] = undefined
+                        frame[Fields.savedEvalResult] = ctx[OpcodeContextField.evalResult]
                         ctx[OpcodeContextField.ptr] = finallyPtr
                         return BREAK_COMMAND
                     }

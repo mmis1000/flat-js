@@ -157,11 +157,14 @@ function generateNamedScope(names: string[]): Segment {
     ]
 }
 
+const generateEvalResultReset = (flag: number): Segment =>
+    flag & StatementFlag.Eval
+        ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
+        : []
+
 export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isIfStatement(node)) {
-        const resetEvalResult = flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)
-            ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
-            : []
+        const resetEvalResult = generateEvalResultReset(flag)
         const exit = [op(OpCode.Nop, 0)]
         const whenTrue = [
             op(OpCode.Nop, 0),
@@ -211,7 +214,10 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
             : undefined
         const catchStatement = node.catchClause
             ? catchTempName == null
-                ? ctx.generate(node.catchClause.block, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch)
+                ? [
+                    ...generateEvalResultReset(flag),
+                    ...ctx.generate(node.catchClause.block, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch),
+                ]
                 : [
                     ...generateNamedScope(catchBindingNames),
                     ...generateBindingInitialization(
@@ -224,6 +230,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                         flag,
                         ctx
                     ),
+                    ...generateEvalResultReset(flag),
                     ...node.catchClause.block.statements.map((statement) =>
                         ctx.generate(statement, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch)
                     ).flat(),
@@ -235,7 +242,10 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         ]
 
         const finallyStatement = node.finallyBlock
-            ? ctx.generate(node.finallyBlock, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Finally)
+            ? [
+                ...generateEvalResultReset(flag),
+                ...ctx.generate(node.finallyBlock, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Finally),
+            ]
             : [op(OpCode.Nop, 0)]
         const exitFinally = [
             op(OpCode.ExitTryCatchFinally)
@@ -259,6 +269,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         ]
 
         return [
+            ...generateEvalResultReset(flag),
             ...init,
             ...tryStatements,
             ...exitTry,
@@ -336,9 +347,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         const connectedBody: Op[] = []
         const connectedBodyExit = op(OpCode.Nop, 0)
         const connectedBodyEnd = hasVariables ? generateLeaveScope() : [op(OpCode.Nop, 0)]
-        const resetEvalResult = flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)
-            ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
-            : []
+        const resetEvalResult = generateEvalResultReset(flag)
         const lexicalFunctionInitializers = node.caseBlock.clauses
             .flatMap((clause) => clause.statements)
             .filter((statement): statement is ts.FunctionDeclaration =>

@@ -1174,6 +1174,7 @@ export const getExecution = (
                     frame[Fields.state] = TryCatchFinallyState.Finally
                     frame[Fields.resolveType] = ResolveType.return
                     frame[Fields.value] = value
+                    frame[Fields.savedEvalResult] = evalResult
                     ptr = finallyAddr
                 } else {
                     stack.pop()
@@ -1259,6 +1260,7 @@ export const getExecution = (
                     currentProgram = frame[Fields.programSection]
                 } else if (finallyAddr >= 0) {
                     frame[Fields.state] = TryCatchFinallyState.Finally
+                    frame[Fields.savedEvalResult] = evalResult
                     ptr = finallyAddr
                     currentProgram = frame[Fields.programSection]
                 } else {
@@ -1273,6 +1275,7 @@ export const getExecution = (
                 frame[Fields.value] = value
 
                 if (finallyAddr >= 0) {
+                    frame[Fields.savedEvalResult] = evalResult
                     ptr = finallyAddr
                     currentProgram = frame[Fields.programSection]
                 } else {
@@ -1319,6 +1322,7 @@ export const getExecution = (
                             nextFrame[Fields.resolveType] = ResolveType.break
                             nextFrame[Fields.depth] = depth
                             nextFrame[Fields.break] = frame[Fields.break]
+                            nextFrame[Fields.savedEvalResult] = evalResult
                             ptr = finallyAddr
                             break loop
                         }
@@ -1350,6 +1354,7 @@ export const getExecution = (
                     frame[Fields.state] = TryCatchFinallyState.Finally
                     frame[Fields.resolveType] = ResolveType.break
                     // frame[Fields.value] = value
+                    frame[Fields.savedEvalResult] = evalResult
                     ptr = finallyAddr
                     currentProgram = frame[Fields.programSection]
                 } else {

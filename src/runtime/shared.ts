@@ -171,6 +171,7 @@ export const enum Fields {
     names,
     flags,
     values,
+    savedEvalResult,
 }
 
 interface BaseFrame {
@@ -219,6 +220,7 @@ interface TryFrame extends BaseFrame {
     [Fields.depth]: number,
 
     [Fields.variable]: string
+    [Fields.savedEvalResult]: unknown
 }
 
 export type Frame = FunctionFrame | TryFrame

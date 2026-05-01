@@ -50,6 +50,17 @@ test('compileAndRun: if statements with empty completion reset eval result ', ()
     expect(compileAndRun('11; do { 12; if (true) { 13; break; } 14; } while (false)')).toBe(13)
 })
 
+test('compileAndRun: try statements preserve completion values ', () => {
+    expect(compileAndRun('1; try {} catch (err) {}')).toBe(undefined)
+    expect(compileAndRun('2; try { 3; } catch (err) {}')).toBe(3)
+    expect(compileAndRun('4; try { throw null; } catch (err) {}')).toBe(undefined)
+    expect(compileAndRun('5; try { throw null; } catch (err) { 6; }')).toBe(6)
+    expect(compileAndRun('7; try { 8; } finally { 9; }')).toBe(8)
+    expect(compileAndRun('10; do { 11; try { 12; } finally { break; } 13; } while (false)')).toBe(undefined)
+    expect(compileAndRun('14; do { 15; try { 16; } finally { 17; break; } 18; } while (false)')).toBe(17)
+    expect(compileAndRun('19; do { 20; try { 21; break; } finally { 22; } 23; } while (false)')).toBe(21)
+})
+
 test('compileAndRun: finally does not affects result ', () => {
     expect(compileAndRun('try { throw 0 } catch (err) { 42 } finally { 43 }')).toBe(42)
 })

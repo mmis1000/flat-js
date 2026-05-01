@@ -147,7 +147,7 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
     }
 
     if (ts.isExpressionStatement(node)) {
-        if (flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)) {
+        if (flag & StatementFlag.Eval) {
             return [
                 ...ctx.generate(node.expression, flag),
                 op(OpCode.SetEvalResult),

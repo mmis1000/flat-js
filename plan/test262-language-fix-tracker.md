@@ -213,6 +213,17 @@ Reduce the `language` category failures in targeted batches:
     - eval-mode `if` statements now reset the completion value to `undefined` before evaluating the condition, so empty true/false/else branches do not leak a previous expression completion
     - expression-statement branches still replace the result normally, and empty abrupt branch completions such as `break` preserve the last branch expression only when one executed
 
+- [x] `try-completion-values`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - `language/statements/try/**`: `7` failing files -> `1`
+  - Fixed areas:
+    - eval-mode `try` and `catch` blocks now reset completion to `undefined` before block evaluation, so empty selected clauses do not leak a prior expression completion
+    - `finally` blocks now update completion while they execute, but a normally completed `finally` restores the saved `try` / `catch` completion
+    - abrupt `finally` completions such as `break` now replace the saved completion with the final block's own last value, including `undefined` for empty abrupt completions
+  - Remaining focused failure:
+    - `scope-catch-block-lex-open.js`: catch block lexical scope capture
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -239,7 +250,7 @@ Reduce the `language` category failures in targeted batches:
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `269` total (`261` runtime, `8` early)
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
-    - control-flow completion and iterator close: `81` total (`81` runtime, `0` early)
+    - control-flow completion and iterator close: `75` total (`75` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
       - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
     - lexical/global declaration early errors: `132` total (`43` runtime, `89` early)
@@ -545,3 +556,13 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/utils.test.ts`
     - `npm run build`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/if`
+- 2026-05-02: Cleared `try` statement eval completion-value tails except catch block lexical capture.
+  - eval-mode `try` / `catch` / `finally` completion handling now resets empty selected clauses, restores saved completions for normal `finally`, and lets abrupt `finally` replace the completion in [control-flow.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/control-flow.ts:1>) and [control.ts](</M:/Playground/flat-js/src/runtime/opcodes/control.ts:1>)
+  - focused `language/statements/try/**` rerun now records `1` remaining failure:
+    - `scope-catch-block-lex-open.js`
+  - adjusted the control-flow runtime count from `81` to `75`
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/utils.test.ts`
+    - `npm run build`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/try`

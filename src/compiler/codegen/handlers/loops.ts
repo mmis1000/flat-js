@@ -13,7 +13,7 @@ type LoopScopeCopyItem = {
 }
 
 const generateLoopEvalResultReset = (flag: number): Segment =>
-    flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)
+    flag & StatementFlag.Eval
         ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
         : []
 
