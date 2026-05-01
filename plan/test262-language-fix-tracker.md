@@ -171,6 +171,18 @@ Reduce the `language` category failures in targeted batches:
       - `head-lhs-let.js`
       - `identifier-let-allowed-as-lefthandside-expression-not-strict.js`
 
+- [x] `classic-for-completion-and-lexical-scope`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - before: `4` failing files (`4` intended, `0` out of scope)
+    - after: `1` failing file (`1` intended, `0` out of scope)
+  - Fixed areas:
+    - classic `for` loops now create the initial per-iteration lexical environment after lexical initialization and before the first test/body evaluation
+    - eval-mode classic `for` loop bodies reset completion at each iteration, so an empty `break` on a later iteration does not leak an earlier iteration's expression completion
+  - Remaining focused `for` failure:
+    - one sloppy-script `let` identifier LHS parser-shape tail that TypeScript parses as an invalid declaration head:
+      - `head-lhs-let.js`
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -455,3 +467,12 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/static-scope-resolution.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/for-in`
+- 2026-05-02: Reduced the focused `language/statements/for/**` slice to its current parser tail.
+  - fixed classic `for` initial per-iteration lexical scope creation and eval completion leakage across iterations
+  - focused `language/statements/for/**` rerun now records:
+    - `1` intended parser-shape failure
+    - `0` out-of-scope failures
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/static-scope-resolution.test.ts src/__tests__/utils.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/for`

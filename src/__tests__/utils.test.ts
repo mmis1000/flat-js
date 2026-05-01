@@ -27,6 +27,19 @@ test('compileAndRun: loop statements with empty completion reset eval result ', 
     expect(compileAndRun('42; for (let i = 0; i < 5; i++);')).toBe(undefined)
 })
 
+test('compileAndRun: for loop break with empty completion ignores prior iterations ', () => {
+    expect(compileAndRun(`
+        var count = 0
+        for (count = 0;;) {
+            if (count === 5) {
+                break
+            } else {
+                count++
+            }
+        }
+    `)).toBe(undefined)
+})
+
 test('compileAndRun: finally does not affects result ', () => {
     expect(compileAndRun('try { throw 0 } catch (err) { 42 } finally { 43 }')).toBe(42)
 })

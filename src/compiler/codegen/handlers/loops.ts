@@ -137,22 +137,25 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 op(OpCode.Nop, 0)
             ]
 
-        const update0: Segment = []
+        const loopScopeCopyItems: LoopScopeCopyItem[] = []
 
         if (hasScope && initializer && ts.isVariableDeclarationList(initializer)) {
-            const copyItems: LoopScopeCopyItem[] = []
-
             for (const item of initializer.declarations) {
                 for (const name of extractVariable(item.name)) {
-                    copyItems.push({
+                    loopScopeCopyItems.push({
                         name: name.text,
                         flags: SetFlag.DeTDZ | ((initializer.flags & ts.NodeFlags.Const) ? SetFlag.Freeze : 0),
                     })
                 }
             }
-
-            update0.push(...generateLoopScopeCopy(node, copyItems, ctx))
         }
+
+        const initialIterationScope = loopScopeCopyItems.length === 0
+            ? []
+            : generateLoopScopeCopy(node, loopScopeCopyItems, ctx)
+        const update0 = loopScopeCopyItems.length === 0
+            ? []
+            : generateLoopScopeCopy(node, loopScopeCopyItems, ctx)
 
         const update1 = incrementor
             ? [
@@ -172,7 +175,9 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             ...generateLoopEvalResultReset(flag),
             ...markInternals(entry0),
             ...entry1,
+            ...markInternals(initialIterationScope),
             ...conditionS,
+            ...generateLoopEvalResultReset(flag),
             ...body,
             continueOp,
             ...markInternals(update0),

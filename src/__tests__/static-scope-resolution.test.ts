@@ -298,6 +298,26 @@ print(probeBefore(), probeExprResult, probeDecl(), probeBody(), x)
     expect(out).toEqual(['outside', 'ReferenceError', 'i', 'i', 'outside'])
 })
 
+test('classic for lexical head creates an initial per-iteration scope', () => {
+    const out: any[] = []
+    const [program] = compile(`
+var probeBefore, probeTest, probeIncr, probeBody
+var runLoop = true
+
+for (
+    let x = 'outside', _ = probeBefore = function() { return x }
+    ; runLoop && (x = 'inside', probeTest = function() { return x })
+    ; probeIncr = function() { return x }
+)
+    probeBody = function() { return x }, runLoop = false
+
+print(probeBefore(), probeTest(), probeBody(), probeIncr())
+`)
+
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual(['outside', 'inside', 'inside', 'inside'])
+})
+
 test('for-of destructuring loop targets still initialize through binding patterns', () => {
     const out: any[] = []
     const [program] = compile(`
