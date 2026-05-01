@@ -68,9 +68,6 @@ const syntaxes = [
       default:
         function f() {}
     }
-    `],
-    ['DoStatement body hoisted function only', `
-    do function f() {} while (0)
     `]
 ]
 
@@ -81,3 +78,21 @@ for (let [name, code] of syntaxes) {
         }).not.toThrow()
     })
 }
+
+test('WhileStatement declaration body is a syntax error', () => {
+    expect(() => {
+        compiler.compile('while (false) function f() {}')
+    }).toThrow(SyntaxError)
+})
+
+test('DoStatement declaration body is a syntax error', () => {
+    expect(() => {
+        compiler.compile('do function f() {} while (false)')
+    }).toThrow(SyntaxError)
+})
+
+test('WhileStatement labelled function body is a syntax error', () => {
+    expect(() => {
+        compiler.compile('while (false) label: function f() {}')
+    }).toThrow(SyntaxError)
+})

@@ -183,32 +183,50 @@ Reduce the `language` category failures in targeted batches:
     - one sloppy-script `let` identifier LHS parser-shape tail that TypeScript parses as an invalid declaration head:
       - `head-lhs-let.js`
 
+- [x] `while-do-while-statement-body-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scans:
+    - `language/statements/while/**`: `9` failing files -> `0`
+    - `language/statements/do-while/**`: `9` failing files -> `0`
+  - Fixed areas:
+    - the loop statement-body validator now covers `WhileStatement` and `DoStatement`, matching the existing `for` / `for-in` / `for-of` single-body declaration checks
+    - declaration-shaped bodies are rejected for `function`, async function, generator, async generator, class, `let`, `const`, labeled function, and `let [` ASI forms that TypeScript accepts but Test262 marks parse-negative
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - intended-support matches: `2632`
-    - actionable Flat JS work: `2238`
-    - non-actionable TypeScript parser misses to document only: `394`
-    - host/module interaction exclusions: `57`
+    - last completed broad `language` scan still has the 2026-04-29 split:
+      - intended-support matches: `2632`
+      - actionable Flat JS work: `2238`
+      - non-actionable TypeScript parser misses to document only: `394`
+      - host/module interaction exclusions: `57`
+    - after the 2026-05-02 compiler-only parse-negative refresh:
+      - scanned Test262 `language` parse-negative files: `4389`
+      - actionable early-error files still not caught as `SyntaxError`: `225`
+      - non-actionable parser-delegation files: `39`
+      - out-of-scope unsupported-feature parse-negative files: `451`
+      - host/module parse-negative files: `422`
   - Actionable intended-support groups:
-    - functions, parameters, eval, arguments env: `537` total (`375` runtime, `162` early)
+    - counts below keep runtime counts from the last completed broad scan; early counts were refreshed by the 2026-05-02 compiler-only parse-negative pass
+    - functions, parameters, eval, arguments env: `423` total (`375` runtime, `48` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
-    - supported class constructors/methods/accessors/super: `546` total (`327` runtime, `219` early)
+    - supported class constructors/methods/accessors/super: `359` total (`327` runtime, `32` early)
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
-    - generators and async generators: `339` total (`261` runtime, `78` early)
+    - generators and async generators: `269` total (`261` runtime, `8` early)
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
-    - control-flow completion and iterator close: `288` total (`88` runtime, `200` early)
+    - control-flow completion and iterator close: `125` total (`88` runtime, `37` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
-    - lexical/global declaration early errors: `205` total (`43` runtime, `162` early)
+      - the remaining early-error tail is now concentrated in `if` single-body declaration forms and `try`/`catch` function declaration position checks
+    - lexical/global declaration early errors: `132` total (`43` runtime, `89` early)
       - fix redeclarations, global script declaration conflicts, and owned static checks
-    - object literal, property keys, named evaluation: `192` total (`115` runtime, `77` early) - mostly completed / validation-only
+    - object literal, property keys, named evaluation: `126` total (`115` runtime, `11` early) - mostly completed / validation-only
       - object literal property semantics were implemented by `eff9eeb`
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
-    - references, assignment, update/delete: `124` total (`72` runtime, `52` early) - completed / validation-only
+    - references, assignment, update/delete: `72` total (`72` runtime, `0` early) - completed / validation-only
       - reference update and delete semantics were implemented by `a929038`
       - keep this group in focused regression checks when adjacent operator/control-flow work changes reference handling
     - RegExp runtime behavior: `7` total (`7` runtime, `0` early)
@@ -223,14 +241,10 @@ Reduce the `language` category failures in targeted batches:
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
-    - invalid assignment target forms under `assignmenttargettype`: completed except the documented Node/browser web-compat call-assignment runtime path
-    - invalid RegExp literals, flags, modifiers, named groups, unicode escapes: `167`
-    - strict reserved words accepted as identifiers: `20`
-    - invalid optional-chain assignment/tag/update forms: `11`
-    - invalid loop declaration heads: `8`
-    - directive prologue / ASI parse forms: `7`
-    - function declarations in invalid statement positions: `5`
-    - invalid `await` grammar forms: `2`
+    - current compiler-only parse-negative refresh: `39`
+    - documented Node/browser web-compat call-assignment target path: `4`
+    - invalid RegExp literals, modifiers, and named-group spellings still accepted by TypeScript: `35`
+    - strict reserved words, optional-chain invalid targets, invalid loop declaration heads, directive/ASI forms, and invalid statement-body declarations are now either caught by TypeScript diagnostics or covered by custom validators, except for the actionable `if` / `try` tails listed above
   - Host/module interaction exclusions:
     - keep these out of `runtime-semantic-cluster` because they require host/module machinery, not script runtime fixes
     - module parse/instantiation/evaluation: `33`
@@ -476,3 +490,17 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/static-scope-resolution.test.ts src/__tests__/utils.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/for`
+- 2026-05-02: Cleared `while` / `do-while` statement-body early-error tails.
+  - extended loop statement-body validation to `WhileStatement` and `DoStatement`
+  - focused reruns now record `0` failing files for both:
+    - `language/statements/while/**`
+    - `language/statements/do-while/**`
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/while`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/do-while`
+- 2026-05-02: Refreshed early-error group counts with a compiler-only parse-negative scan after the TypeScript diagnostic cleanup.
+  - actionable early-error files now total `225` across the runtime-semantic groups
+  - non-actionable TypeScript/parser-delegation files now total `39`: `4` call-assignment web-compat cases and `35` RegExp grammar gaps
+  - the full broad `language` summary was not regenerated in this pass; runtime counts in the group table still come from the last completed broad scan

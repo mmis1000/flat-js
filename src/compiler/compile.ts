@@ -725,6 +725,8 @@ function validateLoopSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
             ts.isForStatement(node)
             || ts.isForInStatement(node)
             || ts.isForOfStatement(node)
+            || ts.isWhileStatement(node)
+            || ts.isDoStatement(node)
         ) {
             if (isInvalidSingleStatementBody(node.statement)) {
                 throw new SyntaxError('invalid loop statement body')
