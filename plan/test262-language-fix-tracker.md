@@ -154,7 +154,7 @@ Reduce the `language` category failures in targeted batches:
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
-    - invalid assignment target forms under `assignmenttargettype`: completed 2026-05-01; focused slice is green
+    - invalid assignment target forms under `assignmenttargettype`: completed except the documented Node/browser web-compat call-assignment runtime path
     - invalid RegExp literals, flags, modifiers, named groups, unicode escapes: `167`
     - strict reserved words accepted as identifiers: `20`
     - invalid optional-chain assignment/tag/update forms: `11`
@@ -195,6 +195,7 @@ Reduce the `language` category failures in targeted batches:
       - `TS1499`, `TS1500`, `TS1504`, `TS1507`, `TS1508`, `TS1509`, `TS1510`, `TS1512`, `TS1514`, `TS1515`, `TS1516`, `TS1532`, `TS1534`, `TS1535`
     - references, optional chaining, `super`, `new.target`, and lexical redeclarations:
       - `TS1358`, `TS2335`, `TS2337`, `TS2364`, `TS2451`, `TS2480`, `TS2481`, `TS2492`, `TS2660`, `TS2777`, `TS2779`, `TS2813`, `TS2814`, `TS5076`, `TS17013`
+      - `TS2364` is intentionally ignored for call-expression `=` / compound-assignment targets because browsers and Node evaluate the call and throw `ReferenceError` at runtime; logical assignment targets still remain early `SyntaxError`s
   - Deliberately not whitelisted from the scan:
     - TypeScript/type-system opinions or no-lib fallout, such as missing names, unreachable `??` RHS, impossible comparisons, async `Promise` library complaints, and tuple/object type complaints
     - module and host-feature diagnostics for `import`/`export`, dynamic import, `import.meta`, top-level await, import attributes, and string-named module exports
@@ -211,7 +212,7 @@ Reduce the `language` category failures in targeted batches:
   - Result:
     - `language/expressions/logical-assignment/**`: intended failures are now `0`; only `21` out-of-scope class/private-feature files remain
     - `language/expressions/compound-assignment/**`: early-error bucket is gone; intended failures are now the `11` invalid PutValue runtime tails
-    - `language/expressions/assignmenttargettype/**`: focused slice is green (`0` failing files)
+    - `language/expressions/assignmenttargettype/**`: raw focused scan now records `4` intentional web-compat call-assignment parse-negative mismatches plus `6` out-of-scope import-call files
 
 ## Run Log
 
@@ -343,3 +344,9 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/assignmenttargettype`
     - `npm test`
+- 2026-05-01: Documented the call-expression assignment target host-compat exception.
+  - `print(0) = 1` and `print(1) += 1` now compile, evaluate the call, and throw runtime `ReferenceError`, matching Node/browser behavior
+  - the `TS2364` semantic-diagnostic whitelist skips only call-expression `=` / compound-assignment targets; logical assignment remains an early `SyntaxError`
+  - focused `language/expressions/assignmenttargettype/**` rerun now records:
+    - `4` intentional strict parse-negative mismatches for direct/parenthesized call-expression `=` and compound assignment
+    - `6` out-of-scope import-call files

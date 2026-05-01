@@ -272,7 +272,22 @@ testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
 testRuntimeThrows('undefined ++i', '++i;', ReferenceError, printProvider)
 testRuntimeThrows('undefined --i', '--i;', ReferenceError, printProvider)
 testRuntimeThrows('undefined i += 1', 'i += 1;', ReferenceError, printProvider)
-testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', SyntaxError, printProvider)
+// Browsers and Node preserve the web-compat call target path: evaluate the call,
+// then throw ReferenceError instead of rejecting this as an early SyntaxError.
+test('Runtime: web-compat bad left hand call assignment targets', () => {
+    for (const [source, expectedResults] of [
+        ['print(0) = 1', [0]],
+        ['print(1) += 1', [1]],
+    ] as const) {
+        const [program] = compiler.compile(source)
+        const results: any[] = []
+
+        expect(() => {
+            runtime.run(program, 0, fakeGlobalThis, [printProvider(results)], undefined, [], compiler.compile)
+        }).toThrowError(ReferenceError)
+        expect(results).toEqual(expectedResults)
+    }
+})
 testRuntimeThrows('syntax error for invalid syntax', '{', SyntaxError, printProvider)
 
 testRuntime('this', 'print(this === globalThis)', [true], printProvider)

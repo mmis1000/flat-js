@@ -1141,11 +1141,11 @@ test('semantic diagnostics for JavaScript early errors are compile errors', () =
             arguments &&= 20
         `,
         `
-            'use strict'
+            'use strict';
             (eval) = 20
         `,
         `
-            'use strict'
+            'use strict';
             (arguments) = 20
         `,
         `

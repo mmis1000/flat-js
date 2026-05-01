@@ -305,6 +305,7 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
         ? syntacticDiagnostics
         : program.getSemanticDiagnostics(validationSourceNode).filter((diagnostic) => (
             javascriptEarlyErrorSemanticDiagnosticCodes.has(diagnostic.code)
+            && !isWebCompatFunctionCallAssignmentDiagnostic(validationSourceNode, diagnostic)
         ))
 
     if (diagnostics.length > 0) {
@@ -314,6 +315,21 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
         }).join('\r\n')
         throw new SyntaxError(errorMessages)
     }
+}
+
+function findSmallestNodeAtSpan(root: ts.SourceFile, start: number, end: number): ts.Node | null {
+    let found: ts.Node | null = null
+
+    const visit = (node: ts.Node) => {
+        if (node.getStart(root, false) === start && node.getEnd() === end) {
+            found = node
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(root)
+    return found
 }
 
 function unwrapParenthesizedExpression(node: ts.Expression): ts.Expression {
@@ -351,6 +367,36 @@ function isAssignmentOperatorToken(kind: ts.SyntaxKind) {
         || kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken
         || kind === ts.SyntaxKind.BarBarEqualsToken
         || kind === ts.SyntaxKind.QuestionQuestionEqualsToken
+}
+
+function isWebCompatFunctionCallAssignmentOperator(kind: ts.SyntaxKind) {
+    return isAssignmentOperatorToken(kind)
+        && kind !== ts.SyntaxKind.AmpersandAmpersandEqualsToken
+        && kind !== ts.SyntaxKind.BarBarEqualsToken
+        && kind !== ts.SyntaxKind.QuestionQuestionEqualsToken
+}
+
+function isWebCompatFunctionCallAssignmentDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.Diagnostic) {
+    if (diagnostic.code !== 2364 || diagnostic.start == null || diagnostic.length == null) {
+        return false
+    }
+
+    const node = findSmallestNodeAtSpan(sourceNode, diagnostic.start, diagnostic.start + diagnostic.length)
+    if (node == null || !ts.isExpression(node) || !ts.isCallExpression(unwrapParenthesizedExpression(node))) {
+        return false
+    }
+
+    let target: ts.Node = node
+    while (target.parent != null && ts.isParenthesizedExpression(target.parent)) {
+        target = target.parent
+    }
+
+    // V8/browser-compatible hosts evaluate call-expression assignment targets and
+    // throw ReferenceError at runtime. Logical assignment stays an early SyntaxError.
+    return target.parent != null
+        && ts.isBinaryExpression(target.parent)
+        && target.parent.left === target
+        && isWebCompatFunctionCallAssignmentOperator(target.parent.operatorToken.kind)
 }
 
 function throwPatternSyntaxError(message: string): never {
