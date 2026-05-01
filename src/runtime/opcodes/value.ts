@@ -4,12 +4,15 @@ import {
     Fields,
     Frame,
     getIterator,
+    getIteratorRecord,
+    iteratorRecordNext,
     iteratorComplete,
     iteratorNext,
     environments,
     toNumeric,
     toPropertyKey,
 } from "../shared"
+import type { IteratorRecord } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
 
 const templateObjectCache = new WeakMap<number[], WeakMap<object, any[]>>()
@@ -197,6 +200,16 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                 }
             })(value)
             ctx[OpcodeContextField.pushCurrentFrameStack](iterator)
+        }
+            break
+        case OpCode.GetIterator: {
+            const value = ctx[OpcodeContextField.popCurrentFrameStack]()
+            ctx[OpcodeContextField.pushCurrentFrameStack](getIteratorRecord(value))
+        }
+            break
+        case OpCode.IteratorNext: {
+            const record = ctx[OpcodeContextField.popCurrentFrameStack]<IteratorRecord>()
+            ctx[OpcodeContextField.pushCurrentFrameStack](iteratorRecordNext(record))
         }
             break
         case OpCode.NextEntry: {

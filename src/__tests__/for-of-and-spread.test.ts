@@ -66,6 +66,128 @@ describe('for...of', () => {
         `)
         expect(result).toEqual([3, 4, 10])
     })
+
+    test('member assignment heads receive each entry', () => {
+        const result = compileAndRun(`
+            var x = {};
+            var count = 0;
+            for (x.y of [23]) {
+                count += 1;
+            }
+            [x.y, count];
+        `)
+        expect(result).toEqual([23, 1])
+    })
+
+    test('arguments objects are iterable', () => {
+        const result = compileAndRun(`
+            var out = [];
+            (function() {
+                for (var value of arguments) {
+                    out.push(value);
+                }
+            }(0, 'a', true));
+            out;
+        `)
+        expect(result).toEqual([0, 'a', true])
+    })
+
+    test('strict arguments iteration is unmapped', () => {
+        const result = compileAndRun(`
+            var out = [];
+            (function(a, b, c) {
+                'use strict';
+                for (var value of arguments) {
+                    a = b;
+                    b = c;
+                    c = 0;
+                    out.push(value);
+                }
+            }(1, 2, 3));
+            out;
+        `)
+        expect(result).toEqual([1, 2, 3])
+    })
+
+    test('iterator next method is captured during loop prologue', () => {
+        const result = compileAndRun(`
+            var calls = 0;
+            var iterator = {
+                next: function() {
+                    calls += 1;
+                    if (calls === 1) {
+                        iterator.next = function() {
+                            throw new Error('next was read again');
+                        };
+                        return { done: false, value: 7 };
+                    }
+                    return { done: true };
+                }
+            };
+            var iterable = {};
+            iterable[Symbol.iterator] = function() {
+                return iterator;
+            };
+
+            var total = 0;
+            for (var value of iterable) {
+                total += value;
+            }
+            [total, calls];
+        `)
+        expect(result).toEqual([7, 2])
+    })
+
+    test('iterator next must return an object', () => {
+        expect(() => compileAndRun(`
+            var iterable = {};
+            iterable[Symbol.iterator] = function() {
+                return {
+                    next: function() {
+                        return 1;
+                    }
+                };
+            };
+            for (var value of iterable) {}
+        `)).toThrow(TypeError)
+    })
+
+    test('iterator result proxies only expose done and value', () => {
+        const result = compileAndRun(`
+            var iterable = {};
+            var first = true;
+            iterable[Symbol.iterator] = function() {
+                return {
+                    next: function() {
+                        if (first) {
+                            first = false;
+                            return new Proxy({}, {
+                                get: function(target, name) {
+                                    if (name === 'done') return false;
+                                    if (name === 'value') return 23;
+                                    throw new Error('unexpected property');
+                                }
+                            });
+                        }
+                        return { done: true };
+                    }
+                };
+            };
+            var seen = 0;
+            for (var value of iterable) {
+                seen = value;
+            }
+            seen;
+        `)
+        expect(result).toBe(23)
+    })
+
+    test('invalid for-of statement forms are syntax errors', () => {
+        expect(() => compile(`for (var x of []) function f() {}`)).toThrow(SyntaxError)
+        expect(() => compile(`for (var x of []) label: function f() {}`)).toThrow(SyntaxError)
+        expect(() => compile(`for (var x of []) let y;`)).toThrow(SyntaxError)
+        expect(() => compile(`for (this of []) {}`)).toThrow(SyntaxError)
+    })
 })
 
 describe('array spread [...iterable]', () => {

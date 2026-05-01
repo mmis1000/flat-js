@@ -103,7 +103,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                 const obj = ctx[OpcodeContextField.createArgumentObject]()
                 const bindingLength = Math.min(argumentNameCount, parameterCount)
-                const mapsArguments = simpleParameterList
+                const mapsArguments = simpleParameterList && !strict
 
                 for (let i = 0; i < parameterCount; i++) {
                     if (mapsArguments && i < bindingLength) {

@@ -498,6 +498,19 @@ export const enum OpCode {
      */
     GetPropertyIterator,
     /**
+     * Creates an ECMAScript iterator record for `for...of`.
+     * Stack (bottom to top): iterable
+     * Result: iteratorRecord
+     * Notes: Captures the iterator's `next` method during loop prologue.
+     */
+    GetIterator,
+    /**
+     * Advances an ECMAScript iterator record.
+     * Stack (bottom to top): iteratorRecord
+     * Result: iteratorEntry
+     */
+    IteratorNext,
+    /**
      * Advances an iterator and pushes its `IteratorResult`.
      * Stack (bottom to top): iterator
      * Result: iteratorEntry

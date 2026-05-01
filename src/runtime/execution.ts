@@ -145,16 +145,26 @@ export const getExecution = (
         [IDENTIFIER_REFERENCE_FRAME]: frame,
         [IDENTIFIER_REFERENCE_SCOPE]: scope,
     } as IdentifierReference)
+    const hasScopeInternalProperty = (value: object, key: symbol) => {
+        let current: object | null = value
+        while (current != null) {
+            if (Object.prototype.hasOwnProperty.call(current, key)) {
+                return true
+            }
+            current = Object.getPrototypeOf(current)
+        }
+        return false
+    }
     const isEnvironmentScopeObject = (value: unknown): value is Scope => {
         if (!isObjectLike(value) || environments.has(value) || isIdentifierReference(value)) {
             return false
         }
 
         const internal = getScopeInternal(value as Scope)
-        return internal[SCOPE_WITH_OBJECT] !== undefined
-            || internal[SCOPE_FLAGS] !== undefined
-            || internal[SCOPE_STATIC_SLOTS] !== undefined
-            || internal[SCOPE_STATIC_STORE] !== undefined
+        return hasScopeInternalProperty(internal, SCOPE_WITH_OBJECT)
+            || hasScopeInternalProperty(internal, SCOPE_FLAGS)
+            || hasScopeInternalProperty(internal, SCOPE_STATIC_SLOTS)
+            || hasScopeInternalProperty(internal, SCOPE_STATIC_STORE)
     }
     const isSpecialVariableName = (name: string) =>
         name === SpecialVariable.This
@@ -467,6 +477,11 @@ export const getExecution = (
     const createArgumentObject = () => {
         const obj = new MyArgument()
         Reflect.setPrototypeOf(obj, Object.prototype)
+        Object.defineProperty(obj, Symbol.iterator, {
+            configurable: true,
+            writable: true,
+            value: Array.prototype[Symbol.iterator],
+        })
         return obj
     }
     const runUntilAwait = (execution: Execution): ResultDone | ResultAwait => {
@@ -1596,6 +1611,8 @@ export const getExecution = (
                 case OpCode.TypeofStaticReference:
                 case OpCode.TypeofStaticReferenceUnchecked:
                 case OpCode.GetPropertyIterator:
+                case OpCode.GetIterator:
+                case OpCode.IteratorNext:
                 case OpCode.NextEntry:
                 case OpCode.EntryIsDone:
                 case OpCode.EntryGetValue:

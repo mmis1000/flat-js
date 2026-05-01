@@ -114,6 +114,28 @@ Reduce the `language` category failures in targeted batches:
       - logical assignment: only out-of-scope unsupported class-feature cases remain
       - compound assignment: only out-of-scope unsupported class-feature cases remain after the strict global object-environment PutValue fix
 
+- [x] `for-of-iterator-record-and-heads`
+  - Status: completed 2026-05-01 as a partial `for-of` cleanup inside the control-flow / iterator-close batch.
+  - Fresh focused scan:
+    - before: `58` failing files (`57` intended, `1` out of scope)
+    - after: `34` failing files (`33` intended, `1` out of scope)
+  - Fixed areas:
+    - `for-of` now creates an iterator record in the loop prologue and captures `next` once, rather than re-reading `iterator.next` each iteration
+    - `IteratorNext` now throws when `next()` returns a primitive
+    - non-declaration member targets such as `for (x.y of values)` now use assignment semantics instead of declaration initialization
+    - loop bodies reject declaration-shaped statement-position forms that TypeScript accepts for parse-negative Test262 files
+    - custom loop-head validation rejects invalid assignment targets such as `this` while preserving the existing sloppy call-assignment web-compat path
+    - arguments objects are iterable, and strict functions now create unmapped arguments objects even with simple parameter lists
+    - runtime scope-internal probes no longer trigger arbitrary Proxy `get` traps while reading iterator result objects
+  - Remaining focused `for-of` failures:
+    - abrupt `IteratorClose` for body assignment errors and `break` / outer `continue` / `return` / `throw`
+    - `IteratorClose` return-method edge cases (`null`, non-callable, abrupt getter, non-object result)
+    - completion-value tests (`cptn-*`)
+    - per-iteration lexical scope visibility tests (`scope-*-lex-*`)
+    - `continue` crossing `try` / `catch` / `finally`
+    - parser tails: `dstr/array-elem-init-in.js` and escaped `async` in the for-of head
+    - out-of-scope explicit resource-management tail remains excluded
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`

@@ -305,7 +305,7 @@ const isResultDone = (r: Result): r is ResultDone => r[Fields.done] === true
 const isIteratorYieldDone = (x: unknown): x is { value: unknown, done: boolean } =>
     x !== null && typeof x === 'object' && 'value' in x && 'done' in x
 
-/** ECMA-262 GetIterator / IteratorRecord: @@iterator must be present and callable; result must be an object with a callable next. */
+/** ECMA-262 GetIterator: @@iterator must be present and callable; result must be an object. */
 const getIterator = (iterable: unknown) => {
     if (iterable == null) {
         throw new TypeError('Cannot convert undefined or null to object')
@@ -321,12 +321,32 @@ const getIterator = (iterable: unknown) => {
     return iterator
 }
 
+/** ECMA-262 IteratorRecord creation captures the `next` method once. */
+const getIteratorRecord = (iterable: unknown): IteratorRecord => {
+    const iterator = getIterator(iterable)
+    const next = (iterator as any).next
+    if (typeof next !== 'function') {
+        throw new TypeError('iterator must have next method')
+    }
+    return { iterator, next }
+}
+
 const iteratorNext = (iterator: { next: unknown }, value?: unknown) => {
     const next = iterator.next
     if (typeof next !== 'function') {
         throw new TypeError('iterator must have next method')
     }
     const result = value === undefined ? next.call(iterator) : next.call(iterator, value)
+    if (result == null || typeof result !== 'object') {
+        throw new TypeError('iterator result must be an object')
+    }
+    return result
+}
+
+const iteratorRecordNext = (record: IteratorRecord, value?: unknown) => {
+    const result = value === undefined
+        ? record.next.call(record.iterator)
+        : record.next.call(record.iterator, value)
     if (result == null || typeof result !== 'object') {
         throw new TypeError('iterator result must be an object')
     }
@@ -348,6 +368,11 @@ type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
 }
 
 type Context = Record<string, any> | Frame
+
+type IteratorRecord = {
+    iterator: Iterator<unknown>
+    next: Function
+}
 
 export type ScopeDebugEntry = [string, unknown, boolean]
 
@@ -465,6 +490,7 @@ export {
     generatorStates,
     getEmptyObject,
     getIterator,
+    getIteratorRecord,
     getLiteralFromPool,
     HOST_FUNCTION,
     isAsyncType,
@@ -478,6 +504,7 @@ export {
     isSmallNumber,
     iteratorComplete,
     iteratorNext,
+    iteratorRecordNext,
     literalPoolCache,
     literalPoolWordMask,
     REGEXP,
@@ -502,6 +529,7 @@ export type {
     GeneratorDelegateState,
     FunctionFrame,
     GeneratorState,
+    IteratorRecord,
     InvokeParamApply,
     InvokeParamConstruct,
     PendingAction,

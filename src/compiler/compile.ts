@@ -403,6 +403,26 @@ function throwPatternSyntaxError(message: string): never {
     throw new SyntaxError(message)
 }
 
+function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
+    let current = statement
+
+    while (ts.isLabeledStatement(current)) {
+        current = current.statement
+    }
+
+    return current
+}
+
+function isInvalidSingleStatementBody(statement: ts.Statement): boolean {
+    const item = unwrapLabeledStatementItem(statement)
+
+    if (ts.isVariableStatement(item)) {
+        return !!(item.declarationList.flags & ts.NodeFlags.BlockScoped)
+    }
+
+    return ts.isClassDeclaration(item) || ts.isFunctionDeclaration(item)
+}
+
 function validateBindingPattern(pattern: ts.BindingName, strictContext: boolean) {
     if (ts.isIdentifier(pattern)) {
         validateStrictIdentifierReference(pattern, strictContext)
@@ -662,6 +682,65 @@ function validateReferenceSyntax(sourceNode: ts.SourceFile, withStrict: boolean)
     visit(sourceNode, false)
 }
 
+function validateLoopSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
+    const validateLoopAssignmentTarget = (target: ts.Expression, strictContext: boolean) => {
+        const rawTarget = unwrapParenthesizedExpression(target)
+
+        if (rawTarget.kind === ts.SyntaxKind.ThisKeyword || ts.isMetaProperty(rawTarget)) {
+            throwPatternSyntaxError('invalid loop assignment target')
+        }
+
+        if (ts.isIdentifier(rawTarget)) {
+            validateStrictIdentifierReference(rawTarget, strictContext)
+            return
+        }
+
+        if (ts.isPropertyAccessExpression(rawTarget) || ts.isElementAccessExpression(rawTarget)) {
+            if (ts.isOptionalChain(rawTarget)) {
+                throwPatternSyntaxError('invalid loop assignment target')
+            }
+            validateStrictPatternExpression(rawTarget.expression, strictContext)
+            if (ts.isElementAccessExpression(rawTarget) && rawTarget.argumentExpression != null) {
+                validateStrictPatternExpression(rawTarget.argumentExpression, strictContext)
+            }
+            return
+        }
+
+        if (ts.isArrayLiteralExpression(rawTarget) || ts.isObjectLiteralExpression(rawTarget)) {
+            validateAssignmentPattern(rawTarget, strictContext)
+            return
+        }
+
+        if (ts.isCallExpression(rawTarget) && !strictContext) {
+            return
+        }
+
+        throwPatternSyntaxError('invalid loop assignment target')
+    }
+
+    const visit = (node: ts.Node, inheritedStrict: boolean) => {
+        const strictContext = getStrictContext(node, inheritedStrict, withStrict)
+
+        if (
+            ts.isForStatement(node)
+            || ts.isForInStatement(node)
+            || ts.isForOfStatement(node)
+        ) {
+            if (isInvalidSingleStatementBody(node.statement)) {
+                throw new SyntaxError('invalid loop statement body')
+            }
+        }
+
+        if ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
+            validateLoopAssignmentTarget(node.initializer, strictContext)
+        }
+
+        node.forEachChild((child) => visit(child, strictContext))
+    }
+
+    visit(sourceNode, false)
+}
+
 function getStaticPropertyName(name: ts.PropertyName): string | null {
     if (ts.isComputedPropertyName(name)) {
         return null
@@ -857,6 +936,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateObjectLiteralSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
+    validateLoopSyntax(sourceNode, withStrict)
     validateSwitchDeclarationSyntax(sourceNode, withStrict)
 
     markParent(sourceNode, parentMap)

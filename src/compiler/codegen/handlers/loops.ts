@@ -262,7 +262,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             return [
                 ...getLhs(),
                 ...entryValue,
-                op(OpCode.SetInitialized),
+                op(OpCode.Set),
                 op(OpCode.Pop),
                 ...(variableIsConst
                     ? [
@@ -400,7 +400,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             return [
                 ...getLhs(),
                 ...entryValue,
-                op(OpCode.SetInitialized),
+                op(OpCode.Set),
                 op(OpCode.Pop),
                 ...(variableIsConst
                     ? [
@@ -417,16 +417,8 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
         const head = [
             op(OpCode.GetRecord),
             op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            ...[
-                ...ctx.generate(node.expression, flag),
-                op(OpCode.GetRecord),
-                op(OpCode.Literal, 2, ['Symbol']),
-                op(OpCode.Get),
-                op(OpCode.Literal, 2, ['iterator']),
-                op(OpCode.Get),
-                op(OpCode.Literal, 2, [0]),
-                op(OpCode.Call),
-            ],
+            ...ctx.generate(node.expression, flag),
+            op(OpCode.GetIterator),
             op(OpCode.Set),
             op(OpCode.Pop)
         ]
@@ -441,14 +433,11 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                         op(OpCode.GetRecord),
                         op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
                         op(OpCode.Get),
-                        op(OpCode.Literal, 2, ['next']),
-                        op(OpCode.Literal, 2, [0]),
-                        op(OpCode.Call),
+                        op(OpCode.IteratorNext),
                     ],
                     op(OpCode.Set),
                 ],
-                op(OpCode.Literal, 2, ['done']),
-                op(OpCode.Get),
+                op(OpCode.EntryIsDone),
             ],
             op(OpCode.JumpIf),
             ...generateEntryBinding(),
