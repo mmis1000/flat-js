@@ -793,6 +793,33 @@ print(c)
 print(d)
 `, [0, 1, 1, 1], printProvider)
 
+testRuntime('switch default waits for later case matches', `
+var matchedLaterCase = 0
+switch (4) {
+    default:
+        matchedLaterCase += 32
+        break
+    case 4:
+        matchedLaterCase += 64
+}
+print(matchedLaterCase)
+
+var defaultFallsThrough = 0
+switch (9) {
+    default:
+        defaultFallsThrough += 32
+    case 4:
+        defaultFallsThrough += 64
+}
+print(defaultFallsThrough)
+`, [64, 96], printProvider)
+
+testRuntime('switch eval completion is undefined without executed values', `
+print(eval('1; switch ("a") { case null: }'))
+print(eval('2; switch ("a") { case null: 3; }'))
+print(eval('4; switch ("a") { default: }'))
+print(eval('5; switch ("a") { default: 6; }'))
+`, [undefined, undefined, undefined, 6], printProvider)
 
 testRuntime('switch break', `
 var a = 0
@@ -1311,6 +1338,43 @@ b += (b = 1)
 print(a)
 print(b)
 `, [1, 1], printProvider)
+
+testRuntime('strict global compound assignment re-checks object binding presence', `
+var count = 0
+Object.defineProperty(this, 'globalCompoundBinding', {
+    configurable: true,
+    get: function () {
+        delete this.globalCompoundBinding
+        return 2
+    }
+});
+(function () {
+    "use strict"
+    try {
+        count += 1
+        globalCompoundBinding ^= 3
+        count += 1
+    } catch (error) {
+        print(error instanceof ReferenceError)
+    }
+    count += 1
+})()
+print(count)
+print('globalCompoundBinding' in this)
+`, [true, 2, false], printProvider)
+
+testRuntime('sloppy global compound assignment creates disappeared object binding', `
+Object.defineProperty(this, 'sloppyGlobalCompoundBinding', {
+    configurable: true,
+    get: function () {
+        delete this.sloppyGlobalCompoundBinding
+        return 2
+    }
+});
+sloppyGlobalCompoundBinding ^= 3
+print(sloppyGlobalCompoundBinding)
+delete this.sloppyGlobalCompoundBinding
+`, [1], printProvider)
 
 testRuntime('with statement bare identifier call reads callee before argument side effects', `
 var env = {

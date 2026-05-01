@@ -112,7 +112,7 @@ Reduce the `language` category failures in targeted batches:
     - logical assignment reuses `GetKeepCtx` / `ResolveScopeGetValue`, ordinary jumps, and generic stack shuffling so each reference is evaluated once
     - focused tails still remain outside this compile-blocker batch:
       - logical assignment: only out-of-scope unsupported class-feature cases remain
-      - compound assignment: invalid PutValue runtime tails, plus out-of-scope unsupported class-feature cases
+      - compound assignment: only out-of-scope unsupported class-feature cases remain after the strict global object-environment PutValue fix
 
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
@@ -211,7 +211,7 @@ Reduce the `language` category failures in targeted batches:
       - `TS1003`, `TS1005`, `TS1136`, `TS1344`
   - Result:
     - `language/expressions/logical-assignment/**`: intended failures are now `0`; only `21` out-of-scope class/private-feature files remain
-    - `language/expressions/compound-assignment/**`: early-error bucket is gone; intended failures are now the `11` invalid PutValue runtime tails
+    - `language/expressions/compound-assignment/**`: early-error bucket and invalid PutValue runtime tails are gone; only `48` out-of-scope private-class files remain
     - `language/expressions/assignmenttargettype/**`: raw focused scan now records `4` intentional web-compat call-assignment parse-negative mismatches plus `6` out-of-scope import-call files
 
 ## Run Log
@@ -350,3 +350,23 @@ Reduce the `language` category failures in targeted batches:
   - focused `language/expressions/assignmenttargettype/**` rerun now records:
     - `4` intentional strict parse-negative mismatches for direct/parenthesized call-expression `=` and compound assignment
     - `6` out-of-scope import-call files
+- 2026-05-01: Cleared the compound-assignment invalid PutValue runtime tail.
+  - strict identifier assignment through the global object-environment record now re-checks that a dynamically resolved global property still exists before `PutValue`, matching the existing `with` object-environment behavior
+  - focused `language/expressions/compound-assignment/**` rerun now records:
+    - `0` intended failures
+    - `48` out-of-scope private-class files
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "global compound assignment"`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/compound-assignment`
+- 2026-05-01: Cleared the `switch` runtime completion/default-order tail.
+  - delayed the `default` jump until all case selectors have been checked, so later `case` clauses can still match when `default` appears first
+  - reset eval completion to `undefined` before switch body execution, so no-match and empty-case switches do not inherit a prior completion value
+  - focused `language/statements/switch/**` rerun now records:
+    - `0` runtime failures
+    - `56` lexical/redeclaration early-error failures
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "switch default|switch eval|global compound assignment"`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/switch`
+    - `npm test`

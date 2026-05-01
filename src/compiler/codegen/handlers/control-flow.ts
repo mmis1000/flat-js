@@ -320,26 +320,26 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         const connectedBody: Op[] = []
         const connectedBodyExit = op(OpCode.Nop, 0)
         const connectedBodyEnd = hasVariables ? generateLeaveScope() : [op(OpCode.Nop, 0)]
+        const resetEvalResult = flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)
+            ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
+            : []
 
-        for (const [, item] of bodies.entries()) {
-            connectedBody.push(...item.body)
-        }
-
-        for (const [index, item] of bodies.entries()) {
-            const nextSegment = bodies[index].body[0]
-            connectedBodyRules.push(op(OpCode.NodeOffset, 2, [nextSegment]))
+        let defaultSegment: Op | undefined
+        for (const item of bodies) {
+            const nextSegment = item.body[0]
 
             if (item.rule != null) {
+                connectedBodyRules.push(op(OpCode.NodeOffset, 2, [nextSegment]))
                 connectedBodyRules.push(...item.rule)
                 connectedBodyRules.push(op(OpCode.JumpIf))
             } else {
-                connectedBodyRules.push(op(OpCode.Jump))
+                defaultSegment = nextSegment
             }
 
             connectedBody.push(...item.body)
         }
 
-        connectedBodyRules.push(op(OpCode.NodeOffset, 2, [connectedBodyExit]))
+        connectedBodyRules.push(op(OpCode.NodeOffset, 2, [defaultSegment ?? connectedBodyExit]))
         connectedBodyRules.push(op(OpCode.Jump))
 
         const switchTail = [
@@ -348,6 +348,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
 
         return [
             ...switchHead,
+            ...resetEvalResult,
             ...connectedBodyHead,
             ...connectedBodyRules,
             ...connectedBody,

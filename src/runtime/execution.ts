@@ -310,6 +310,15 @@ export const getExecution = (
             return writeBindingValue(scope, name, value)
         }
 
+        if (
+            scope === currentFrame[Fields.globalThis] &&
+            getVariableFlag(scope, name) === undefined &&
+            !Reflect.has(scope, name) &&
+            currentFrame[Fields.strict]
+        ) {
+            throw new ReferenceError(name + is_not_defined)
+        }
+
         if (readBindingValue(scope, name) === TDZ_VALUE) {
             throw new ReferenceError(`Cannot access '${name}' before initialization`)
         }
