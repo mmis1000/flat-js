@@ -1,9 +1,10 @@
 import * as ts from 'typescript'
 
-import { extractVariable, findAncient } from '../../analysis'
+import { extractVariable, findAncient, isLexicalSwitchFunctionDeclaration } from '../../analysis'
 import { OpCode, SpecialVariable, StatementFlag, VariableType } from '../../shared'
 import { generateBindingInitialization } from '../binding-patterns'
 import { abort, headOf, op, generateEnterScope, generateLeaveScope } from '../helpers'
+import { generateFunctionDefinitionWithStackName } from './functions'
 import type { CodegenContext } from '../context'
 import type { Op, Segment } from '../types'
 
@@ -323,6 +324,19 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
         const resetEvalResult = flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)
             ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
             : []
+        const lexicalFunctionInitializers = node.caseBlock.clauses
+            .flatMap((clause) => clause.statements)
+            .filter((statement): statement is ts.FunctionDeclaration =>
+                ts.isFunctionDeclaration(statement) && isLexicalSwitchFunctionDeclaration(statement, ctx.parentMap)
+            )
+            .flatMap((declaration) => [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [declaration.name?.text ?? '']),
+                op(OpCode.Literal, 2, [declaration.name?.text ?? '']),
+                ...generateFunctionDefinitionWithStackName(declaration),
+                op(OpCode.Set),
+                op(OpCode.Pop),
+            ])
 
         let defaultSegment: Op | undefined
         for (const item of bodies) {
@@ -350,6 +364,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
             ...switchHead,
             ...resetEvalResult,
             ...connectedBodyHead,
+            ...lexicalFunctionInitializers,
             ...connectedBodyRules,
             ...connectedBody,
             connectedBodyExit,

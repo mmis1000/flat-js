@@ -109,6 +109,23 @@ export function extractVariable(node: ts.Identifier | ts.ObjectBindingPattern | 
     return []
 }
 
+export function isAsyncFunctionDeclaration(node: ts.FunctionDeclaration): boolean {
+    return node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ?? false
+}
+
+export function isNonAnnexBFunctionDeclaration(node: ts.FunctionDeclaration): boolean {
+    return node.asteriskToken != null || isAsyncFunctionDeclaration(node)
+}
+
+export function isLexicalSwitchFunctionDeclaration(node: ts.FunctionDeclaration, parentMap: ParentMap): boolean {
+    if (!isNonAnnexBFunctionDeclaration(node)) {
+        return false
+    }
+
+    const parent = parentMap.get(node)?.node
+    return parent != null && (ts.isCaseClause(parent) || ts.isDefaultClause(parent))
+}
+
 function bindingNameHasParameterExpressions(name: ts.BindingName): boolean {
     if (ts.isIdentifier(name)) {
         return false
@@ -271,12 +288,16 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
         }
 
         if (ts.isFunctionDeclaration(current)) {
-            const parentFn = getOwningFunctionBodyScope(current)
+            const lexicalSwitchCaseBlock = isLexicalSwitchFunctionDeclaration(current, parentMap)
+                ? findAncient(current, parentMap, (ancestor): ancestor is ts.CaseBlock => ts.isCaseBlock(ancestor))
+                : undefined
+            const targetScope = lexicalSwitchCaseBlock
+                ?? getOwningFunctionBodyScope(current)
                 ?? findAncient(current, parentMap, (ancestor) => (functions as Set<ts.Node>).has(ancestor))
-            if (parentFn === undefined) {
+            if (targetScope === undefined) {
                 throw new Error('unresolvable variable')
             }
-            scopes.get(parentFn)!.set(current.name!.text, {
+            scopes.get(targetScope)!.set(current.name!.text, {
                 type: VariableType.Function,
                 node: current
             })

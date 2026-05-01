@@ -1,5 +1,6 @@
 import * as ts from 'typescript'
 
+import { isLexicalSwitchFunctionDeclaration } from '../../analysis'
 import { OpCode } from '../../shared'
 import { op } from '../helpers'
 import type { CodegenContext } from '../context'
@@ -45,6 +46,10 @@ export function generateFunctions(node: ts.Node, _flag: number, ctx: CodegenCont
     }
 
     if (ts.isFunctionDeclaration(node)) {
+        if (isLexicalSwitchFunctionDeclaration(node, ctx.parentMap)) {
+            return []
+        }
+
         ctx.functionDeclarations.push(node)
         return []
     }

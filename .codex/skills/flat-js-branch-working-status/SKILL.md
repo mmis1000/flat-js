@@ -27,6 +27,7 @@ Do not claim the branch is working until the changed surfaces have been checked 
   - `npm run build-example`
 - If another generated example changed, rebuild that artifact too.
 - If compiler/runtime semantics changed and there is a relevant Test262 harness slice for the area, run it and treat failures as blocking, not advisory.
+- If the expected Test262 language or harness status changed, update both `plan/test262-language-fix-tracker.md` and the Test262 status notes in `README.md`.
 
 ## Browser And Example Checks
 
@@ -51,6 +52,7 @@ Only call the target complete when all relevant checked surfaces are green.
 - No relevant browser or example regressions remain.
 - No relevant Test262 harness failures remain.
 - The original repro path or user-facing behavior has been rechecked.
+- Documentation reflects the current Test262 status when language or harness expectations changed.
 
 If one of those surfaces was not run or is still unknown, say that explicitly and do not present the work as fully target complete.
 

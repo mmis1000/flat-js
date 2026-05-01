@@ -821,6 +821,33 @@ print(eval('4; switch ("a") { default: }'))
 print(eval('5; switch ("a") { default: 6; }'))
 `, [undefined, undefined, undefined, 6], printProvider)
 
+testRuntimeThrows('switch rejects duplicate lexical declarations across clauses', `
+switch (0) { case 1: let f; default: function* f() {} }
+`, SyntaxError)
+
+testRuntimeThrows('switch rejects var redeclaration of case lexical names', `
+switch (0) { case 1: function f() {} default: var f }
+`, SyntaxError)
+
+testRuntime('sloppy switch duplicate ordinary functions are allowed', `
+switch (0) {
+    case 1:
+        function duplicateSwitchFunction() { return 1 }
+    default:
+        function duplicateSwitchFunction() { return 2 }
+}
+print(duplicateSwitchFunction())
+`, [2], printProvider)
+
+testRuntimeThrows('switch async and generator declarations stay in case block scope', `
+switch (0) {
+    default:
+        function* switchScopedGenerator() {}
+        async function switchScopedAsync() {}
+}
+switchScopedGenerator
+`, ReferenceError)
+
 testRuntime('switch break', `
 var a = 0
 switch (1) {

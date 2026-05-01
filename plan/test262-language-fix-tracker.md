@@ -370,3 +370,12 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "switch default|switch eval|global compound assignment"`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/switch`
     - `npm test`
+- 2026-05-01: Cleared the remaining `switch` lexical/redeclaration batch.
+  - added switch CaseBlock declaration early-error validation for duplicate lexical names and `var` names colliding with case-block lexical declarations, while preserving sloppy duplicate ordinary function declarations
+  - direct async/generator function declarations in switch cases now bind in the switch CaseBlock scope instead of leaking through the enclosing function/global scope
+  - focused `language/statements/switch/**` rerun now records `0` failing files
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "switch rejects|sloppy switch duplicate|switch async and generator"`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/switch`
+    - `npm test`
