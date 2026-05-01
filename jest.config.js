@@ -7,6 +7,16 @@ module.exports = {
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
       isolatedModules: false,
+      tsconfig: {
+        target: 'esnext',
+        module: 'commonjs',
+        strict: true,
+        esModuleInterop: true,
+        types: ['node', 'jest'],
+        skipLibCheck: true,
+        forceConsistentCasingInFileNames: true,
+        ignoreDeprecations: '6.0',
+      },
     }],
   },
 };

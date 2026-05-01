@@ -259,11 +259,63 @@ const javascriptEarlyErrorSemanticDiagnosticCodes = new Set([
     2779, // Optional property access cannot be used as an assignment target.
     2813, // Class declaration cannot merge with a function declaration.
     2814, // Function declaration cannot merge with a class declaration.
+    2815, // 'arguments' cannot be referenced in property initializers.
     5076, // Nullish coalescing cannot be mixed with && / || without parentheses.
     17013, // 'new.target' is only allowed in functions and constructors.
 ])
 
-function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>) {
+const strictOnlySemanticDiagnosticCodes = new Set([
+    1100, // Invalid use of 'eval' / 'arguments' in strict mode.
+    1101, // 'with' statements are not allowed in strict mode.
+    1102, // 'delete' cannot be called on an identifier in strict mode.
+    1210, // Class strict mode disallows this use of 'arguments'.
+    1212, // Strict-mode reserved word cannot be used as an identifier.
+    1213, // 'yield' is reserved in strict mode and class bodies.
+])
+
+function findSmallestNodeContainingSpan(root: ts.SourceFile, start: number, end: number): ts.Node | null {
+    let found: ts.Node | null = null
+
+    const visit = (node: ts.Node) => {
+        const nodeStart = node.getStart(root, false)
+        const nodeEnd = node.getEnd()
+        if (nodeStart <= start && end <= nodeEnd) {
+            if (found == null || nodeEnd - nodeStart < found.getEnd() - found.getStart(root, false)) {
+                found = node
+            }
+            node.forEachChild(visit)
+        }
+    }
+
+    visit(root)
+    return found
+}
+
+function isNodeInStrictContext(node: ts.Node, withStrict: boolean): boolean {
+    const ancestry: ts.Node[] = []
+    let current: ts.Node | undefined = node
+    while (current != null) {
+        ancestry.unshift(current)
+        current = current.parent
+    }
+
+    let strictContext = false
+    for (const item of ancestry) {
+        strictContext = getStrictContext(item, strictContext, withStrict)
+    }
+    return strictContext
+}
+
+function isNonStrictOnlySemanticDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.Diagnostic, withStrict: boolean): boolean {
+    if (!strictOnlySemanticDiagnosticCodes.has(diagnostic.code) || diagnostic.start == null) {
+        return false
+    }
+
+    const node = findSmallestNodeContainingSpan(sourceNode, diagnostic.start, diagnostic.start + (diagnostic.length ?? 0))
+    return node != null && !isNodeInStrictContext(node, withStrict)
+}
+
+function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>, withStrict: boolean) {
     const validationSourceNode = ts.createSourceFile(
         'output.ts',
         sourceNode.text,
@@ -305,6 +357,7 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
         ? syntacticDiagnostics
         : program.getSemanticDiagnostics(validationSourceNode).filter((diagnostic) => (
             javascriptEarlyErrorSemanticDiagnosticCodes.has(diagnostic.code)
+            && !isNonStrictOnlySemanticDiagnostic(sourceNode, diagnostic, withStrict)
             && !isWebCompatFunctionCallAssignmentDiagnostic(validationSourceNode, diagnostic)
         ))
 
@@ -401,6 +454,62 @@ function isWebCompatFunctionCallAssignmentDiagnostic(sourceNode: ts.SourceFile, 
 
 function throwPatternSyntaxError(message: string): never {
     throw new SyntaxError(message)
+}
+
+function isClassFieldArgumentsBoundary(node: ts.Node): boolean {
+    return ts.isClassLike(node) || (ts.isFunctionLike(node) && !ts.isArrowFunction(node))
+}
+
+function containsClassFieldArgumentsReference(node: ts.Node): boolean {
+    if (isClassFieldArgumentsBoundary(node)) {
+        return false
+    }
+
+    let found = false
+
+    const visit = (current: ts.Node) => {
+        if (found) {
+            return
+        }
+
+        if (ts.isIdentifier(current) && current.text === 'arguments') {
+            found = true
+            return
+        }
+
+        if (current !== node && isClassFieldArgumentsBoundary(current)) {
+            return
+        }
+
+        current.forEachChild(visit)
+    }
+
+    visit(node)
+    return found
+}
+
+function validateClassFieldArgumentsSyntax(sourceNode: ts.SourceFile) {
+    const visit = (node: ts.Node) => {
+        if (ts.isClassLike(node)) {
+            for (const member of node.members) {
+                if (ts.isPropertyDeclaration(member) && member.initializer != null) {
+                    if (containsClassFieldArgumentsReference(member.initializer)) {
+                        throwPatternSyntaxError('arguments is not allowed in class field initializer')
+                    }
+                }
+
+                if (ts.isClassStaticBlockDeclaration(member)) {
+                    if (containsClassFieldArgumentsReference(member)) {
+                        throwPatternSyntaxError('arguments is not allowed in class static initialization block')
+                    }
+                }
+            }
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
 }
 
 function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
@@ -933,9 +1042,10 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     const sourceNode = ts.createSourceFile('output.ts', normalizedSrc, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
     const locationMap = createLocationMap(normalizedSrc)
 
-    validateSyntax(sourceNode, locationMap)
+    validateSyntax(sourceNode, locationMap, withStrict)
     validateCoalesceSyntax(sourceNode)
     validateObjectLiteralSyntax(sourceNode)
+    validateClassFieldArgumentsSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
     validateLoopSyntax(sourceNode, withStrict)

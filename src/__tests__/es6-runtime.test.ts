@@ -1221,6 +1221,48 @@ test('semantic diagnostics for JavaScript early errors are compile errors', () =
             }
         `,
         `
+            function f() {
+                class C {
+                    x = arguments
+                }
+            }
+        `,
+        `
+            function f() {
+                class C {
+                    x = () => arguments
+                }
+            }
+        `,
+        `
+            function f() {
+                class C {
+                    static {
+                        arguments
+                    }
+                }
+            }
+        `,
+        `
+            var C = class {
+                x = () => arguments
+            }
+        `,
+        `
+            class C {
+                static {
+                    arguments
+                }
+            }
+        `,
+        `
+            class C {
+                x = class {
+                    y = arguments
+                }
+            }
+        `,
+        `
             'use strict'
             {
                 async function duplicateName() {}
@@ -1250,6 +1292,14 @@ test('semantic diagnostics for JavaScript early errors are compile errors', () =
     expect(() => compileAndRun(`
         missingSemanticCheck += 1
     `)).toThrow(ReferenceError)
+
+    expect(() => compileAndRun(`
+        class C {
+            x = function () {
+                return arguments
+            }
+        }
+    `)).not.toThrow()
 })
 
 test('destructuring default initializers infer names for anonymous functions and classes', () => {
