@@ -224,6 +224,14 @@ Reduce the `language` category failures in targeted batches:
   - Remaining focused failure:
     - `scope-catch-block-lex-open.js`: catch block lexical scope capture
 
+- [x] `destructured-catch-block-scope`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - `language/statements/try/**`: `1` failing file -> `0`
+  - Fixed areas:
+    - destructured catch bindings still evaluate parameter initializers before the catch block lexical scope exists
+    - the catch block itself now enters its own lexical scope before evaluating statements, so closures created before a later `let` declaration capture the block binding rather than an outer binding
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -250,7 +258,7 @@ Reduce the `language` category failures in targeted batches:
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `269` total (`261` runtime, `8` early)
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
-    - control-flow completion and iterator close: `75` total (`75` runtime, `0` early)
+    - control-flow completion and iterator close: `74` total (`74` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
       - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
     - lexical/global declaration early errors: `132` total (`43` runtime, `89` early)
@@ -564,5 +572,14 @@ Reduce the `language` category failures in targeted batches:
   - verified with:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/utils.test.ts`
+    - `npm run build`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/try`
+- 2026-05-02: Cleared destructured catch block lexical scope capture.
+  - destructured catch codegen now evaluates the catch parameter binding first, then generates the catch block so the block lexical environment is created for block-local closures in [control-flow.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/control-flow.ts:1>)
+  - focused `language/statements/try/**` rerun is green: `0` failing files
+  - adjusted the control-flow runtime count from `75` to `74`
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/utils.test.ts`
     - `npm run build`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/try`

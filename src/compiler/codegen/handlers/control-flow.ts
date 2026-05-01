@@ -231,9 +231,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
                         ctx
                     ),
                     ...generateEvalResultReset(flag),
-                    ...node.catchClause.block.statements.map((statement) =>
-                        ctx.generate(statement, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch)
-                    ).flat(),
+                    ...ctx.generate(node.catchClause.block, (flag ^ (flag & StatementFlag.TryCatchFlags)) | StatementFlag.Catch),
                     ...generateLeaveScope(),
                 ]
             : [op(OpCode.Nop, 0)]

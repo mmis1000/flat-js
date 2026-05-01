@@ -662,6 +662,22 @@ test('catch binding patterns destructure the thrown value', () => {
     `)).toEqual([1, 2])
 })
 
+test('destructured catch parameter initializers and catch block closures use distinct lexical scopes', () => {
+    expect(compileAndRun(`
+        var probeParam, probeBlock
+        let x = 'outside'
+
+        try {
+            throw []
+        } catch ([_ = probeParam = function () { return x }]) {
+            probeBlock = function () { return x }
+            let x = 'inside'
+        }
+
+        [probeParam(), probeBlock()]
+    `)).toEqual(['outside', 'inside'])
+})
+
 test('simple catch bindings shadow parameter-expression scopes', () => {
     expect(compileAndRun(`
         const fn = (error = false) => {
