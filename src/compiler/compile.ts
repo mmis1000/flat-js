@@ -189,7 +189,88 @@ const validateStrictPatternExpression = (node: ts.Node, strictContext: boolean) 
     visit(node)
 }
 
+const javascriptEarlyErrorSemanticDiagnosticCodes = new Set([
+    1013, // Rest parameter or binding pattern cannot have a trailing comma.
+    1014, // Rest parameter must be last in a parameter list.
+    1042, // 'async' modifier cannot be used here.
+    1048, // Rest parameter cannot have an initializer.
+    1052, // Set accessor parameter cannot have an initializer.
+    1054, // Get accessor cannot have parameters.
+    1089, // 'async' modifier cannot appear on a constructor declaration.
+    1091, // Only a single variable declaration is allowed in a for-in statement.
+    1100, // Invalid use of 'eval' / 'arguments' in strict mode.
+    1101, // 'with' statements are not allowed in strict mode.
+    1102, // 'delete' cannot be called on an identifier in strict mode.
+    1104, // Continue statement outside an enclosing iteration statement.
+    1105, // Break statement outside an enclosing iteration or switch statement.
+    1106, // The left-hand side of a for-of statement may not be 'async'.
+    1107, // Jump target cannot cross function boundary.
+    1108, // Return statement outside a function body.
+    1113, // Switch statement cannot have more than one default clause.
+    1114, // Duplicate label.
+    1115, // Continue statement cannot jump to a non-iteration label.
+    1116, // Break statement cannot jump outside an enclosing label.
+    1123, // Variable declaration list cannot be empty.
+    1142, // Line break not permitted here.
+    1163, // Yield expression is only allowed in a generator body.
+    1186, // Rest element cannot have an initializer.
+    1189, // For-in variable declaration cannot have an initializer.
+    1190, // For-of variable declaration cannot have an initializer.
+    1198, // Unicode escape value must be in range.
+    1199, // Unicode escape sequence cannot be empty.
+    1200, // Line terminator not permitted before arrow.
+    1210, // Class strict mode disallows this use of 'arguments'.
+    1212, // Strict-mode reserved word cannot be used as an identifier.
+    1213, // 'yield' is reserved in strict mode and class bodies.
+    1312, // '=' after an object literal property name only belongs in destructuring.
+    1341, // Class constructor may not be an accessor.
+    1346, // Use strict directive cannot be used with this parameter list.
+    1347, // Use strict directive cannot appear with a non-simple parameter list.
+    1358, // Tagged template expressions are not permitted in an optional chain.
+    1359, // 'await' is reserved in this context.
+    1368, // Class constructor may not be a generator.
+    1499, // Unknown regular expression flag.
+    1500, // Duplicate regular expression flag.
+    1504, // Invalid regular expression subpattern flags.
+    1507, // Invalid regular expression repetition.
+    1508, // Unexpected regular expression '{'.
+    1509, // Invalid regular expression subpattern flag toggle.
+    1510, // Invalid regular expression named backreference.
+    1512, // Invalid regular expression control escape.
+    1514, // Invalid regular expression group name.
+    1515, // Invalid duplicate regular expression named capture groups.
+    1516, // Invalid regular expression character class range.
+    1532, // Regular expression references a missing named capture group.
+    1534, // Regular expression backreference group does not exist.
+    1535, // Invalid regular expression escape.
+    2335, // 'super' can only be referenced in a derived class.
+    2337, // Super calls are only permitted in derived constructors.
+    2364, // Invalid assignment left-hand side.
+    2392, // Class bodies cannot contain multiple constructor implementations.
+    2451, // Block-scoped redeclaration.
+    2462, // Rest element must be last in a destructuring pattern.
+    2480, // 'let' cannot be a let/const declaration name.
+    2481, // Var declaration conflicts with a block-scoped declaration.
+    2492, // Cannot redeclare catch parameter identifier.
+    2523, // 'yield' cannot be used in a parameter initializer.
+    2524, // 'await' cannot be used in a parameter initializer.
+    2660, // 'super' can only be referenced in valid class/object members.
+    2777, // Optional property access cannot be used as an update operand.
+    2779, // Optional property access cannot be used as an assignment target.
+    2813, // Class declaration cannot merge with a function declaration.
+    2814, // Function declaration cannot merge with a class declaration.
+    5076, // Nullish coalescing cannot be mixed with && / || without parentheses.
+    17013, // 'new.target' is only allowed in functions and constructors.
+])
+
 function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>) {
+    const validationSourceNode = ts.createSourceFile(
+        'output.ts',
+        sourceNode.text,
+        ts.ScriptTarget.ESNext,
+        true,
+        ts.ScriptKind.TS
+    )
     const servicesHost: ts.CompilerHost = (<Partial<ts.CompilerHost>>{
         getScriptFileNames: () => ['output.ts'],
         getScriptKind: () => ts.ScriptKind.TS,
@@ -198,7 +279,15 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
         getDefaultLibFileName: () => 'lib.d.ts',
         getCurrentDirectory: () => '/fake',
         getCanonicalFileName: (str: string) => str,
-        getSourceFile: () => sourceNode,
+        getSourceFile(fileName) {
+            if (fileName === 'output.ts') {
+                return validationSourceNode
+            }
+            if (fileName === 'lib.d.ts') {
+                return ts.createSourceFile(fileName, '', ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+            }
+            return undefined
+        },
         readFile(fileName) {
             if (fileName === 'lib.d.ts') {
                 return ''
@@ -206,12 +295,17 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
             return undefined
         },
         fileExists(fileName) {
-            return fileName === 'lib.d.ts'
+            return fileName === 'output.ts' || fileName === 'lib.d.ts'
         },
     }) as ts.CompilerHost
 
-    const program = ts.createProgram(['output.ts'], {}, servicesHost)
-    const diagnostics = program.getSyntacticDiagnostics(sourceNode)
+    const program = ts.createProgram(['output.ts'], { target: ts.ScriptTarget.ESNext, noLib: true }, servicesHost)
+    const syntacticDiagnostics = program.getSyntacticDiagnostics(validationSourceNode)
+    const diagnostics = syntacticDiagnostics.length > 0
+        ? syntacticDiagnostics
+        : program.getSemanticDiagnostics(validationSourceNode).filter((diagnostic) => (
+            javascriptEarlyErrorSemanticDiagnosticCodes.has(diagnostic.code)
+        ))
 
     if (diagnostics.length > 0) {
         const errorMessages = diagnostics.map((diagnostic) => {
@@ -238,6 +332,25 @@ function splitAssignmentTarget(node: ts.Expression): { target: ts.Expression, in
         }
     }
     return { target: rawNode }
+}
+
+function isAssignmentOperatorToken(kind: ts.SyntaxKind) {
+    return kind === ts.SyntaxKind.EqualsToken
+        || kind === ts.SyntaxKind.PlusEqualsToken
+        || kind === ts.SyntaxKind.MinusEqualsToken
+        || kind === ts.SyntaxKind.AsteriskEqualsToken
+        || kind === ts.SyntaxKind.AsteriskAsteriskEqualsToken
+        || kind === ts.SyntaxKind.SlashEqualsToken
+        || kind === ts.SyntaxKind.PercentEqualsToken
+        || kind === ts.SyntaxKind.LessThanLessThanEqualsToken
+        || kind === ts.SyntaxKind.GreaterThanGreaterThanEqualsToken
+        || kind === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken
+        || kind === ts.SyntaxKind.AmpersandEqualsToken
+        || kind === ts.SyntaxKind.BarEqualsToken
+        || kind === ts.SyntaxKind.CaretEqualsToken
+        || kind === ts.SyntaxKind.AmpersandAmpersandEqualsToken
+        || kind === ts.SyntaxKind.BarBarEqualsToken
+        || kind === ts.SyntaxKind.QuestionQuestionEqualsToken
 }
 
 function throwPatternSyntaxError(message: string): never {
@@ -469,6 +582,20 @@ function validateReferenceSyntax(sourceNode: ts.SourceFile, withStrict: boolean)
             const expression = unwrapParenthesizedExpression(node.expression)
             if (strictContext && ts.isIdentifier(expression)) {
                 throwPatternSyntaxError('delete of an unqualified identifier in strict mode')
+            }
+        }
+
+        if (ts.isBinaryExpression(node) && isAssignmentOperatorToken(node.operatorToken.kind)) {
+            const target = unwrapParenthesizedExpression(node.left)
+            if (ts.isIdentifier(target)) {
+                validateStrictIdentifierReference(target, strictContext)
+            }
+        }
+
+        if ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
+            const target = unwrapParenthesizedExpression(node.initializer)
+            if (strictContext && ts.isCallExpression(target)) {
+                throwPatternSyntaxError('invalid strict loop assignment target')
             }
         }
 

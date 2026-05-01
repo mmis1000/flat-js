@@ -3,6 +3,8 @@ import * as ts from 'typescript'
 import { OpCode } from '../../shared'
 import { abort, getNameOfKind, headOf, op } from '../helpers'
 import { generateAssignmentPattern } from '../binding-patterns'
+import { generateClassValue } from './classes'
+import { generateFunctionDefinition } from './functions'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -89,6 +91,29 @@ const generateDiscardReferenceKeepValue = (): Segment => [
     op(OpCode.Swap),
     op(OpCode.Pop),
 ]
+
+function generateNamedAssignmentValue(
+    expression: ts.Expression,
+    left: ts.Node,
+    flag: number,
+    ctx: CodegenContext
+): Segment {
+    if (!ts.isIdentifier(left)) {
+        return ctx.generate(expression, flag)
+    }
+
+    const value = ctx.extractQuote(expression)
+    if (ts.isArrowFunction(value)) {
+        return generateFunctionDefinition(value, left.text)
+    }
+    if (ts.isFunctionExpression(value) && value.name == null) {
+        return generateFunctionDefinition(value, left.text)
+    }
+    if (ts.isClassExpression(value) && value.name == null) {
+        return generateClassValue(value, flag, ctx, left.text)
+    }
+    return ctx.generate(expression, flag)
+}
 
 export function generateOperators(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isConditionalExpression(node)) {
@@ -290,7 +315,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                     op(OpCode.NodeOffset, 2, [headOf(shortCircuit)]),
                     ...conditionOps,
                     op(OpCode.Pop),
-                    ...ctx.generate(node.right, flag),
+                    ...generateNamedAssignmentValue(node.right, left, flag, ctx),
                     op(OpCode.Set),
                     op(OpCode.NodeOffset, 2, [headOf(exit)]),
                     op(OpCode.Jump),

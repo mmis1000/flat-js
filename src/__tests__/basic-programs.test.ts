@@ -272,7 +272,7 @@ testRuntimeThrows('undefined i--', 'i--;', ReferenceError, printProvider)
 testRuntimeThrows('undefined ++i', '++i;', ReferenceError, printProvider)
 testRuntimeThrows('undefined --i', '--i;', ReferenceError, printProvider)
 testRuntimeThrows('undefined i += 1', 'i += 1;', ReferenceError, printProvider)
-testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', ReferenceError, printProvider)
+testRuntimeThrows('bad left hand print(0) = 1', 'print(0) = 1', SyntaxError, printProvider)
 testRuntimeThrows('syntax error for invalid syntax', '{', SyntaxError, printProvider)
 
 testRuntime('this', 'print(this === globalThis)', [true], printProvider)

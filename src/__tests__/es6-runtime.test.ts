@@ -96,6 +96,18 @@ test('logical assignment evaluates the reference once and short-circuits correct
 
         [obj.a, obj.b, obj.c, keyCalls, rhsCalls]
     `)).toEqual([5, 3, 7, 6, 3])
+
+    expect(compileAndRun(`
+        var andValue = 1
+        var orValue = 0
+        var nullishValue
+
+        andValue &&= function() {}
+        orValue ||= class {}
+        nullishValue ??= () => {}
+
+        [andValue.name, orValue.name, nullishValue.name]
+    `)).toEqual(['andValue', 'orValue', 'nullishValue'])
 })
 
 test('missing binary and compound operators evaluate through VM opcodes', () => {
@@ -1120,6 +1132,124 @@ test('strict delete and invalid update targets are early errors', () => {
         'use strict'
         arguments--
     `)).toThrow(SyntaxError)
+})
+
+test('semantic diagnostics for JavaScript early errors are compile errors', () => {
+    for (const source of [
+        `
+            'use strict'
+            arguments &&= 20
+        `,
+        `
+            'use strict'
+            (eval) = 20
+        `,
+        `
+            'use strict'
+            (arguments) = 20
+        `,
+        `
+            1 ||= 20
+        `,
+        `
+            const obj = {}
+            obj?.value = 1
+        `,
+        `
+            const tag = () => {}
+            tag?.\`value\`
+        `,
+        `
+            function f(...args,) {}
+        `,
+        `
+            continue
+        `,
+        `
+            break missing
+        `,
+        `
+            return 1
+        `,
+        `
+            switch (1) {
+                default:
+                    break
+                default:
+                    break
+            }
+        `,
+        `
+            for (var x = 1 in {}) {}
+        `,
+        `
+            'use strict'
+            function target() {}
+            for (target() in {}) {}
+        `,
+        `
+            'use strict'
+            function target() {}
+            for (target() of []) {}
+        `,
+        `
+            function nonSimple(a = 1) {
+                'use strict'
+            }
+        `,
+        `
+            function* g(a = yield 1) {}
+        `,
+        `
+            class Base {
+                get value(param) {
+                    return param
+                }
+            }
+        `,
+        `
+            class Base {
+                constructor() {
+                    super()
+                }
+            }
+        `,
+        `
+            class DuplicateConstructor {
+                constructor() {}
+                constructor(value) {}
+            }
+        `,
+        `
+            'use strict'
+            {
+                async function duplicateName() {}
+                class duplicateName {}
+            }
+        `,
+        `
+            let duplicate
+            let duplicate
+        `,
+        `
+            /(?<known>.)\\k<missing>/u
+        `,
+    ]) {
+        expect(() => compileAndRun(source)).toThrow(SyntaxError)
+    }
+
+    expect(compileAndRun(`
+        if (true);
+        7
+    `)).toBe(7)
+
+    expect(compileAndRun(`
+        ({ value: 1, value: 2 }).value
+    `)).toBe(2)
+
+    expect(() => compileAndRun(`
+        missingSemanticCheck += 1
+    `)).toThrow(ReferenceError)
 })
 
 test('destructuring default initializers infer names for anonymous functions and classes', () => {

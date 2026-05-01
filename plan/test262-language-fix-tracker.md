@@ -111,8 +111,8 @@ Reduce the `language` category failures in targeted batches:
     - new compound assignments reuse existing binary opcodes plus `Set`, rather than adding one runtime opcode per operator
     - logical assignment reuses `GetKeepCtx` / `ResolveScopeGetValue`, ordinary jumps, and generic stack shuffling so each reference is evaluated once
     - focused tails still remain outside this compile-blocker batch:
-      - logical assignment: named-evaluation and early-error tails, plus out-of-scope unsupported class-feature cases
-      - compound assignment: invalid PutValue / early-error tails, plus out-of-scope unsupported class-feature cases
+      - logical assignment: only out-of-scope unsupported class-feature cases remain
+      - compound assignment: invalid PutValue runtime tails, plus out-of-scope unsupported class-feature cases
 
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
@@ -154,7 +154,7 @@ Reduce the `language` category failures in targeted batches:
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
-    - invalid assignment target forms under `assignmenttargettype`: `174`
+    - invalid assignment target forms under `assignmenttargettype`: completed 2026-05-01; focused slice is green
     - invalid RegExp literals, flags, modifiers, named groups, unicode escapes: `167`
     - strict reserved words accepted as identifiers: `20`
     - invalid optional-chain assignment/tag/update forms: `11`
@@ -174,6 +174,44 @@ Reduce the `language` category failures in targeted batches:
       - bound to module syntax handling and parse goal separation
     - `import.meta` host metadata: `5`
       - requires host-provided module metadata
+
+## TypeScript Diagnostic Early-Error Cases
+
+- [x] `typescript-semantic-early-errors`
+  - Status: completed 2026-05-01; Flat JS now treats a whitelist of TypeScript semantic diagnostics as compile-time `SyntaxError`s, while still ignoring ordinary type errors such as missing names.
+  - Systemic scan:
+    - scanned Test262 `language` parse-negative files: `4389`
+    - checked default/strict scenarios: `8352`
+    - scenarios already caught by TypeScript syntactic diagnostics: `2338`
+    - whitelisted TypeScript semantic early-error hits after this pass: `3847`
+  - Included diagnostic code groups:
+    - parameter, binding, accessor, and constructor shape:
+      - `TS1013`, `TS1014`, `TS1042`, `TS1048`, `TS1052`, `TS1054`, `TS1089`, `TS1123`, `TS1142`, `TS1186`, `TS1198`, `TS1199`, `TS1200`, `TS1312`, `TS1341`, `TS1346`, `TS1347`, `TS1368`, `TS2392`, `TS2462`, `TS2523`, `TS2524`
+    - strict/reserved-word and control-flow early errors:
+      - `TS1100`, `TS1101`, `TS1102`, `TS1104`, `TS1105`, `TS1107`, `TS1108`, `TS1113`, `TS1114`, `TS1115`, `TS1116`, `TS1163`, `TS1210`, `TS1212`, `TS1213`, `TS1359`
+    - loop declaration head early errors:
+      - `TS1091`, `TS1106`, `TS1189`, `TS1190`
+    - RegExp literal early errors:
+      - `TS1499`, `TS1500`, `TS1504`, `TS1507`, `TS1508`, `TS1509`, `TS1510`, `TS1512`, `TS1514`, `TS1515`, `TS1516`, `TS1532`, `TS1534`, `TS1535`
+    - references, optional chaining, `super`, `new.target`, and lexical redeclarations:
+      - `TS1358`, `TS2335`, `TS2337`, `TS2364`, `TS2451`, `TS2480`, `TS2481`, `TS2492`, `TS2660`, `TS2777`, `TS2779`, `TS2813`, `TS2814`, `TS5076`, `TS17013`
+  - Deliberately not whitelisted from the scan:
+    - TypeScript/type-system opinions or no-lib fallout, such as missing names, unreachable `??` RHS, impossible comparisons, async `Promise` library complaints, and tuple/object type complaints
+    - module and host-feature diagnostics for `import`/`export`, dynamic import, `import.meta`, top-level await, import attributes, and string-named module exports
+    - unsupported-feature diagnostics for explicit resource management, class fields, private names, and class static blocks
+    - overbroad JS-valid diagnostics:
+      - `TS1117`: duplicate object literal property names are generally valid; Flat JS keeps its own duplicate data `__proto__` check
+      - `TS1313`: `if (condition);` is valid JavaScript
+      - `TS2410`: sloppy `with` is valid; strict `with` is already covered by `TS1101`
+      - `TS2703`: sloppy `delete identifier` is valid; strict delete is covered by `TS1102` and the existing validator
+      - `TS2491`: TypeScript rejects `for-in` destructuring heads that JavaScript allows
+      - `TS2357`, `TS2406`, `TS2487`: update and `for-in`/`for-of` call-expression targets need strict/web-compat-sensitive filtering before they can be delegated wholesale to TypeScript; strict call-expression `for-in`/`for-of` heads are now covered by custom validation instead
+    - generic parser-shape diagnostics left for parser/custom validation rather than semantic whitelist expansion:
+      - `TS1003`, `TS1005`, `TS1136`, `TS1344`
+  - Result:
+    - `language/expressions/logical-assignment/**`: intended failures are now `0`; only `21` out-of-scope class/private-feature files remain
+    - `language/expressions/compound-assignment/**`: early-error bucket is gone; intended failures are now the `11` invalid PutValue runtime tails
+    - `language/expressions/assignmenttargettype/**`: focused slice is green (`0` failing files)
 
 ## Run Log
 
@@ -284,3 +322,24 @@ Reduce the `language` category failures in targeted batches:
     - `language/expressions/logical-assignment/**`: residual `42` failing files (`21` intended tails, `21` out-of-scope unsupported class-feature cases)
     - `language/expressions/compound-assignment/**`: residual `93` failing files (`45` intended tails, `48` out-of-scope unsupported class-feature cases)
   - kept [test262-language-summary.md](</M:/Playground/flat-js/plan/test262-language-summary.md:1>) unchanged until the next fresh full `language` scan.
+- 2026-05-01: Cleared the logical-assignment named-evaluation tail and added a TypeScript semantic-diagnostic whitelist for JavaScript early errors.
+  - focused `language/expressions/logical-assignment/**` scan now records `21` failures:
+    - `0` intended failures
+    - `21` out-of-scope unsupported class-feature cases
+  - focused `language/expressions/compound-assignment/**` scan now records `59` failures:
+    - `11` intended invalid PutValue runtime tails
+    - `48` out-of-scope unsupported class-feature cases
+- 2026-05-01: Ran a systemic TypeScript semantic-diagnostic scan over Test262 `language` parse-negative files and expanded the whitelist to all safe JavaScript early-error diagnostics found.
+  - validation now uses a fresh ESNext/no-lib TypeScript program so semantic diagnostics do not mutate or duplicate the compiler AST
+  - added coverage for rest/binding shape, invalid control-flow jumps, strict/reserved-word errors, invalid loop declaration heads, RegExp literal errors, class constructor/accessor/super errors, non-simple-parameter strict directives, lexical redeclarations, optional-chain invalid targets, and `new.target`
+  - kept overbroad TypeScript diagnostics deferred when they reject valid JavaScript or require strict/web-compat-sensitive filtering
+- 2026-05-01: Cleared the focused `language/expressions/assignmenttargettype/**` slice.
+  - added strict-context validation for parenthesized `eval` / `arguments` assignment targets that TypeScript does not report as `TS1100`
+  - added strict-only validation for call-expression `for-in` / `for-of` heads instead of globally whitelisting TypeScript's overbroad `TS2406` / `TS2487`
+  - focused rerun result: `0` failing files
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
+    - `npm run build`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/assignmenttargettype`
+    - `npm test`
