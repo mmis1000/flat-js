@@ -2,9 +2,15 @@ import * as ts from 'typescript'
 
 import { extractVariable, getFunctionBodyScopeNode, hasParameterExpressions, type Functions, type ParentMap, type Scopes, type VariableRoot } from '../analysis'
 import { OpCode, SpecialVariable, STATIC_SLOT_NAMELESS, VariableType } from '../shared'
-import { getNameOfKind, op } from './helpers'
+import { getNameOfKind, markInternals, op } from './helpers'
 import { dispatchGenerate } from './dispatch'
 import type { Op, Segment, SegmentOptions, StaticAccess } from './types'
+
+type IdentifierWriteOptions = {
+    mode: 'initialize' | 'assign'
+    freezeConst?: boolean
+    popResult?: boolean
+}
 
 export type CodegenContext = {
     root: VariableRoot
@@ -23,6 +29,7 @@ export type CodegenContext = {
     extractQuote(node: ts.Node): ts.Node
     generateStaticAccessOps(access: StaticAccess): Segment
     generateIdentifierGet(node: ts.Identifier): Segment
+    generateIdentifierWrite(node: ts.Identifier, value: Segment, flag: number, options: IdentifierWriteOptions): Segment
     tryResolveStaticAccess(node: ts.Node, name: string): StaticAccess | null
     isStaticAccessUnchecked(access: StaticAccess): boolean
     getVariableRuntimeName(scopeNode: ts.Node, name: string): string
@@ -238,15 +245,6 @@ export function createCodegenContext(
                 preserveScopeRuntimeNames(map, current)
             }
 
-            if (
-                (ts.isForInStatement(current) || ts.isForOfStatement(current))
-                && ts.isVariableDeclarationList(current.initializer)
-            ) {
-                for (const declaration of current.initializer.declarations) {
-                    preserveVariableNames(map, declaration.name)
-                }
-            }
-
             if (ts.isCatchClause(current) && current.variableDeclaration != null) {
                 preserveVariableNames(map, current.variableDeclaration.name)
             }
@@ -409,6 +407,49 @@ export function createCodegenContext(
         ]
     }
 
+    function generateIdentifierWrite(
+        node: ts.Identifier,
+        value: Segment,
+        flag: number,
+        { mode, freezeConst = false, popResult = true }: IdentifierWriteOptions
+    ): Segment {
+        const access = tryResolveStaticAccess(node, node.text)
+        if (access) {
+            return [
+                ...value,
+                ...generateStaticAccessOps(access),
+                op(mode === 'initialize'
+                    ? OpCode.SetInitializedStatic
+                    : isStaticAccessUnchecked(access)
+                        ? OpCode.SetStaticUnchecked
+                        : OpCode.SetStatic),
+                ...(popResult ? [op(OpCode.Pop)] : []),
+                ...(freezeConst
+                    ? markInternals([
+                        ...generateStaticAccessOps(access),
+                        op(OpCode.FreezeVariableStatic),
+                    ])
+                    : []),
+            ]
+        }
+
+        return [
+            ...generateLeft(node, flag),
+            ...(mode === 'assign' ? [op(OpCode.ResolveScope)] : []),
+            ...value,
+            op(mode === 'initialize' ? OpCode.SetInitialized : OpCode.Set),
+            ...(popResult ? [op(OpCode.Pop)] : []),
+            ...(freezeConst
+                ? markInternals([
+                    ...generateLeft(node, flag),
+                    op(OpCode.FreezeVariable),
+                    op(OpCode.Pop),
+                    op(OpCode.Pop),
+                ])
+                : []),
+        ]
+    }
+
     function allocateInternalName(prefix: string = 'tmp') {
         return `[${prefix}:${nextInternalNameId++}]`
     }
@@ -476,6 +517,7 @@ export function createCodegenContext(
         extractQuote,
         generateStaticAccessOps,
         generateIdentifierGet,
+        generateIdentifierWrite,
         tryResolveStaticAccess,
         isStaticAccessUnchecked,
         getVariableRuntimeName,

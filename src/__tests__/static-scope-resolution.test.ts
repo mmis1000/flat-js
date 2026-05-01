@@ -178,7 +178,7 @@ print(read({ a: 1, b: 2, x: 3 }))
     expect(out).toEqual(['1:2:3'])
 })
 
-test('for-in var declaration target keeps name for dynamic loop binding', () => {
+test('for-in var declaration target omits runtime binding name', () => {
     const out: any[] = []
     const code = `
 function read(obj) {
@@ -193,9 +193,97 @@ print(read({ answer: 1 }))
     const strings = collectStringLiterals(code)
     const [program] = compile(code)
 
-    expect(strings).toContain('loopSlot')
+    expect(strings).not.toContain('loopSlot')
     run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
     expect(out).toEqual(['answer'])
+})
+
+test('for-of var declaration target omits runtime binding name', () => {
+    const out: any[] = []
+    const code = `
+function read(values) {
+    var seen = 0
+    for (var loopValue of values) {
+        seen = loopValue
+    }
+    return seen
+}
+print(read([1, 2, 3]))
+`
+    const strings = collectStringLiterals(code)
+    const [program] = compile(code)
+
+    expect(strings).not.toContain('loopValue')
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual([3])
+})
+
+test('for-in and for-of block scoped declaration targets still initialize and freeze const', () => {
+    const out: any[] = []
+    const [program] = compile(`
+function read(obj, values) {
+    let keySeen = ''
+    let constThrew = false
+    for (const loopKey in obj) {
+        keySeen = loopKey
+        try {
+            loopKey = 'changed'
+        } catch (e) {
+            constThrew = e.constructor === TypeError
+        }
+    }
+
+    let total = 0
+    for (let loopValue of values) {
+        total += loopValue
+    }
+
+    return keySeen + ':' + constThrew + ':' + total
+}
+print(read({ answer: 1 }, [1, 2, 3]))
+`)
+
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual(['answer:true:6'])
+})
+
+test('for-in and for-of identifier targets use assignment semantics', () => {
+    const [forInProgram] = compile(`
+function read(obj) {
+    const loopSlot = 'locked'
+    for (loopSlot in obj) {
+    }
+}
+read({ answer: 1 })
+`)
+    const [forOfProgram] = compile(`
+function read(values) {
+    const loopSlot = 'locked'
+    for (loopSlot of values) {
+    }
+}
+read([1])
+`)
+
+    expect(() => run(forInProgram, 0, globalThis)).toThrow(TypeError)
+    expect(() => run(forOfProgram, 0, globalThis)).toThrow(TypeError)
+})
+
+test('for-of destructuring loop targets still initialize through binding patterns', () => {
+    const out: any[] = []
+    const [program] = compile(`
+function read(values) {
+    let seen = ''
+    for (const [name, value] of values) {
+        seen += name + value
+    }
+    return seen
+}
+print(read([['a', 1], ['b', 2]]))
+`)
+
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual(['a1b2'])
 })
 
 test('range builds preserve static local names for scope materialization', () => {

@@ -32,7 +32,7 @@ Public API (`src/index.ts`): `compile`, `run`, `getExecution`, and `compileAndRu
 ## Current status
 
 - The core compiler/runtime supports the main debugger workflows and a broad ES feature set, but language coverage is still actively being improved.
-- Focused Test262 work is tracked under `plan/test262-language-fix-tracker.md`, with generated summary files in `plan/test262-*-summary.md`; larger current-scan JSON artifacts may also be produced locally during investigation.
+- Focused Test262 work is tracked under `plan/test262-language-fix-tracker.md`, with generated summary files in `plan/test262-*-summary.md`; static scope name-elision follow-up is tracked under `plan/static-scope-name-elision-tracker.md`; larger current-scan JSON artifacts may also be produced locally during investigation.
 - The web app includes the Monaco debugger plus the robot arena simulation, deterministic browser `Math.random`, and VM-compiled host polyfills for callback-heavy array methods.
 - VM state serialization is not implemented yet. The current design and implementation phases are captured in `plan/vm-state-serialization-plan.md`.
 

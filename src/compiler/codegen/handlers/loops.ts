@@ -203,10 +203,20 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 )
             }
 
+            if (declarationName && ts.isIdentifier(declarationName)) {
+                return ctx.generateIdentifierWrite(declarationName, entryValue, flag, {
+                    mode: 'initialize',
+                    freezeConst: !!variableIsConst,
+                })
+            }
+
             if (!ts.isVariableDeclarationList(node.initializer)) {
                 const assignmentTarget = ctx.extractQuote(node.initializer)
                 if (ts.isArrayLiteralExpression(assignmentTarget) || ts.isObjectLiteralExpression(assignmentTarget)) {
                     return generateAssignmentPattern(assignmentTarget, entryValue, flag, ctx)
+                }
+                if (ts.isIdentifier(assignmentTarget)) {
+                    return ctx.generateIdentifierWrite(assignmentTarget, entryValue, flag, { mode: 'assign' })
                 }
             }
 
@@ -363,10 +373,20 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 )
             }
 
+            if (declarationName && ts.isIdentifier(declarationName)) {
+                return ctx.generateIdentifierWrite(declarationName, entryValue, flag, {
+                    mode: 'initialize',
+                    freezeConst: variableIsConst,
+                })
+            }
+
             if (!ts.isVariableDeclarationList(node.initializer)) {
                 const assignmentTarget = ctx.extractQuote(node.initializer)
                 if (ts.isArrayLiteralExpression(assignmentTarget) || ts.isObjectLiteralExpression(assignmentTarget)) {
                     return generateAssignmentPattern(assignmentTarget, entryValue, flag, ctx)
+                }
+                if (ts.isIdentifier(assignmentTarget)) {
+                    return ctx.generateIdentifierWrite(assignmentTarget, entryValue, flag, { mode: 'assign' })
                 }
             }
 
