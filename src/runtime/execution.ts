@@ -51,6 +51,8 @@ import { handleGeneratorOpcode } from "./opcodes/generator"
 import { BREAK_COMMAND, OpcodeContextField, type DebugCallback, type RuntimeOpcodeContext } from "./opcodes/types"
 import { handleValueOpcode } from "./opcodes/value"
 
+const HOST_GLOBAL_THIS = globalThis
+
 export const getExecution = (
     program: number[],
     entryPoint: number = 0,
@@ -111,7 +113,7 @@ export const getExecution = (
         if (typeof ctor !== 'function') return e
         const ctorName = ctor.name
         if (!ctorName) return e
-        const hostCtor = (globalThis as any)[ctorName]
+        const hostCtor = (HOST_GLOBAL_THIS as any)[ctorName]
         if (typeof hostCtor !== 'function' || ctor !== hostCtor) {
             return e
         }

@@ -140,7 +140,8 @@ Reduce the `language` category failures in targeted batches:
   - Status: completed 2026-05-02.
   - Fresh focused scan:
     - before this sub-batch: `34` failing files (`33` intended, `1` out of scope)
-    - after: `5` failing files (`4` intended, `1` out of scope)
+    - after iterator/lexical scope pass: `5` failing files (`4` intended, `1` out of scope)
+    - after cross-realm native TypeError fix: `3` failing files (`2` intended, `1` out of scope)
   - Fixed areas:
     - direct eval completion values for loops now reset to `undefined` before loop execution instead of inheriting a prior expression value
     - `for-of` abrupt exits now perform `IteratorClose` for `break`, outer `continue`, `return`, and `throw`, including return-method edge cases and throw-completion error suppression
@@ -148,8 +149,8 @@ Reduce the `language` category failures in targeted batches:
     - `continue` now uses the existing try/finally staged jump path instead of rejecting `continue` inside `try`, `catch`, or `finally`
     - functions created inside destructuring default initializers no longer capture compiler temporary scopes
     - `for-of` lexical declaration heads now evaluate the RHS in a distinct TDZ scope and create the real per-iteration environment afterward
+    - native errors thrown by inherited cross-realm built-ins now keep that inherited realm constructor instead of being compared against host-pinned constructors
   - Remaining focused `for-of` failures:
-    - two resizable-arraybuffer typedarray tests where the thrown `TypeError` comes from the wrong realm
     - two TypeScript parser-shape tails:
       - `dstr/array-elem-init-in.js`
       - `head-lhs-async-escaped.js`
@@ -423,8 +424,9 @@ Reduce the `language` category failures in targeted batches:
     - `npm test`
 - 2026-05-02: Reduced the focused `language/statements/for-of/**` slice to its current tail.
   - completed direct-eval loop completion resets, `IteratorClose` for abrupt `for-of` exits, `continue` through `try` / `catch` / `finally`, and `for-of` lexical head TDZ/per-iteration scope separation
+  - fixed cross-realm native `TypeError` constructor handling by preserving inherited error constructors on provided globals and comparing host-created runtime errors against the actual host global
   - focused `language/statements/for-of/**` rerun now records:
-    - `4` intended failures
+    - `2` intended failures
     - `1` out-of-scope explicit-resource-management failure
   - verified with:
     - `npm run build:tsc`

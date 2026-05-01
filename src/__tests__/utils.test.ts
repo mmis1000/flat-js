@@ -84,3 +84,29 @@ test('compileAndRun: cross-context errors use the provided global constructors',
 
     expect(context.result).toEqual([true])
 })
+
+test('compileAndRun: cross-context native errors keep inherited realm constructors', () => {
+    const context = vm.createContext({
+        console,
+        require,
+        result: [] as boolean[],
+    })
+
+    vm.runInContext(`
+        const { compileAndRun } = require(${JSON.stringify(require.resolve('../index', { paths: [__dirname] }))});
+        const vmGlobal = Object.create(globalThis);
+        vmGlobal.globalThis = vmGlobal;
+        vmGlobal.print = function (value) {
+            result.push(value);
+        };
+        compileAndRun(\`
+            try {
+                Array.prototype.values.call(null);
+            } catch (e) {
+                print(e.constructor === TypeError);
+            }
+        \`, vmGlobal);
+    `, context)
+
+    expect(context.result).toEqual([true])
+})

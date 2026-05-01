@@ -14,6 +14,10 @@ const pinGlobalErrorConstructors = (global: any) => {
         'URIError',
         'AggregateError',
     ]) {
+        if (Reflect.has(global, name)) {
+            continue
+        }
+
         if (typeof (globalThis as any)[name] === 'function') {
             Reflect.defineProperty(global, name, {
                 configurable: true,
