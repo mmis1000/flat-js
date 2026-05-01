@@ -40,6 +40,16 @@ test('compileAndRun: for loop break with empty completion ignores prior iteratio
     `)).toBe(undefined)
 })
 
+test('compileAndRun: if statements with empty completion reset eval result ', () => {
+    expect(compileAndRun('1; if (false) {}')).toBe(undefined)
+    expect(compileAndRun('2; if (true) {}')).toBe(undefined)
+    expect(compileAndRun('3; if (true) { 4; }')).toBe(4)
+    expect(compileAndRun('5; if (false) {} else {}')).toBe(undefined)
+    expect(compileAndRun('6; if (false) {} else { 7; }')).toBe(7)
+    expect(compileAndRun('8; do { 9; if (true) { break; } 10; } while (false)')).toBe(undefined)
+    expect(compileAndRun('11; do { 12; if (true) { 13; break; } 14; } while (false)')).toBe(13)
+})
+
 test('compileAndRun: finally does not affects result ', () => {
     expect(compileAndRun('try { throw 0 } catch (err) { 42 } finally { 43 }')).toBe(42)
 })

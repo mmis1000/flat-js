@@ -202,8 +202,16 @@ Reduce the `language` category failures in targeted batches:
     - strict-mode direct `if (...) function f() {}` bodies, async/generator function declarations, class declarations, lexical declarations, labeled functions, and `let [` newline bodies now throw `SyntaxError`
     - catch blocks now reject direct lexical declarations, including direct and labeled function declarations, that redeclare a catch parameter
   - Remaining focused failures:
-    - `if`: the seven `cptn-*` completion-value tests
+    - `if`: the seven `cptn-*` completion-value tests, cleared by `if-completion-values`
     - `try`: completion-value tests plus the catch block lexical-scope runtime tail
+
+- [x] `if-completion-values`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - `language/statements/if/**`: `7` failing files -> `0`
+  - Fixed areas:
+    - eval-mode `if` statements now reset the completion value to `undefined` before evaluating the condition, so empty true/false/else branches do not leak a previous expression completion
+    - expression-statement branches still replace the result normally, and empty abrupt branch completions such as `break` preserve the last branch expression only when one executed
 
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
@@ -231,7 +239,7 @@ Reduce the `language` category failures in targeted batches:
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `269` total (`261` runtime, `8` early)
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
-    - control-flow completion and iterator close: `88` total (`88` runtime, `0` early)
+    - control-flow completion and iterator close: `81` total (`81` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
       - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
     - lexical/global declaration early errors: `132` total (`43` runtime, `89` early)
@@ -528,3 +536,12 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/if`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/try`
+- 2026-05-02: Cleared `if` statement eval completion values.
+  - eval-mode `IfStatement` codegen now resets the eval result to `undefined` before condition evaluation in [control-flow.ts](</M:/Playground/flat-js/src/compiler/codegen/handlers/control-flow.ts:1>)
+  - focused `language/statements/if/**` rerun is green: `0` failing files
+  - adjusted the control-flow runtime count from `88` to `81`
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/utils.test.ts`
+    - `npm run build`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/if`

@@ -159,6 +159,9 @@ function generateNamedScope(names: string[]): Segment {
 
 export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isIfStatement(node)) {
+        const resetEvalResult = flag & StatementFlag.Eval && !(flag & StatementFlag.Finally)
+            ? [op(OpCode.UndefinedLiteral), op(OpCode.SetEvalResult), op(OpCode.Pop)]
+            : []
         const exit = [op(OpCode.Nop, 0)]
         const whenTrue = [
             op(OpCode.Nop, 0),
@@ -176,7 +179,7 @@ export function generateControlFlow(node: ts.Node, flag: number, ctx: CodegenCon
             op(OpCode.JumpIfNot)
         ]
 
-        return [...condition, ...whenTrue, ...whenFalsy, ...exit]
+        return [...resetEvalResult, ...condition, ...whenTrue, ...whenFalsy, ...exit]
     }
 
     if (ts.isThrowStatement(node)) {
