@@ -269,6 +269,35 @@ read([1])
     expect(() => run(forOfProgram, 0, globalThis)).toThrow(TypeError)
 })
 
+test('for-in lexical head keeps TDZ and iteration closures distinct', () => {
+    const out: any[] = []
+    const [program] = compile(`
+var probeBefore = function() { return x }
+let x = 'outside'
+var probeExpr, probeDecl, probeBody
+
+for (
+    let [x, _ = probeDecl = function() { return x }]
+    in
+    { i: probeExpr = function() { typeof x } }
+)
+    probeBody = function() { return x }
+
+var probeExprResult
+try {
+    probeExpr()
+    probeExprResult = 'no error'
+} catch (e) {
+    probeExprResult = e.constructor.name
+}
+
+print(probeBefore(), probeExprResult, probeDecl(), probeBody(), x)
+`)
+
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual(['outside', 'ReferenceError', 'i', 'i', 'outside'])
+})
+
 test('for-of destructuring loop targets still initialize through binding patterns', () => {
     const out: any[] = []
     const [program] = compile(`

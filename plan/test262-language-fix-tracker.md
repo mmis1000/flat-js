@@ -157,6 +157,20 @@ Reduce the `language` category failures in targeted batches:
     - out-of-scope explicit resource-management tail:
       - `head-using-bound-names-fordecl-tdz.js`
 
+- [x] `for-in-lexical-head-scope`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - before: `5` failing files (`5` intended, `0` out of scope)
+    - after: `2` failing files (`2` intended, `0` out of scope)
+  - Fixed areas:
+    - `for-in` lexical declaration heads now evaluate the RHS in a distinct TDZ scope and create the real per-iteration environment afterward, matching the adjacent `for-of` handling
+    - functions created in the RHS expression observe the head TDZ instead of an outer binding
+    - functions created during destructuring declaration initialization and statement-body evaluation capture the per-iteration binding value
+  - Remaining focused `for-in` failures:
+    - two sloppy-script `let` identifier LHS parser-shape tails that TypeScript parses as invalid declaration heads:
+      - `head-lhs-let.js`
+      - `identifier-let-allowed-as-lefthandside-expression-not-strict.js`
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -432,3 +446,12 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/for-of-and-spread.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/for-of`
+- 2026-05-02: Reduced the focused `language/statements/for-in/**` slice to its current parser tail.
+  - reused the lexical-head TDZ/per-iteration scope structure from the `for-of` fix for `for-in`
+  - focused `language/statements/for-in/**` rerun now records:
+    - `2` intended parser-shape failures
+    - `0` out-of-scope failures
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/static-scope-resolution.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/for-in`

@@ -320,16 +320,26 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
             ]
         }
 
-        const head = [
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
-            ...[
+        const head = hasVariable
+            ? [
+                ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
+                ...ctx.generate(node.expression, flag),
+                ...generateLeaveScope(),
+                op(OpCode.GetPropertyIterator),
+                ...enter,
+                ...generateLoopScopeStaticAccess(node, SpecialVariable.LoopIterator, ctx),
+                op(OpCode.SetInitializedStatic),
+                op(OpCode.Pop)
+            ]
+            : [
+                ...enter,
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
                 ...ctx.generate(node.expression, flag),
                 op(OpCode.GetPropertyIterator),
-            ],
-            op(OpCode.Set),
-            op(OpCode.Pop)
-        ]
+                op(OpCode.Set),
+                op(OpCode.Pop)
+            ]
 
         const condition = [
             op(OpCode.NodeOffset, 2, [leave[0]]),
@@ -364,7 +374,6 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
 
         return [
             ...generateLoopEvalResultReset(flag),
-            ...enter,
             ...head,
             ...condition,
             ...body,
