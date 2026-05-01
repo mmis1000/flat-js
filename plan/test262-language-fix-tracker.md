@@ -237,11 +237,18 @@ Reduce the `language` category failures in targeted batches:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - last completed broad `language` scan still has the 2026-04-29 split:
-      - intended-support matches: `2632`
-      - actionable Flat JS work: `2238`
-      - non-actionable TypeScript parser misses to document only: `394`
-      - host/module interaction exclusions: `57`
+    - latest completed broad `language` scan: 2026-05-01T22:11:28.439Z
+      - intended-scope failing files: `1728`
+      - out-of-scope failing files: `6376`
+      - total failing files recorded: `8104`
+      - intended buckets:
+        - broken / needs inspection: `1087`
+        - broken early error semantics: `226`
+        - broken semantics: `251`
+        - harness issue: `1`
+        - not supported: `34`
+        - not supported parser syntax: `129`
+      - regression check: the broad summary has no detailed failures under `language/statements/if/**` or `language/statements/try/**`
     - after the 2026-05-02 compiler-only parse-negative refresh:
       - scanned Test262 `language` parse-negative files: `4389`
       - actionable early-error files still not caught as `SyntaxError`: `188`
@@ -249,7 +256,7 @@ Reduce the `language` category failures in targeted batches:
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
   - Actionable intended-support groups:
-    - counts below keep runtime counts from the last completed broad scan; early counts were refreshed by the 2026-05-02 compiler-only parse-negative pass
+    - counts below are working-group estimates from focused and compiler-only scans; use the latest broad summary above for current top-line totals
     - functions, parameters, eval, arguments env: `423` total (`375` runtime, `48` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
@@ -583,3 +590,18 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/utils.test.ts`
     - `npm run build`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/try`
+- 2026-05-01T22:11:28Z: Regenerated the full [test262-language-summary.md](</M:/Playground/flat-js/plan/test262-language-summary.md:1>) after the `if` / `try` batches.
+  - totals:
+    - intended-scope failing files: `1728`
+    - out-of-scope failing files: `6376`
+    - total failing files recorded: `8104`
+  - intended buckets:
+    - broken / needs inspection: `1087`
+    - broken early error semantics: `226`
+    - broken semantics: `251`
+    - harness issue: `1`
+    - not supported: `34`
+    - not supported parser syntax: `129`
+  - regression check: no detailed failures remain for `language/statements/if/**` or `language/statements/try/**`
+  - command:
+    - `TEST262_SCAN_CONCURRENCY=8 node plan\\test262-language-scan.js`
