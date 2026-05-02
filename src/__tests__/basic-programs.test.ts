@@ -1255,6 +1255,28 @@ print(outer.x)
 print(inner.x)
 `, [1, 7, 5], printProvider)
 
+testRuntime('with statement does not expose global lexical bindings as object properties', `
+let count = 0
+var local
+globalThis[Symbol.unscopables] = { local: true }
+;(function (value) {
+    count++
+    with (globalThis) {
+        count++
+        print(local)
+    }
+    var local = value
+    with (globalThis) {
+        count++
+        print(local)
+        local = 20
+    }
+    print(local)
+})('inside')
+print(count)
+delete globalThis[Symbol.unscopables]
+`, [undefined, 'inside', 20, 3], printProvider)
+
 testRuntime('with statement ignores non-object Symbol.unscopables', `
 var marker = {}
 var env = { toString: marker }

@@ -373,18 +373,19 @@ Reduce the `language` category failures in targeted batches:
       - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
-    - functions, parameters, eval, arguments env: at least `374` core files
+    - functions, parameters, eval, arguments env: at least `372` core files
       - direct eval: `165`
       - function-code: `127`
       - arguments-object: `47`
-      - ordinary/async function expression and statement roots: `35`
+      - ordinary/async function expression and statement roots: `33`
       - adjacent indirect eval (`26`) and arrow/async-arrow (`19`) tails likely belong with this work
       - parameter/body environment separation is partially completed by `7751069`
       - parameter default self/later-name TDZ is now covered for ordinary function expression and statement roots
       - named function-expression self bindings are now immutable, including sloppy-silent and strict-throw assignment behavior
       - direct eval inside rest/binding-pattern parameter cleanup now keeps the active function variable environment instead of falling into synthetic scopes
       - non-strict direct eval now rejects `var` declarations that collide with lexical or non-simple parameter environments
-      - remaining work is mapped arguments, directive strictness, `with` / unscopables, and older statement-function object model tails
+      - function-expression root now has `0` intended failures; only out-of-scope class-static/class-private files remain there
+      - remaining work is mapped arguments, directive strictness, and older statement-function object model tails
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
       - class expressions: `165`
@@ -941,3 +942,13 @@ Reduce the `language` category failures in targeted batches:
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
   - next runtime target remains eval/function/arguments environment behavior, especially `with` / `Symbol.unscopables` and mapped arguments
+- 2026-05-03: Cleared the function-expression `with(globalThis)` / `Symbol.unscopables` tail.
+  - object-environment lookup now skips VM global lexical bindings mirrored on `globalThis`, so `with (globalThis)` no longer exposes `let` / `const` globals as object properties
+  - added a focused regression in [basic-programs.test.ts](</M:/Playground/flat-js/src/__tests__/basic-programs.test.ts:1>) for `with (globalThis)` resolving a global lexical `count` and an unscopables-skipped local `var`
+  - focused `language/expressions/function/**` scan is now at `0` intended failures; latest recorded total `6`, all out-of-scope class-static/class-private files
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "with statement does not expose global lexical|with statement respects Symbol.unscopables"`
+    - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
+  - boundary reached: ordinary function-expression root has no intended Test262 failures left; continue with function statement / function-code / arguments-object tails next

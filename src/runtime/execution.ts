@@ -235,6 +235,12 @@ export const getExecution = (
             }
 
             const object = getWithScopeObject(scope) as Record<string, any>
+            if (
+                object === currentFrame[Fields.globalThis]
+                && ((getVariableFlag(currentFrame[Fields.globalThis], name) ?? VariableFlags.None) & VariableFlags.Lexical)
+            ) {
+                return false
+            }
             if (!Reflect.has(object, name)) {
                 return false
             }
