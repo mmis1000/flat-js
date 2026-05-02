@@ -47,6 +47,19 @@ const isVmConstructible = (fn: any) => {
 const isObjectEnvironmentScope = (scope: Scope) =>
     (scope as any)[SCOPE_WITH_OBJECT] !== undefined
 
+const isObjectLike = (value: unknown): value is object =>
+    (typeof value === 'object' && value !== null) || typeof value === 'function'
+
+type ConstructTarget = { new(...args: any[]): any, prototype?: unknown }
+
+const createConstructThis = (newTarget: ConstructTarget, globalThis: any) => {
+    const newTargetPrototype = (newTarget as { prototype?: unknown }).prototype
+    const prototype = isObjectLike(newTargetPrototype)
+        ? newTargetPrototype
+        : globalThis?.Object?.prototype ?? Object.prototype
+    return Object.create(prototype)
+}
+
 const isSourceFileInPlace = (functionType: FunctionTypes) =>
     functionType === FunctionTypes.SourceFileInPlace
     || functionType === FunctionTypes.EvalSourceFileInPlace
@@ -144,6 +157,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 Object.defineProperty(obj, 'callee', {
                     enumerable: false,
                     configurable: true,
+                    writable: !strict,
                     value: callee,
                 })
 
@@ -159,6 +173,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 newTargetValue: any,
                 validateEvalDeclarations = false
             ) => {
+                let argumentsObject: any
                 switch (functionType) {
                     case FunctionTypes.FunctionDeclaration:
                     case FunctionTypes.FunctionExpression:
@@ -187,7 +202,8 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         }
                         ctx[OpcodeContextField.defineVariable](activationScope, SpecialVariable.NewTarget, VariableType.Var, false)
                         ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.NewTarget, newTargetValue)
-                            ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', getArgumentObject(bindingScope, fn))
+                        argumentsObject = getArgumentObject(bindingScope, fn)
+                        ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', argumentsObject)
                 }
 
                 if (validateEvalDeclarations && !strict) {
@@ -205,6 +221,14 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         ? VariableType.Let
                         : variable[Fields.type]
                     ctx[OpcodeContextField.defineVariable](bindingScope, variable[Fields.name], variableType)
+                    if (
+                        variable[Fields.name] === 'arguments'
+                        && variable[Fields.type] === VariableType.Var
+                        && bindingScope === activationScope
+                        && argumentsObject !== undefined
+                    ) {
+                        ctx[OpcodeContextField.initializeBindingValue](bindingScope, variable[Fields.name], argumentsObject)
+                    }
                 }
 
                 bindFunctionSelfName(functionType, bindingScope, name, fn, ctx)
@@ -288,7 +312,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             } else if (invokeType === InvokeType.Construct) {
                 const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
                 const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
-                const newTarget = ctx[OpcodeContextField.popCurrentFrameStack]<{ new(...args: any[]): any }>()
+                const newTarget = ctx[OpcodeContextField.popCurrentFrameStack]<ConstructTarget>()
 
                 let activationScope: Scope
                 let bindingScope: Scope
@@ -320,7 +344,9 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     bindingScope,
                     name,
                     fn,
-                    functionType === FunctionTypes.DerivedConstructor ? undefined : Object.create(newTarget.prototype),
+                    functionType === FunctionTypes.DerivedConstructor
+                        ? undefined
+                        : createConstructThis(newTarget, ctx[OpcodeContextField.currentFrame][Fields.globalThis]),
                     newTarget
                 )
             }

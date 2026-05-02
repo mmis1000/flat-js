@@ -398,6 +398,17 @@ run(fn)
     })
 )
 testRuntime(
+    'function objects use realm prototypes and construct fallback prototypes',
+    `
+function Factory () {}
+print(Function.prototype.isPrototypeOf(Factory))
+Factory.prototype = 1
+print(Object.prototype.isPrototypeOf(new Factory()))
+`,
+    [true, true],
+    printProvider
+)
+testRuntime(
     'local function without return',
     `
 const fn = () => {}
@@ -427,9 +438,25 @@ testRuntimeThrows('variable const immutable', ' const a = 0; a = 0', TypeError)
 
 testRuntime('empty statement', ';', [], printProvider)
 testRuntime('function statement', 'print(a()); function a () { return 0 }', [0], printProvider)
+testRuntime('function var arguments keeps arguments object before initializer', `
+function fn () {
+    return typeof arguments
+    var arguments = 1
+}
+print(fn(42))
+`, ['object'], printProvider)
 testRuntime('function statement covered by ParenthesizedExpression', 'print((a)()); function a () { return 0 }', [0], printProvider)
 testRuntime('function expression', 'const a = function a () { return 0 }; print(a());', [0], printProvider)
 testRuntime('arrow function', 'const a = () => 0; print(a());', [0], printProvider)
+testRuntime('sloppy arguments callee is writable through with', `
+var result = (function () {
+    with (arguments) {
+        callee = 1
+    }
+    return arguments.callee
+})(0)
+print(result)
+`, [1], printProvider)
 testRuntime('object method', 'const a = { b () { return 0 } }; print(a.b());', [0], printProvider)
 testRuntime('object method covered by ParenthesizedExpression', 'const a = { b () { return 0 } }; print((a.b)());', [0], printProvider)
 testRuntime('this reference get', 'const a = { a: 0, b () { return this.a } }; print(a.b());', [0], printProvider)

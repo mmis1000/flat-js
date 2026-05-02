@@ -901,6 +901,10 @@ export const getExecution = (
         }
 
         Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
+        const functionPrototype = globalThis?.Function?.prototype
+        if (functionPrototype && Object.getPrototypeOf(fn) !== functionPrototype) {
+            Object.setPrototypeOf(fn, functionPrototype)
+        }
 
         functionDescriptors.set(fn, des)
 

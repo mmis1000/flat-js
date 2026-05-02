@@ -287,6 +287,7 @@ export function createCodegenContext(
 
     function bindingNameAlwaysNeeded(name: string, type: VariableType) {
         return name.startsWith('[')
+            || name === 'arguments'
             || type === VariableType.Function
             || type === VariableType.Parameter
     }

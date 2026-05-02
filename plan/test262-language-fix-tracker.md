@@ -952,3 +952,15 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
   - boundary reached: ordinary function-expression root has no intended Test262 failures left; continue with function statement / function-code / arguments-object tails next
+- 2026-05-03: Cleared the ordinary function-statement runtime tail.
+  - VM-created function objects now inherit from the active realm `Function.prototype`
+  - `new F()` now falls back to the active realm `Object.prototype` when `F.prototype` is primitive
+  - sloppy arguments objects expose a writable `callee`, matching legacy mapped-arguments behavior exercised through `with (arguments)`
+  - statically resolved `var arguments` bindings preserve their runtime name and initialize from the real arguments object before later initializers run
+  - added focused regressions in [basic-programs.test.ts](</M:/Playground/flat-js/src/__tests__/basic-programs.test.ts:1>) for function object prototypes, construct fallback prototypes, writable sloppy `arguments.callee`, and `var arguments` before initializer execution
+  - focused `language/statements/function/**` scan is now at `0` intended failures; latest recorded total `4`, all out-of-scope class-private invalid-name files
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "function objects use realm prototypes|sloppy arguments callee|function var arguments"`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
+  - boundary reached: ordinary function expression/statement roots have no intended failures left; continue with adjacent `function-code`, arguments-object, async/generator function runtime clusters
