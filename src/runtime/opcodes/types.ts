@@ -7,6 +7,7 @@ import type {
     Scope,
     Stack,
     StaticVariableStore,
+    VariableFlags,
     VariableRecord,
 } from "../shared"
 
@@ -103,7 +104,7 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.setBindingValueChecked](scope: Scope, name: string, value: any): any
     [OpcodeContextField.clearBindingTDZ](scope: Scope, name: string): void
     [OpcodeContextField.freezeBinding](scope: Scope, name: string): void
-    [OpcodeContextField.defineVariable](scope: Scope, name: string, type: VariableType, trackStaticSlot?: boolean): void
+    [OpcodeContextField.defineVariable](scope: Scope, name: string, type: VariableType, trackStaticSlot?: boolean, configurableOverride?: boolean, extraFlags?: VariableFlags): void
     [OpcodeContextField.initializeBindingValue](scope: Scope, name: string, value: any): any
     [OpcodeContextField.createWithScope](value: unknown): Scope
     [OpcodeContextField.createIdentifierReference](frame: Frame, scope: Scope | null): IdentifierReference

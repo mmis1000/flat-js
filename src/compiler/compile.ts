@@ -12,6 +12,8 @@ export type CompileOptions = {
     range?: boolean
     /** generate with eval result op inserted */
     evalMode?: boolean
+    /** use EvalDeclarationInstantiation source-file entry semantics; internal runtime eval only */
+    runtimeEval?: boolean
     /** force strict-mode source semantics for direct eval / synthetic entry points */
     withStrict?: boolean
 }
@@ -1539,7 +1541,7 @@ function toSourceRange(locationMap: Map<number, [number, number]>, start: number
     return [startPos[0], startPos[1], endPos[0], endPos[1]]
 }
 
-export function compile(src: string, { debug = false, range = false, evalMode = false, withStrict = false }: CompileOptions = {}): [number[], DebugInfo] {
+export function compile(src: string, { debug = false, range = false, evalMode = false, runtimeEval = false, withStrict = false }: CompileOptions = {}): [number[], DebugInfo] {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
@@ -1584,6 +1586,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
         const generated = generateSegment(item, scopes, parentMap, functions, evalTaintedFunctions, {
             withPos: range,
             withEval: (item.kind === ts.SyntaxKind.SourceFile) && evalMode,
+            withRuntimeEval: (item.kind === ts.SyntaxKind.SourceFile) && runtimeEval,
             withStrict,
             preserveRuntimeBindingNames: debug || range
         })

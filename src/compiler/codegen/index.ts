@@ -77,7 +77,7 @@ export function generateSegment(
     parentMap: ParentMap,
     functions: Functions,
     evalTaintedFunctions: Set<VariableRoot>,
-    { withPos = false, withEval = false, withStrict = false, preserveRuntimeBindingNames = false }: SegmentOptions = {}
+    { withPos = false, withEval = false, withRuntimeEval = false, withStrict = false, preserveRuntimeBindingNames = false }: SegmentOptions = {}
 ): Segment {
     const ctx = createCodegenContext(node, scopes, parentMap, functions, evalTaintedFunctions, {
         withPos,
@@ -205,8 +205,8 @@ export function generateSegment(
     }
 
     entry.push(...generateVariableList(node, scopes, ctx.getVariableRuntimeName))
-    if (ts.isSourceFile(node) && !withStrict) {
-        entry.push(op(OpCode.Literal, 2, [withEval ? FunctionTypes.EvalSourceFileInPlace : FunctionTypes.SourceFileInPlace]))
+    if (ts.isSourceFile(node) && !withStrict && !(withRuntimeEval && strictRoot)) {
+        entry.push(op(OpCode.Literal, 2, [withRuntimeEval ? FunctionTypes.EvalSourceFileInPlace : FunctionTypes.SourceFileInPlace]))
     } else {
         entry.push(op(OpCode.NodeFunctionType, 2, [node]))
     }

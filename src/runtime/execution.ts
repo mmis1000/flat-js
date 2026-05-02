@@ -361,6 +361,11 @@ export const getExecution = (
         if (isWithScope(scope)) {
             return Reflect.deleteProperty(getWithScopeObject(scope), name)
         }
+        const flags = getVariableFlag(scope, name) ?? VariableFlags.None
+        if (flags & VariableFlags.Deletable) {
+            delete getVariableFlagMap(scope)[name]
+            return Reflect.deleteProperty(scope, name)
+        }
         if (scope === currentFrame[Fields.globalThis] && getVariableFlag(scope, name) === undefined) {
             return Reflect.deleteProperty(scope, name)
         }
@@ -412,8 +417,15 @@ export const getExecution = (
         }
     }
 
-    const defineVariable = (scope: Scope, name: string, type: VariableType, trackStaticSlot: boolean = true) => {
-        const configurable = !(scope === currentFrame[Fields.globalThis] && (
+    const defineVariable = (
+        scope: Scope,
+        name: string,
+        type: VariableType,
+        trackStaticSlot: boolean = true,
+        configurableOverride?: boolean,
+        extraFlags: VariableFlags = VariableFlags.None
+    ) => {
+        const configurable = configurableOverride ?? !(scope === currentFrame[Fields.globalThis] && (
             type === VariableType.Var ||
             type === VariableType.Function
         ))
@@ -421,14 +433,14 @@ export const getExecution = (
         switch (type) {
             case VariableType.Const:
                 // seal it later
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical | extraFlags)
             case VariableType.Let:
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical | extraFlags)
             case VariableType.Function:
             case VariableType.Parameter:
             case VariableType.Var:
                 //don't have tdz
-                return defineVariableInternal(scope, name, false, false, trackStaticSlot, configurable)
+                return defineVariableInternal(scope, name, false, false, trackStaticSlot, configurable, extraFlags)
         }
     }
     const getStaticVariableScope = (frame: Frame, depth: number) =>
@@ -1051,7 +1063,8 @@ export const getExecution = (
 
         const [programData] = compileFunction(value, {
             evalMode: true,
-            withStrict: !!currentFrame[Fields.strict],
+            runtimeEval: true,
+            withStrict: includesLocalScope && !!currentFrame[Fields.strict],
         })
 
         const result = run(

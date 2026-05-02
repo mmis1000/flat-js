@@ -691,6 +691,48 @@ test('sloppy direct eval rejects arguments var in parameter eval environments', 
     `)).toEqual([true, 0])
 })
 
+test('eval declaration instantiation uses eval lexical and variable environments', () => {
+    const global = Object.create(globalThis)
+    global.globalThis = global
+
+    expect(compileAndRun(`
+        var initialExisting, localInitial, localDeleted, strictFunctionType
+        var __flatEvalExisting = 23
+
+        eval('let __flatEvalLexical = 1')
+        var lexicalHidden = typeof __flatEvalLexical === 'undefined'
+
+        eval('initialExisting = __flatEvalExisting; var __flatEvalExisting = 45')
+        var existingDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__flatEvalExisting')
+
+        eval('var __flatEvalNew = 11')
+        var newDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__flatEvalNew')
+
+        ;(function () {
+            eval('localInitial = __flatEvalLocal; delete __flatEvalLocal; localDeleted = function () { try { __flatEvalLocal; return false } catch (error) { return error instanceof ReferenceError } }; var __flatEvalLocal')
+        })()
+
+        ;(function () {
+            eval('"use strict"; function __flatStrictEvalFunction () {}')
+            strictFunctionType = typeof __flatStrictEvalFunction
+        })()
+
+        var out = [
+            lexicalHidden,
+            initialExisting,
+            __flatEvalExisting,
+            existingDescriptor.configurable,
+            globalThis.__flatEvalNew,
+            newDescriptor.configurable,
+            localInitial,
+            localDeleted(),
+            strictFunctionType
+        ]
+        delete globalThis.__flatEvalNew
+        out
+    `, global)).toEqual([true, 23, 45, false, 11, true, undefined, true, 'undefined'])
+})
+
 test('parameter-expression functions resolve captured outer block bindings', () => {
     expect(compileAndRun(`
         {

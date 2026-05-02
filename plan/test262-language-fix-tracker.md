@@ -375,7 +375,7 @@ Reduce the `language` category failures in targeted batches:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
     - functions, parameters, eval, arguments env: at least `372` core files
       - direct eval: `165`
-        - current focused direct-eval scan after ordinary function-code and eval-arguments cleanup: `59` intended failures, `2` out-of-scope
+        - current focused direct-eval scan after ordinary function-code, eval-arguments, and eval declaration-instantiation cleanup: `42` intended parser-delegation failures, `2` out-of-scope
       - function-code: `127` - cleared for intended support on 2026-05-03
       - arguments-object: `47` - cleared for intended support on 2026-05-03
       - ordinary/async function expression and statement roots: `33`
@@ -387,7 +387,7 @@ Reduce the `language` category failures in targeted batches:
       - non-strict direct eval now rejects `var` declarations that collide with lexical or non-simple parameter environments
       - function-expression root now has `0` intended failures; only out-of-scope class-static/class-private files remain there
       - function-statement, arguments-object, and function-code roots now have `0` intended failures
-      - remaining work is direct/indirect eval plus async/generator function-family runtime tails
+      - remaining work is direct-eval parser-delegation cases, one indirect-eval cross-realm harness tail, and async/generator function-family runtime tails
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
       - class expressions: `165`
@@ -1002,3 +1002,19 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts -t "sloppy direct eval rejects"`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/direct`
   - next eval target: global/local eval variable-environment creation, deletion, configurability, and lexical environment distinctness
+- 2026-05-03: Cleared direct/indirect eval declaration-instantiation runtime semantics.
+  - runtime eval compilation is now distinguished from compile-and-run eval-result mode, so Test262 top-level scripts keep script global declarations while actual `eval(...)` uses EvalDeclarationInstantiation semantics
+  - sloppy direct and indirect eval now create a temporary eval lexical environment for `let` / `const` / class declarations, while `var` and function declarations bind in the eval variable environment
+  - eval-created global `var` / function bindings are configurable, existing global script bindings preserve their attributes, and non-definable globals throw before partial declaration creation
+  - eval-created local `var` / function bindings are deletable when newly created, and strict eval source no longer instantiates declarations in the caller variable environment
+  - indirect eval no longer inherits caller strictness
+  - added a focused regression in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) for eval lexical non-leakage, global descriptor attributes, local deletable bindings, and strict eval non-leakage
+  - fresh scans:
+    - `language/eval-code/direct/**`: `0` runtime-semantic intended failures; remaining `42` intended files are parser-delegation syntax cases (`arguments` in method params, direct-eval `new.target`, direct-eval `super`)
+    - `language/eval-code/indirect/**`: `1` intended failure (`realm.js`, `$262` cross-realm harness/global provisioning), plus `2` out-of-scope import/export files
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts -t "eval declaration instantiation|sloppy direct eval rejects"`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/direct`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/indirect`
+  - boundary reached: eval runtime-semantics work is clear enough to move to async/generator function-family runtime clusters; parser-delegation eval syntax cases are deferred

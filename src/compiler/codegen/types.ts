@@ -19,6 +19,7 @@ export type Segment = Op[]
 export type SegmentOptions = {
     withPos?: boolean
     withEval?: boolean
+    withRuntimeEval?: boolean
     withStrict?: boolean
     preserveRuntimeBindingNames?: boolean
 }

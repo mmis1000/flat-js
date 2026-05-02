@@ -237,6 +237,7 @@ export const enum VariableFlags {
     Immutable = 1 << 0,
     SloppySilentImmutable = 1 << 1,
     Lexical = 1 << 2,
+    Deletable = 1 << 3,
 }
 
 type StaticVariableStore = {

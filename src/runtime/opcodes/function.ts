@@ -65,6 +65,9 @@ const isSourceFileInPlace = (functionType: FunctionTypes) =>
     functionType === FunctionTypes.SourceFileInPlace
     || functionType === FunctionTypes.EvalSourceFileInPlace
 
+const isEvalSourceFileInPlace = (functionType: FunctionTypes) =>
+    functionType === FunctionTypes.EvalSourceFileInPlace
+
 const bindFunctionSelfName = (
     functionType: FunctionTypes,
     scope: Scope,
@@ -325,21 +328,30 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         }
                 }
 
+                const evalSourceFile = validateEvalDeclarations && isEvalSourceFileInPlace(functionType)
+                const evalVariableDeclarations = evalSourceFile
+                    ? variables.filter((variable) =>
+                        variable[Fields.type] === VariableType.Var
+                        || variable[Fields.type] === VariableType.Function
+                    )
+                    : []
+
                 if (validateEvalDeclarations && !strict) {
-                    const varNames = variables
-                        .filter((variable) =>
-                            variable[Fields.type] === VariableType.Var
-                            || variable[Fields.type] === VariableType.Function
-                        )
-                        .map((variable) => variable[Fields.name])
-                    validateSloppyEvalVarDeclarations(activationScope, varNames)
+                    validateSloppyEvalVarDeclarations(activationScope, evalVariableDeclarations)
                 }
 
                 for (const variable of variables) {
                     const variableType = hasParameterExpressions && variable[Fields.type] === VariableType.Parameter
                         ? VariableType.Let
                         : variable[Fields.type]
-                    ctx[OpcodeContextField.defineVariable](bindingScope, variable[Fields.name], variableType)
+                    if (
+                        evalSourceFile
+                        && (variableType === VariableType.Var || variableType === VariableType.Function)
+                    ) {
+                        defineEvalVarBinding(activationScope, variable[Fields.name], variableType)
+                    } else {
+                        ctx[OpcodeContextField.defineVariable](bindingScope, variable[Fields.name], variableType)
+                    }
                     if (
                         variable[Fields.name] === 'arguments'
                         && variable[Fields.type] === VariableType.Var
@@ -364,14 +376,51 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 }
             }
 
-            const validateSloppyEvalVarDeclarations = (varEnv: Scope, names: readonly string[]) => {
-                if (names.length === 0) {
+            const getEvalDeclarationNames = (declarations: readonly VariableRecord[]) =>
+                declarations.map((declaration) => declaration[Fields.name])
+
+            const isGlobalVariableEnvironment = (scope: Scope) =>
+                scope === ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+
+            const canDeclareGlobalVar = (name: string) =>
+                Reflect.has(ctx[OpcodeContextField.currentFrame][Fields.globalThis], name)
+                || Object.isExtensible(ctx[OpcodeContextField.currentFrame][Fields.globalThis])
+
+            const canDeclareGlobalFunction = (name: string) => {
+                const globalThis = ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+                const descriptor = Reflect.getOwnPropertyDescriptor(globalThis, name)
+                if (descriptor == null) {
+                    return Object.isExtensible(globalThis)
+                }
+                if (descriptor.configurable) {
+                    return true
+                }
+                return 'value' in descriptor
+                    && descriptor.writable === true
+                    && descriptor.enumerable === true
+            }
+
+            const validateSloppyEvalVarDeclarations = (varEnv: Scope, declarations: readonly VariableRecord[]) => {
+                if (declarations.length === 0) {
                     return
                 }
 
+                const names = getEvalDeclarationNames(declarations)
                 const varEnvInternals = varEnv as Scope & { [SCOPE_REJECT_EVAL_ARGUMENTS_VAR]?: boolean }
                 if (names.includes('arguments') && varEnvInternals[SCOPE_REJECT_EVAL_ARGUMENTS_VAR]) {
                     throw new SyntaxError(`Identifier 'arguments' has already been declared`)
+                }
+
+                if (isGlobalVariableEnvironment(varEnv)) {
+                    for (const declaration of declarations) {
+                        const name = declaration[Fields.name]
+                        const canDeclare = declaration[Fields.type] === VariableType.Function
+                            ? canDeclareGlobalFunction(name)
+                            : canDeclareGlobalVar(name)
+                        if (!canDeclare) {
+                            throw new TypeError(`Cannot declare global variable '${name}'`)
+                        }
+                    }
                 }
 
                 const checkScope = (scope: Scope) => {
@@ -397,6 +446,31 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 checkScope(varEnv)
             }
 
+            const defineEvalVarBinding = (scope: Scope, name: string, type: VariableType) => {
+                if (isGlobalVariableEnvironment(scope)) {
+                    if (type === VariableType.Var && Reflect.has(scope, name)) {
+                        return
+                    }
+                    if (type === VariableType.Function) {
+                        const descriptor = Reflect.getOwnPropertyDescriptor(scope, name)
+                        if (descriptor && !descriptor.configurable) {
+                            return
+                        }
+                    }
+                } else if (ctx[OpcodeContextField.hasBinding](scope, name)) {
+                    return
+                }
+
+                ctx[OpcodeContextField.defineVariable](
+                    scope,
+                    name,
+                    type,
+                    false,
+                    true,
+                    VariableFlags.Deletable
+                )
+            }
+
             if (invokeType === InvokeType.Apply) {
                 const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
                 const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
@@ -412,7 +486,12 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     activationScope = evalVariableEnvironment
                         ?? ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.scopes])
                         ?? ctx[OpcodeContextField.currentFrame][Fields.globalThis]
-                    bindingScope = activationScope
+                    if (validateEvalDeclarations) {
+                        bindingScope = getEmptyObject()
+                        ctx[OpcodeContextField.currentFrame][Fields.scopes].push(bindingScope)
+                    } else {
+                        bindingScope = activationScope
+                    }
                     ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = activationScope
                     ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], bindingScope)
                     initializeVariableBindings(activationScope, bindingScope, name, fn, self, undefined, validateEvalDeclarations)
