@@ -146,6 +146,30 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             ctx[OpcodeContextField.pushCurrentFrameStack](rest)
         }
             break
+        case OpCode.ObjectSpread: {
+            const source = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const target = ctx[OpcodeContextField.popCurrentFrameStack]<Record<PropertyKey, any>>()
+
+            if (source != null) {
+                const from = Object(source)
+                for (const key of Reflect.ownKeys(from)) {
+                    const descriptor = Reflect.getOwnPropertyDescriptor(from, key)
+                    if (!descriptor?.enumerable) {
+                        continue
+                    }
+
+                    Reflect.defineProperty(target, key, {
+                        configurable: true,
+                        enumerable: true,
+                        writable: true,
+                        value: Reflect.get(from, key),
+                    })
+                }
+            }
+
+            ctx[OpcodeContextField.pushCurrentFrameStack](target)
+        }
+            break
         case OpCode.Typeof: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
             ctx[OpcodeContextField.pushCurrentFrameStack](typeof value)

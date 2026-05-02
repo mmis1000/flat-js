@@ -25,21 +25,44 @@ module.exports = function flatJsTest262Preprocessor(test) {
     return test;
   }
 
-  test.contents = `'use strict';
+test.contents = `'use strict';
 (() => {
   const __flatJsVm = require('vm');
   const { compileAndRun } = require(${JSON.stringify(flatEntry)});
-  const context = __flatJsVm.createContext({ console, require });
-  const vmGlobal = __flatJsVm.runInContext(\`
-    const g = Object.create(globalThis);
-    g.globalThis = g;
-    g.print = function print(...args) {
-      console.log(...args);
-    };
-    g.console = console;
-    g.require = require;
-    g;
-  \`, context);
+  const __createFlatGlobal = () => {
+    const context = __flatJsVm.createContext({ console, require });
+    const vmGlobal = __flatJsVm.runInContext(\`
+      const g = Object.create(globalThis);
+      g.globalThis = g;
+      g.print = function print(...args) {
+        console.log(...args);
+      };
+      g.console = console;
+      g.require = require;
+      g;
+    \`, context);
+    Object.defineProperty(vmGlobal, 'eval', {
+      configurable: true,
+      writable: true,
+      value(source) {
+        return compileAndRun(String(source), vmGlobal);
+      },
+    });
+    Object.defineProperty(vmGlobal, '$262', {
+      configurable: true,
+      writable: true,
+      value: {
+        evalScript(source) {
+          return compileAndRun(String(source), vmGlobal);
+        },
+        createRealm() {
+          return { global: __createFlatGlobal() };
+        },
+      },
+    });
+    return vmGlobal;
+  };
+  const vmGlobal = __createFlatGlobal();
   return compileAndRun(${JSON.stringify(src)}, vmGlobal);
 })();
 `;

@@ -53,6 +53,78 @@ import { handleValueOpcode } from "./opcodes/value"
 
 const HOST_GLOBAL_THIS = globalThis
 
+type GeneratorFunctionIntrinsics = {
+    functionPrototype: object
+    prototype: object
+}
+
+const generatorIntrinsicsByFunctionPrototype = new WeakMap<object, {
+    generator: GeneratorFunctionIntrinsics
+    asyncGenerator: GeneratorFunctionIntrinsics
+}>()
+
+const isObjectLikeValue = (value: unknown): value is object =>
+    (typeof value === 'object' && value !== null) || typeof value === 'function'
+
+const createGeneratorFunctionIntrinsics = (
+    functionPrototype: object,
+    objectPrototype: object
+): GeneratorFunctionIntrinsics => {
+    const prototype = Object.create(objectPrototype)
+    const generatorFunctionPrototype = Object.create(functionPrototype)
+    Object.defineProperty(generatorFunctionPrototype, 'prototype', {
+        configurable: true,
+        enumerable: false,
+        writable: false,
+        value: prototype,
+    })
+    return { functionPrototype: generatorFunctionPrototype, prototype }
+}
+
+const getGeneratorFunctionIntrinsics = (
+    globalThis: any,
+    asyncGenerator: boolean
+): GeneratorFunctionIntrinsics => {
+    const functionPrototype = isObjectLikeValue(globalThis?.Function?.prototype)
+        ? globalThis.Function.prototype
+        : Function.prototype
+    const objectPrototype = isObjectLikeValue(globalThis?.Object?.prototype)
+        ? globalThis.Object.prototype
+        : Object.prototype
+    let cached = generatorIntrinsicsByFunctionPrototype.get(functionPrototype)
+    if (!cached) {
+        cached = {
+            generator: createGeneratorFunctionIntrinsics(functionPrototype, objectPrototype),
+            asyncGenerator: createGeneratorFunctionIntrinsics(functionPrototype, objectPrototype),
+        }
+        generatorIntrinsicsByFunctionPrototype.set(functionPrototype, cached)
+    }
+    return asyncGenerator ? cached.asyncGenerator : cached.generator
+}
+
+const getGeneratorInstancePrototype = (
+    globalThis: any,
+    fn: unknown,
+    asyncGenerator: boolean
+) => {
+    if (isObjectLikeValue(fn)) {
+        const ownPrototype = Reflect.get(fn, 'prototype')
+        if (isObjectLikeValue(ownPrototype)) {
+            return ownPrototype
+        }
+
+        const functionPrototype = Object.getPrototypeOf(fn)
+        const defaultPrototype = isObjectLikeValue(functionPrototype)
+            ? Reflect.get(functionPrototype, 'prototype')
+            : undefined
+        if (isObjectLikeValue(defaultPrototype)) {
+            return defaultPrototype
+        }
+    }
+
+    return getGeneratorFunctionIntrinsics(globalThis, asyncGenerator).prototype
+}
+
 export const getExecution = (
     program: number[],
     entryPoint: number = 0,
@@ -639,6 +711,7 @@ export const getExecution = (
             },
             [Symbol.iterator]() { return gen }
         }
+        Object.setPrototypeOf(gen, getGeneratorInstancePrototype(gt, invokeData[Fields.function], false))
 
         state[Fields.gen] = gen
 
@@ -780,6 +853,7 @@ export const getExecution = (
             },
             [Symbol.asyncIterator]() { return gen }
         }
+        Object.setPrototypeOf(gen, getGeneratorInstancePrototype(gt, invokeData[Fields.function], true))
 
         state[Fields.gen] = gen
 
@@ -791,8 +865,10 @@ export const getExecution = (
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): Promise<unknown> => {
         const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const PromiseCtor = Reflect.get(gt, 'Promise') ?? Promise
+        const promiseResolve = (value: unknown) => Reflect.get(PromiseCtor, 'resolve').call(PromiseCtor, value) as PromiseLike<unknown>
 
-        return new Promise<unknown>((resolve, reject) => {
+        return new PromiseCtor((resolve: (value: unknown) => void, reject: (reason?: unknown) => void) => {
             const continueExecution = (value: unknown, isFirst: boolean) => {
                 try {
                     if (!isFirst) {
@@ -804,7 +880,7 @@ export const getExecution = (
                     if (res[Fields.done]) {
                         resolve(res[Fields.value])
                     } else if (res[Fields.await]) {
-                        Promise.resolve(res[Fields.value]).then(
+                        promiseResolve(res[Fields.value]).then(
                             (val: unknown) => continueExecution(val, false),
                             (err: unknown) => continueWithThrow(err)
                         )
@@ -822,7 +898,7 @@ export const getExecution = (
                     if (res[Fields.done]) {
                         resolve(res[Fields.value])
                     } else if (res[Fields.await]) {
-                        Promise.resolve(res[Fields.value]).then(
+                        promiseResolve(res[Fields.value]).then(
                             (val: unknown) => continueExecution(val, false),
                             (err: unknown) => continueWithThrow(err)
                         )
@@ -896,10 +972,23 @@ export const getExecution = (
         }
 
         Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
-        Object.defineProperty(fn, 'caller', { value: undefined, configurable: true })
-        const functionPrototype = globalThis?.Function?.prototype
-        if (functionPrototype && Object.getPrototypeOf(fn) !== functionPrototype) {
-            Object.setPrototypeOf(fn, functionPrototype)
+        if (!isAsyncType(type) && !isGeneratorType(type) && !isAsyncGeneratorType(type)) {
+            Object.defineProperty(fn, 'caller', { value: undefined, configurable: true })
+        }
+        if (isGeneratorType(type) || isAsyncGeneratorType(type)) {
+            const intrinsics = getGeneratorFunctionIntrinsics(globalThis, isAsyncGeneratorType(type))
+            Object.defineProperty(fn, 'prototype', {
+                configurable: false,
+                enumerable: false,
+                writable: true,
+                value: Object.create(intrinsics.prototype),
+            })
+            Object.setPrototypeOf(fn, intrinsics.functionPrototype)
+        } else {
+            const functionPrototype = globalThis?.Function?.prototype
+            if (functionPrototype && Object.getPrototypeOf(fn) !== functionPrototype) {
+                Object.setPrototypeOf(fn, functionPrototype)
+            }
         }
 
         functionDescriptors.set(fn, des)
@@ -1637,6 +1726,7 @@ export const getExecution = (
                 case OpCode.TemplateObject:
                 case OpCode.ObjectLiteral:
                 case OpCode.ObjectRest:
+                case OpCode.ObjectSpread:
                 case OpCode.Typeof:
                 case OpCode.ToPropertyKey:
                 case OpCode.TypeofReference:

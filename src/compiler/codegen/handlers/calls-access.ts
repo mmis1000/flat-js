@@ -381,6 +381,13 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
         ]
 
         for (const item of node.properties) {
+            if (ts.isSpreadAssignment(item)) {
+                res.push(op(OpCode.Duplicate))
+                res.push(...ctx.generate(item.expression, flag))
+                res.push(op(OpCode.ObjectSpread))
+                continue
+            }
+
             if (ts.isShorthandPropertyAssignment(item)) {
                 res.push(op(OpCode.Literal, 2, [item.name.text]))
                 res.push(...ctx.generate(item.name, flag))

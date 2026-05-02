@@ -284,6 +284,9 @@ breakThroughFinally([1, 2, 3]);
 throwReferenceErrorPath;
 throwNormally;
 
+const spreadCopy = { ...target, spreadMarker: 1 };
+spreadCopy.spreadMarker;
+
 {
     let blockTdz;
     blockTdz = outerVar;

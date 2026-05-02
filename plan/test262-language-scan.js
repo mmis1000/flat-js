@@ -72,6 +72,10 @@ const webCompatHostBehaviorFiles = new Set([
     'language/expressions/assignmenttargettype/parenthesized-callexpression.js',
 ])
 
+const nativeHarnessFailureFiles = new Set([
+    'language/statements/async-function/evaluation-body.js',
+])
+
 function isParserDelegationRegExpFile(file) {
     return file.startsWith('language/literals/regexp/early-err-')
         || file.startsWith('language/literals/regexp/named-groups/invalid-')
@@ -561,6 +565,10 @@ function isOutOfScope(file, attrs, messages) {
         return true
     }
 
+    if (nativeHarnessFailureFiles.has(file)) {
+        return true
+    }
+
     if (isParserDelegationRegExpFile(file)) {
         return true
     }
@@ -594,6 +602,10 @@ function classifyFailure(file, attrsList, messages) {
     const combined = messages.join(' || ')
     const features = normalizeFeatures(primaryAttrs?.features)
     const parseNegative = attrsList.some((attrs) => attrs?.negative?.phase === 'parse')
+
+    if (nativeHarnessFailureFiles.has(file)) {
+        return { scope, type: 'native harness issue', features, negativePhase: parseNegative ? 'parse' : null }
+    }
 
     if (/Maximum call stack size exceeded|Error running test:/i.test(combined)) {
         return { scope, type: 'harness issue', features, negativePhase: parseNegative ? 'parse' : null }

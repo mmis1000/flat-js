@@ -14,6 +14,10 @@ function generateNamedInitializer(initializer: ts.Expression, name: string, ctx:
     if (ts.isArrowFunction(rawInitializer)) {
         return generateFunctionDefinition(rawInitializer, name)
     }
+
+    if (ts.isFunctionExpression(rawInitializer) && rawInitializer.name == null) {
+        return generateFunctionDefinition(rawInitializer, name)
+    }
 }
 
 function findContainingForOfWithoutInnerTry(node: ts.Node, ctx: CodegenContext): ts.ForOfStatement | null {

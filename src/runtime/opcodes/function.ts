@@ -829,6 +829,9 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 ctx[OpcodeContextField.pushCurrentFrameStack](instance)
             } else {
                 const descriptor = functionDescriptors.get(fn)!
+                if (!isVmConstructible(fn)) {
+                    throw new TypeError('target is not a constructor')
+                }
                 const newFrame: Frame = {
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],
@@ -884,6 +887,9 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 }
             } else {
                 const descriptor = functionDescriptors.get(fn)!
+                if (!isVmConstructible(fn)) {
+                    throw new TypeError('target is not a constructor')
+                }
                 const newFrame: Frame = {
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],

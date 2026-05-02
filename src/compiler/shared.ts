@@ -556,6 +556,12 @@ export const enum OpCode {
      */
     ObjectRest,
     /**
+     * Copies own enumerable properties from a source into an existing object literal target.
+     * Stack (bottom to top): target, source
+     * Result: target
+     */
+    ObjectSpread,
+    /**
      * Creates a regular expression object.
      * Stack (bottom to top): source, flags
      * Result: regexp

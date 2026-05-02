@@ -17,6 +17,32 @@ describe('Generators', () => {
         expect(result).toEqual([1, false, 2, false, 3, true])
     })
 
+    test('generator function object and instance prototype shape', () => {
+        const result = compileAndRun(`
+            function ordinary() {}
+            function* declaration() {}
+            const expression = function*() {};
+            const defaultPrototype = Object.getPrototypeOf(declaration).prototype;
+            const beforeNull = [
+                Object.getPrototypeOf(declaration()) === declaration.prototype,
+                declaration() instanceof declaration,
+                Object.getOwnPropertyNames(declaration.prototype).length,
+                Object.getPrototypeOf(Object.getPrototypeOf(declaration)) === Object.getPrototypeOf(ordinary),
+                expression.name
+            ];
+            declaration.prototype = null;
+            let constructError = false;
+            try { new declaration(); } catch (error) { constructError = error.constructor === TypeError; }
+            beforeNull.concat([
+                Object.getPrototypeOf(declaration()) === defaultPrototype,
+                declaration.hasOwnProperty('caller'),
+                declaration.hasOwnProperty('arguments'),
+                constructError
+            ]);
+        `)
+        expect(result).toEqual([true, true, 0, true, 'expression', true, false, false, true])
+    })
+
     test('generator with parameters', () => {
         const result = compileAndRun(`
             function* g(start) {
@@ -91,6 +117,27 @@ describe('Generators', () => {
             [it.next().value, it.next().value, it.next().value];
         `)
         expect(result).toEqual([1, 2, 3])
+    })
+
+    test('object spread operands can suspend on yield', () => {
+        const result = compileAndRun(`
+            const s = Symbol('s');
+            function* gen() {
+                return {
+                    ...yield,
+                    y: 1,
+                    ...yield yield
+                };
+            }
+            const iter = gen();
+            iter.next();
+            iter.next({ x: 42, [s]: 1 });
+            iter.next({ x: 'ignored' });
+            const item = iter.next({ y: 39, [s]: 2 });
+            const value = item.value;
+            [value.x, value.y, value[s], Object.keys(value).length, item.done];
+        `)
+        expect(result).toEqual([42, 39, 2, 2, true])
     })
 
     test('try/finally runs on .return()', () => {

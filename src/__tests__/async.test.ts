@@ -11,6 +11,22 @@ describe('Async/Await', () => {
         expect(result).toBe(42)
     })
 
+    test('async functions use VM realm promises and no own caller property', async () => {
+        const result = await compileAndRun(`
+            async function declaration() {}
+            const expression = async function() {};
+            const declarationPromise = declaration();
+            const expressionPromise = expression();
+            Promise.all([
+                declarationPromise instanceof Promise,
+                expressionPromise instanceof Promise,
+                declaration.hasOwnProperty('caller'),
+                expression.hasOwnProperty('caller')
+            ]);
+        `)
+        expect(result).toEqual([true, true, false, false])
+    })
+
     test('awaiting a literal', async () => {
         const result = await compileAndRun(`
             async function f() {

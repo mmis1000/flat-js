@@ -1018,3 +1018,21 @@ Reduce the `language` category failures in targeted batches:
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/direct`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/indirect`
   - boundary reached: eval runtime-semantics work is clear enough to move to async/generator function-family runtime clusters; parser-delegation eval syntax cases are deferred
+- 2026-05-03: Cleared async-function and generator function-family runtime clusters.
+  - async functions now create their returned promises through the function realm's `Promise`, and async/generator function objects no longer expose forbidden own `caller` properties
+  - generator functions now use a generator-function prototype object, create per-function generator prototypes with no own properties, reject `new g()` in VM construction paths, and create generator instances from `g.prototype` or the default generator prototype
+  - anonymous function expressions, including generator expressions, now receive inferred variable names during variable initialization
+  - object literal spread is now a first-class VM operation that copies own enumerable string and symbol keys into the existing literal target; this clears generator `yield` operands in spread positions
+  - the Test262 preprocessor now provides minimal `$262.evalScript()` and `$262.createRealm()` hooks that run code through Flat JS globals, clearing the previous cross-realm harness-provisioning tail
+  - fresh scans:
+    - `language/expressions/async-function/**`: `0` intended failures
+    - `language/statements/async-function/**`: `0` intended failures; one native `test262-harness` / Node unhandled-rejection case is classified as an out-of-scope native harness issue
+    - `language/expressions/generators/**`: `0` intended failures; only `2` out-of-scope class-static-block files remain
+    - `language/statements/generators/**`: `0` intended failures
+    - `language/eval-code/indirect/**`: `0` intended failures; only `2` out-of-scope import/export files remain
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/generator.test.ts src/__tests__/async.test.ts src/__tests__/opcode-kitchen-sink.test.ts`
+    - `npx test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 "./node_modules/test262/test/language/expressions/generators/eval-body-proto-realm.js"`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for async functions, generators, and indirect eval
+  - next runtime target: async-generator expression/statement runtime clusters; run a full language scan after the async-generator boundary to catch regressions before moving to the next family
