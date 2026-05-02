@@ -11,10 +11,15 @@ const languageDir = process.env.TEST262_SCAN_ROOT
 const summaryPath = process.env.TEST262_SCAN_SUMMARY
     ? path.resolve(rootDir, process.env.TEST262_SCAN_SUMMARY)
     : path.join(rootDir, 'plan', 'test262-language-summary.md')
+const scanStatePath = process.env.TEST262_SCAN_STATE
+    ? path.resolve(rootDir, process.env.TEST262_SCAN_STATE)
+    : `${summaryPath}.state.json`
+const freshScan = process.env.TEST262_SCAN_FRESH === '1'
 const maxFilesPerChunk = 350
 const chunkConcurrency = Math.max(2, Math.min(16, Number(process.env.TEST262_SCAN_CONCURRENCY || 12), os.cpus().length || 1))
 const maxExplicitChunkArgs = 48
 const maxExplicitChunkCommandLength = 7000
+const scanStateVersion = 1
 
 const outOfScopePrefixes = [
     'language/import/',
@@ -180,6 +185,110 @@ function chunkTargets(chunk) {
         return chunk.files.map((file) => `./${relativeFromRoot(file)}`)
     }
     throw new Error(`unknown chunk kind ${chunk.kind}`)
+}
+
+function serializeChunk(chunk) {
+    if (chunk.kind === 'dir') {
+        return {
+            kind: 'dir',
+            dir: relativeFromRoot(chunk.dir),
+        }
+    }
+
+    if (chunk.kind === 'files') {
+        return {
+            kind: 'files',
+            files: chunk.files.map((file) => relativeFromRoot(file)),
+        }
+    }
+
+    throw new Error(`unknown chunk kind ${chunk.kind}`)
+}
+
+function deserializeChunk(chunk) {
+    if (chunk.kind === 'dir') {
+        return {
+            kind: 'dir',
+            dir: path.resolve(rootDir, chunk.dir),
+        }
+    }
+
+    if (chunk.kind === 'files') {
+        return {
+            kind: 'files',
+            files: chunk.files.map((file) => path.resolve(rootDir, file)),
+        }
+    }
+
+    throw new Error(`unknown saved chunk kind ${chunk.kind}`)
+}
+
+function serializeResults(resultsByFile) {
+    return [...resultsByFile.entries()]
+}
+
+function deserializeResults(entries) {
+    return new Map(Array.isArray(entries) ? entries : [])
+}
+
+function saveScanState({ queue, activeChunks, resultsByFile, scanNotes, processed, completed }) {
+    const state = {
+        version: scanStateVersion,
+        languageDir: relativeFromRoot(languageDir),
+        summaryPath: relativeFromRoot(summaryPath),
+        savedAt: new Date().toISOString(),
+        processed,
+        completed,
+        queue: queue.map(serializeChunk),
+        activeChunks: [...activeChunks.values()].map(serializeChunk),
+        resultsByFile: serializeResults(resultsByFile),
+        scanNotes,
+    }
+
+    fs.mkdirSync(path.dirname(scanStatePath), { recursive: true })
+    const tempPath = `${scanStatePath}.tmp`
+    fs.writeFileSync(tempPath, JSON.stringify(state, null, 2))
+    fs.renameSync(tempPath, scanStatePath)
+}
+
+function loadScanState() {
+    if (freshScan) {
+        if (fs.existsSync(scanStatePath)) {
+            fs.rmSync(scanStatePath)
+        }
+        return null
+    }
+
+    if (!fs.existsSync(scanStatePath)) {
+        return null
+    }
+
+    const state = JSON.parse(fs.readFileSync(scanStatePath, 'utf8'))
+    const expectedLanguageDir = relativeFromRoot(languageDir)
+    const expectedSummaryPath = relativeFromRoot(summaryPath)
+
+    if (
+        state.version !== scanStateVersion
+        || state.languageDir !== expectedLanguageDir
+        || state.summaryPath !== expectedSummaryPath
+    ) {
+        throw new Error(
+            `Scan state ${relativeFromRoot(scanStatePath)} does not match this run. `
+            + 'Set TEST262_SCAN_FRESH=1 to start over, or set TEST262_SCAN_STATE to a different file.'
+        )
+    }
+
+    return {
+        queue: [
+            ...(state.activeChunks ?? []),
+            ...(state.queue ?? []),
+        ].map(deserializeChunk),
+        resultsByFile: deserializeResults(state.resultsByFile),
+        scanNotes: Array.isArray(state.scanNotes) ? state.scanNotes : [],
+        processed: Number(state.processed) || 0,
+        completed: Number(state.completed) || 0,
+        savedAt: state.savedAt,
+    }
 }
 
 function extractJsonPrefix(rawOutput) {
@@ -589,74 +698,114 @@ function countChunkFiles(chunk) {
 
 async function main() {
     const initialChunks = createInitialChunks(languageDir)
-    const queue = [...initialChunks]
-    const resultsByFile = new Map()
-    const scanNotes = []
+    const savedState = loadScanState()
+    const queue = savedState?.queue ?? [...initialChunks]
+    const resultsByFile = savedState?.resultsByFile ?? new Map()
+    const scanNotes = savedState?.scanNotes ?? []
+    const activeChunks = new Map()
 
-    console.log(`Initial chunks: ${queue.length}`)
+    console.log(`Initial chunks: ${initialChunks.length}`)
     console.log(`Chunk concurrency: ${chunkConcurrency}`)
+    console.log(`Scan state: ${relativeFromRoot(scanStatePath)}`)
+    if (savedState != null) {
+        console.log(`Resuming scan state from ${savedState.savedAt ?? 'unknown time'} | completed=${savedState.completed} | queued=${queue.length}`)
+    } else if (freshScan) {
+        console.log('Starting fresh scan; existing state was ignored.')
+    }
 
-    let processed = 0
+    let processed = savedState?.processed ?? 0
+    let completed = savedState?.completed ?? 0
     let active = 0
 
-    await new Promise((resolve, reject) => {
-        const pump = () => {
-            while (active < chunkConcurrency && queue.length > 0) {
-                const chunk = queue.shift()
-                active += 1
-                processed += 1
+    const saveProgress = () => {
+        saveScanState({
+            queue,
+            activeChunks,
+            resultsByFile,
+            scanNotes,
+            processed,
+            completed,
+        })
+    }
 
-                if (processed === 1 || processed % 25 === 0) {
-                    console.log(`[${processed}] ${describeChunk(chunk)} | remaining=${queue.length} | active=${active}`)
-                }
+    const onInterrupted = (signal) => {
+        saveProgress()
+        console.log(`Saved ${relativeFromRoot(scanStatePath)} after ${signal}; rerun the same command to resume.`)
+        process.exitCode = signal === 'SIGINT' ? 130 : 143
+        process.exit()
+    }
 
-                runHarness(chunk).then((run) => {
-                    if (run.ok) {
-                        for (const failure of run.failures) {
-                            if (failure.result?.pass !== false) {
-                                continue
+    process.once('SIGINT', () => onInterrupted('SIGINT'))
+    process.once('SIGTERM', () => onInterrupted('SIGTERM'))
+
+    saveProgress()
+
+    if (queue.length > 0) {
+        await new Promise((resolve, reject) => {
+            const pump = () => {
+                while (active < chunkConcurrency && queue.length > 0) {
+                    const chunk = queue.shift()
+                    const activeKey = `${processed}:${describeChunk(chunk)}`
+                    activeChunks.set(activeKey, chunk)
+                    active += 1
+                    processed += 1
+                    saveProgress()
+
+                    if (processed === 1 || processed % 25 === 0) {
+                        console.log(`[${processed}] ${describeChunk(chunk)} | remaining=${queue.length} | active=${active}`)
+                    }
+
+                    runHarness(chunk).then((run) => {
+                        if (run.ok) {
+                            for (const failure of run.failures) {
+                                if (failure.result?.pass !== false) {
+                                    continue
+                                }
+                                const relFile = relativeLanguagePath(toPosix(failure.file))
+                                const existing = resultsByFile.get(relFile) ?? {
+                                    file: relFile,
+                                    messages: [],
+                                    scenarios: [],
+                                    attrsList: [],
+                                }
+                                existing.messages.push(String(failure.result?.message ?? 'unknown failure'))
+                                existing.scenarios.push(String(failure.scenario ?? 'default'))
+                                existing.attrsList.push(failure.attrs ?? null)
+                                resultsByFile.set(relFile, existing)
                             }
-                            const relFile = relativeLanguagePath(toPosix(failure.file))
-                            const existing = resultsByFile.get(relFile) ?? {
-                                file: relFile,
-                                messages: [],
-                                scenarios: [],
-                                attrsList: [],
-                            }
-                            existing.messages.push(String(failure.result?.message ?? 'unknown failure'))
-                            existing.scenarios.push(String(failure.scenario ?? 'default'))
-                            existing.attrsList.push(failure.attrs ?? null)
-                            resultsByFile.set(relFile, existing)
-                        }
-                    } else {
-                        const smaller = splitChunk(chunk)
-                        if (smaller.length > 0) {
-                            scanNotes.push(`Split ${describeChunk(chunk)} after ${run.reason}.`)
-                            console.log(`split ${describeChunk(chunk)} -> ${smaller.length} smaller chunks (${run.reason})`)
-                            queue.unshift(...smaller)
                         } else {
-                            const rawSnippet = String(run.trailing ?? run.rawOutput ?? run.error ?? 'unknown harness failure')
-                                .replace(/\s+/g, ' ')
-                                .trim()
-                                .slice(0, 220)
+                            const smaller = splitChunk(chunk)
+                            if (smaller.length > 0) {
+                                scanNotes.push(`Split ${describeChunk(chunk)} after ${run.reason}.`)
+                                console.log(`split ${describeChunk(chunk)} -> ${smaller.length} smaller chunks (${run.reason})`)
+                                queue.unshift(...smaller)
+                            } else {
+                                const rawSnippet = String(run.trailing ?? run.rawOutput ?? run.error ?? 'unknown harness failure')
+                                    .replace(/\s+/g, ' ')
+                                    .trim()
+                                    .slice(0, 220)
 
-                            for (const absFile of listFilesForChunk(chunk)) {
-                                recordHarnessIssue(resultsByFile, absFile, rawSnippet)
+                                for (const absFile of listFilesForChunk(chunk)) {
+                                    recordHarnessIssue(resultsByFile, absFile, rawSnippet)
+                                }
                             }
                         }
-                    }
-                }).catch(reject).finally(() => {
-                    active -= 1
-                    if (queue.length === 0 && active === 0) {
-                        resolve()
-                        return
-                    }
-                    pump()
-                })
+                        completed += 1
+                    }).catch(reject).finally(() => {
+                        active -= 1
+                        activeChunks.delete(activeKey)
+                        saveProgress()
+                        if (queue.length === 0 && active === 0) {
+                            resolve()
+                            return
+                        }
+                        pump()
+                    })
+                }
             }
-        }
-        pump()
-    })
+            pump()
+        })
+    }
 
     for (const [file, record] of [...resultsByFile.entries()]) {
         if (record.type === 'harness issue') {
@@ -678,6 +827,9 @@ async function main() {
 
     const markdown = renderSummary(resultsByFile, scanNotes)
     fs.writeFileSync(summaryPath, markdown)
+    if (fs.existsSync(scanStatePath)) {
+        fs.rmSync(scanStatePath)
+    }
     console.log(`Wrote ${relativeFromRoot(summaryPath)}`)
     console.log(`Failing files recorded: ${resultsByFile.size}`)
 }
