@@ -1572,7 +1572,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
 
     markParent(sourceNode, parentMap)
     searchFunctionAndScope(sourceNode, parentMap, functions, scopes)
-    resolveScopes(sourceNode, parentMap, functions, scopes)
+    resolveScopes(sourceNode, parentMap, functions, scopes, withStrict)
     linkScopes(sourceNode, parentMap, scopes, scopeChild)
     const evalTaintedFunctions = collectEvalTaintedFunctions(sourceNode, parentMap, functions)
 

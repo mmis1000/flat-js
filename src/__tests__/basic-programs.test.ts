@@ -291,6 +291,59 @@ test('Runtime: web-compat bad left hand call assignment targets', () => {
 testRuntimeThrows('syntax error for invalid syntax', '{', SyntaxError, printProvider)
 
 testRuntime('this', 'print(this === globalThis)', [true], printProvider)
+testRuntime('function this binding boxes sloppy calls only', `
+function sloppy () {
+    print(this === globalThis)
+}
+function strict () {
+    'use strict'
+    print(this === undefined)
+}
+function box () {
+    return this
+}
+sloppy()
+strict()
+var boxed = box.call(1)
+print(typeof boxed, boxed == 1, boxed === 1)
+Object.defineProperty(Object.prototype, '__flatThisProbe', {
+    configurable: true,
+    get: function () { return this }
+})
+var sloppyAccessorThis = (5).__flatThisProbe
+print(typeof sloppyAccessorThis, sloppyAccessorThis == 5, sloppyAccessorThis === 5)
+Object.defineProperty(Object.prototype, '__flatStrictThisProbe', {
+    configurable: true,
+    get: function () { 'use strict'; return this }
+})
+var strictAccessorThis = (5).__flatStrictThisProbe
+print(typeof strictAccessorThis, strictAccessorThis === 5)
+delete Object.prototype.__flatThisProbe
+delete Object.prototype.__flatStrictThisProbe
+`, [true, true, 'object', true, false, 'object', true, false, 'number', true], printProvider)
+testRuntime('strict global this property assignment stays a property', `
+'use strict'
+function declaredBeforeThisAssignment () {}
+this.__flatStrictGlobalProperty = 1
+print(globalThis.__flatStrictGlobalProperty)
+delete this.__flatStrictGlobalProperty
+`, [1], printProvider)
+testRuntime('strict block functions stay block scoped', `
+'use strict'
+var blockBefore, blockAfter, caseBefore, caseAfter;
+(function () {
+    try { blockFunction } catch (error) { blockBefore = error instanceof ReferenceError }
+    { function blockFunction () {} }
+    try { blockFunction } catch (error) { blockAfter = error instanceof ReferenceError }
+    try { caseFunction } catch (error) { caseBefore = error instanceof ReferenceError }
+    switch (1) {
+        case 1:
+            function caseFunction () {}
+    }
+    try { caseFunction } catch (error) { caseAfter = error instanceof ReferenceError }
+})()
+print(blockBefore, blockAfter, caseBefore, caseAfter)
+`, [true, true, true, true], printProvider)
 
 testRuntime(
     'prefix unary expressions', `

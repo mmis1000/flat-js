@@ -127,6 +127,20 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             const hasRestParameter = restParameterIndex >= 0
             ctx[OpcodeContextField.currentFrame][Fields.strict] = strict
 
+            const getThisBindingValue = (thisValue: any) => {
+                if (strict || (thisValue == null && functionType === FunctionTypes.DerivedConstructor)) {
+                    return thisValue
+                }
+                if (thisValue == null) {
+                    return ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+                }
+                if (typeof thisValue !== 'object' && typeof thisValue !== 'function') {
+                    const objectCtor = ctx[OpcodeContextField.currentFrame][Fields.globalThis]?.Object
+                    return typeof objectCtor === 'function' ? objectCtor(thisValue) : Object(thisValue)
+                }
+                return thisValue
+            }
+
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                 const obj = ctx[OpcodeContextField.createArgumentObject](
                     ctx[OpcodeContextField.currentFrame][Fields.globalThis]
@@ -294,7 +308,11 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                             false
                         )
                         if (functionType !== FunctionTypes.DerivedConstructor || thisValue !== undefined) {
-                            ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.This, thisValue)
+                            ctx[OpcodeContextField.initializeBindingValue](
+                                activationScope,
+                                SpecialVariable.This,
+                                getThisBindingValue(thisValue)
+                            )
                         }
                         ctx[OpcodeContextField.defineVariable](activationScope, SpecialVariable.NewTarget, VariableType.Var, false)
                         ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.NewTarget, newTargetValue)
@@ -560,15 +578,6 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             const vmGlobal = ctx[OpcodeContextField.currentFrame][Fields.globalThis]
             const realmEval = Reflect.get(vmGlobal, 'eval')
             const descriptor = functionDescriptors.get(fnTarget)
-
-            if (
-                self == null
-                && descriptor
-                && descriptor[Fields.type] !== FunctionTypes.ArrowFunction
-                && descriptor[Fields.type] !== FunctionTypes.AsyncArrowFunction
-            ) {
-                self = descriptor[Fields.globalThis]
-            }
 
             if (fn === BIND) {
                 const bound = ctx[OpcodeContextField.bindInternal](self, parameters[0], parameters.slice(1))

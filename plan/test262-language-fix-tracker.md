@@ -375,8 +375,8 @@ Reduce the `language` category failures in targeted batches:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
     - functions, parameters, eval, arguments env: at least `372` core files
       - direct eval: `165`
-      - function-code: `127`
-      - arguments-object: `47`
+      - function-code: `127` - cleared for intended support on 2026-05-03
+      - arguments-object: `47` - cleared for intended support on 2026-05-03
       - ordinary/async function expression and statement roots: `33`
       - adjacent indirect eval (`26`) and arrow/async-arrow (`19`) tails likely belong with this work
       - parameter/body environment separation is partially completed by `7751069`
@@ -385,7 +385,8 @@ Reduce the `language` category failures in targeted batches:
       - direct eval inside rest/binding-pattern parameter cleanup now keeps the active function variable environment instead of falling into synthetic scopes
       - non-strict direct eval now rejects `var` declarations that collide with lexical or non-simple parameter environments
       - function-expression root now has `0` intended failures; only out-of-scope class-static/class-private files remain there
-      - remaining work is mapped arguments, directive strictness, and older statement-function object model tails
+      - function-statement, arguments-object, and function-code roots now have `0` intended failures
+      - remaining work is direct/indirect eval plus async/generator function-family runtime tails
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
       - class expressions: `165`
@@ -978,3 +979,15 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/arguments-object`
   - boundary reached: ordinary function roots and arguments-object intended support are clear; continue with `function-code` or async/generator function-family runtime clusters
+- 2026-05-03: Cleared the intended `function-code` runtime cluster.
+  - strict and sloppy function calls now apply `this` binding semantics at function entry: strict calls keep the original receiver, sloppy calls default nullish receivers to the active global object, and sloppy primitive receivers box in the active realm
+  - primitive property gets/sets now use active-realm `ToObject` for prototype lookup while preserving the original primitive receiver for accessors
+  - strict block and switch-case function declarations now initialize lexical block bindings instead of leaking outside their block
+  - raw global-object property writes stay ordinary property writes even after global declarations attach scope metadata, so strict `this.f = ...` remains visible to `Function("return f()")`
+  - added focused regressions in [basic-programs.test.ts](</M:/Playground/flat-js/src/__tests__/basic-programs.test.ts:1>) for function `this` binding, primitive accessor receivers, strict block functions, and strict global `this` property assignment
+  - fresh `language/function-code/**` scan is now at `0` intended failures
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "function this binding boxes|strict global this property|strict block functions"`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/function-code`
+  - boundary reached: ordinary function-code intended support is clear; continue with direct/indirect eval or async/generator function-family runtime clusters

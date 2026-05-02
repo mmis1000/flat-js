@@ -126,6 +126,84 @@ export function isLexicalSwitchFunctionDeclaration(node: ts.FunctionDeclaration,
     return parent != null && (ts.isCaseClause(parent) || ts.isDefaultClause(parent))
 }
 
+function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
+    for (const statement of statements) {
+        if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) {
+            return false
+        }
+
+        if (statement.expression.text === 'use strict') {
+            return true
+        }
+    }
+
+    return false
+}
+
+function isStrictDeclarationContext(node: ts.Node, parentMap: ParentMap, withStrict: boolean) {
+    if (withStrict) {
+        return true
+    }
+
+    let current = parentMap.get(node)?.node
+    while (current != null) {
+        if (ts.isClassLike(current)) {
+            return true
+        }
+
+        if (
+            ts.isMethodDeclaration(current)
+            || ts.isGetAccessorDeclaration(current)
+            || ts.isSetAccessorDeclaration(current)
+            || ts.isConstructorDeclaration(current)
+        ) {
+            return true
+        }
+
+        if (ts.isBlock(current)) {
+            const owner = parentMap.get(current)?.node
+            if (owner != null && ts.isFunctionLike(owner) && hasUseStrictDirective(current.statements)) {
+                return true
+            }
+        }
+
+        if (ts.isSourceFile(current)) {
+            return ts.isExternalModule(current) || hasUseStrictDirective(current.statements)
+        }
+
+        current = parentMap.get(current)?.node
+    }
+
+    return false
+}
+
+export function getStrictLexicalFunctionDeclarationScope(
+    node: ts.FunctionDeclaration,
+    parentMap: ParentMap,
+    withStrict: boolean
+): ts.Block | ts.CaseBlock | undefined {
+    if (!isStrictDeclarationContext(node, parentMap, withStrict)) {
+        return undefined
+    }
+
+    const parent = parentMap.get(node)?.node
+    if (parent == null) {
+        return undefined
+    }
+
+    if (ts.isBlock(parent)) {
+        const blockParent = parentMap.get(parent)
+        const isFunctionBody = blockParent?.key === 'body' && ts.isFunctionLike(blockParent.node)
+        return isFunctionBody ? undefined : parent
+    }
+
+    if (ts.isCaseClause(parent) || ts.isDefaultClause(parent)) {
+        return findAncient<ts.CaseBlock>(node, parentMap, (ancestor): ancestor is ts.CaseBlock => ts.isCaseBlock(ancestor))
+    }
+
+    return undefined
+}
+
 function bindingNameHasParameterExpressions(name: ts.BindingName): boolean {
     if (ts.isIdentifier(name)) {
         return false
@@ -218,7 +296,7 @@ export function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, func
     visit(node)
 }
 
-export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Functions, scopes: Scopes) {
+export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Functions, scopes: Scopes, withStrict = false) {
     const getOwningFunctionBodyScope = (current: ts.Node) => {
         const fn = findAncient(current, parentMap, (ancestor): ancestor is VariableRoot => functions.has(ancestor as VariableRoot)) as VariableRoot | undefined
         if (fn == null) {
@@ -288,10 +366,12 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
         }
 
         if (ts.isFunctionDeclaration(current)) {
-            const lexicalSwitchCaseBlock = isLexicalSwitchFunctionDeclaration(current, parentMap)
+            const strictLexicalScope = getStrictLexicalFunctionDeclarationScope(current, parentMap, withStrict)
+            const lexicalSwitchCaseBlock = strictLexicalScope == null && isLexicalSwitchFunctionDeclaration(current, parentMap)
                 ? findAncient(current, parentMap, (ancestor): ancestor is ts.CaseBlock => ts.isCaseBlock(ancestor))
                 : undefined
-            const targetScope = lexicalSwitchCaseBlock
+            const targetScope = strictLexicalScope
+                ?? lexicalSwitchCaseBlock
                 ?? getOwningFunctionBodyScope(current)
                 ?? findAncient(current, parentMap, (ancestor) => (functions as Set<ts.Node>).has(ancestor))
             if (targetScope === undefined) {

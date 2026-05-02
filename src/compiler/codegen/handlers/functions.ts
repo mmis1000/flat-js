@@ -1,6 +1,6 @@
 import * as ts from 'typescript'
 
-import { isLexicalSwitchFunctionDeclaration } from '../../analysis'
+import { getStrictLexicalFunctionDeclarationScope, isLexicalSwitchFunctionDeclaration } from '../../analysis'
 import { OpCode } from '../../shared'
 import { op } from '../helpers'
 import type { CodegenContext } from '../context'
@@ -36,6 +36,18 @@ export function generateFunctionDefinition(node: ts.ArrowFunction | ts.FunctionE
     ]
 }
 
+function generateFunctionDeclarationInitialization(node: ts.FunctionDeclaration): Segment {
+    const name = node.name!.text
+    return [
+        op(OpCode.GetRecord),
+        op(OpCode.Literal, 2, [name]),
+        op(OpCode.Literal, 2, [name]),
+        ...generateFunctionDefinitionWithStackName(node),
+        op(OpCode.Set),
+        op(OpCode.Pop),
+    ]
+}
+
 export function generateFunctions(node: ts.Node, _flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isArrowFunction(node)) {
         return generateFunctionDefinition(node, '')
@@ -46,6 +58,10 @@ export function generateFunctions(node: ts.Node, _flag: number, ctx: CodegenCont
     }
 
     if (ts.isFunctionDeclaration(node)) {
+        if (getStrictLexicalFunctionDeclarationScope(node, ctx.parentMap, ctx.withStrict) != null) {
+            return generateFunctionDeclarationInitialization(node)
+        }
+
         if (isLexicalSwitchFunctionDeclaration(node, ctx.parentMap)) {
             return []
         }

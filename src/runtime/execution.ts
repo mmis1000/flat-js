@@ -147,27 +147,6 @@ export const getExecution = (
         [IDENTIFIER_REFERENCE_FRAME]: frame,
         [IDENTIFIER_REFERENCE_SCOPE]: scope,
     } as IdentifierReference)
-    const hasScopeInternalProperty = (value: object, key: symbol) => {
-        let current: object | null = value
-        while (current != null) {
-            if (Object.prototype.hasOwnProperty.call(current, key)) {
-                return true
-            }
-            current = Object.getPrototypeOf(current)
-        }
-        return false
-    }
-    const isEnvironmentScopeObject = (value: unknown): value is Scope => {
-        if (!isObjectLike(value) || environments.has(value) || isIdentifierReference(value)) {
-            return false
-        }
-
-        const internal = getScopeInternal(value as Scope)
-        return hasScopeInternalProperty(internal, SCOPE_WITH_OBJECT)
-            || hasScopeInternalProperty(internal, SCOPE_FLAGS)
-            || hasScopeInternalProperty(internal, SCOPE_STATIC_SLOTS)
-            || hasScopeInternalProperty(internal, SCOPE_STATIC_STORE)
-    }
     const isSpecialVariableName = (name: string) =>
         name === SpecialVariable.This
         || name === SpecialVariable.NewTarget
@@ -351,6 +330,11 @@ export const getExecution = (
             return value
         }
         return writeBindingValue(scope, name, value)
+    }
+
+    const toObjectInCurrentRealm = (value: unknown) => {
+        const objectCtor = getCurrentFrame()[Fields.globalThis]?.Object
+        return typeof objectCtor === 'function' ? objectCtor(value) : Object(value)
     }
 
     const initializeBindingValue = (scope: Scope, name: string, value: any) => {
@@ -967,13 +951,10 @@ export const getExecution = (
                 }
                 throw new ReferenceError(String(name) + is_not_defined)
             }
-            if (isEnvironmentScopeObject(ctx)) {
-                return getBindingValueChecked(ctx, bindingName)
-            }
             if (ctx == null) {
                 throw new TypeError('Cannot convert undefined or null to object')
             }
-            return Reflect.get(Object(ctx), toPropertyKey(name))
+            return Reflect.get(toObjectInCurrentRealm(ctx), toPropertyKey(name), ctx)
         } else {
             const env: Frame = ctx
             const scope = findScope(env, bindingName)
@@ -1009,15 +990,12 @@ export const getExecution = (
                 currentGlobal[name] = value
                 return value
             }
-            if (isEnvironmentScopeObject(ctx)) {
-                return setBindingValueChecked(ctx, bindingName, value)
-            }
             try {
                 if (ctx == null) {
                     throw new TypeError('Cannot convert undefined or null to object')
                 }
                 const propertyKey = toPropertyKey(name)
-                const success = Reflect.set(Object(ctx), propertyKey, value)
+                const success = Reflect.set(toObjectInCurrentRealm(ctx), propertyKey, value, ctx)
                 if (!success && currentFrame[Fields.strict]) {
                     throw new TypeError(`Cannot assign to read only property '${String(propertyKey)}'`)
                 }
