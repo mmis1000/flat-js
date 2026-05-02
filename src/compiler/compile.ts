@@ -512,6 +512,35 @@ function validateClassFieldArgumentsSyntax(sourceNode: ts.SourceFile) {
     visit(sourceNode)
 }
 
+function isStaticClassElement(member: ts.ClassElement): boolean {
+    return ts.canHaveModifiers(member)
+        && ts.getModifiers(member)?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword) === true
+}
+
+function validateClassStaticElementSyntax(sourceNode: ts.SourceFile) {
+    const visit = (node: ts.Node) => {
+        if (ts.isClassLike(node)) {
+            for (const member of node.members) {
+                if (
+                    isStaticClassElement(member)
+                    && (
+                        ts.isMethodDeclaration(member)
+                        || ts.isGetAccessorDeclaration(member)
+                        || ts.isSetAccessorDeclaration(member)
+                    )
+                    && getStaticPropertyName(member.name) === 'prototype'
+                ) {
+                    throwPatternSyntaxError('static class method may not be named prototype')
+                }
+            }
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
+}
+
 function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
     let current = statement
 
@@ -1452,6 +1481,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateCoalesceSyntax(sourceNode)
     validateObjectLiteralSyntax(sourceNode)
     validateClassFieldArgumentsSyntax(sourceNode)
+    validateClassStaticElementSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
     validateFunctionParameterSyntax(sourceNode, withStrict)

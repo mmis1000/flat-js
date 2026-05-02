@@ -291,6 +291,17 @@ Reduce the `language` category failures in targeted batches:
     - sloppy duplicate ordinary block function declarations remain accepted
     - plain function-body top-level legacy `function` / `var` compatibility remains untouched
 
+- [x] `class-static-prototype-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scans:
+    - `language/expressions/class/elements/syntax/early-errors/**`: intended `6` static-`prototype` method/accessor files -> `0`
+    - `language/statements/class/elements/syntax/early-errors/**`: intended `6` static-`prototype` method/accessor files -> `0`
+  - Fixed areas:
+    - static class methods named `prototype` now throw `SyntaxError`
+    - static class getters/setters named `prototype` now throw `SyntaxError`
+    - computed names such as `static ["prototype"]() {}` remain accepted
+    - class fields, private names, and static blocks remain out of scope for this batch
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -310,7 +321,7 @@ Reduce the `language` category failures in targeted batches:
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `57`
+      - actionable early-error files still not caught as `SyntaxError`: `45`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
@@ -319,7 +330,7 @@ Reduce the `language` category failures in targeted batches:
     - functions, parameters, eval, arguments env: `375` total (`375` runtime, `0` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
-    - supported class constructors/methods/accessors/super: `359` total (`327` runtime, `32` early)
+    - supported class constructors/methods/accessors/super: `347` total (`327` runtime, `20` early)
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `261` total (`261` runtime, `0` early)
@@ -734,3 +745,15 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/block-scope/syntax/redeclaration`
+- 2026-05-02: Cleared static `prototype` class method/accessor early errors.
+  - supported class elements now reject static methods, getters, and setters named `prototype` in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - computed names such as `static ["prototype"]() {}` remain accepted, and class fields/private/static blocks stay out of scope
+  - focused class-element early-error reruns now record no intended failures:
+    - `language/expressions/class/elements/syntax/early-errors/**`: `0` intended, `151` out of scope
+    - `language/statements/class/elements/syntax/early-errors/**`: `0` intended, `151` out of scope
+  - adjusted the actionable early-error estimate from `57` to `45` and the supported class estimate from `359` to `347` (`327` runtime, `20` early)
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/class/elements/syntax/early-errors`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/class/elements/syntax/early-errors`

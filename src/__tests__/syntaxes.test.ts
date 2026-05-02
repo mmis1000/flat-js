@@ -42,6 +42,7 @@ const syntaxes = [
     ['ObjectLiteral ComputedKey', '({ [a]: {} })'],
     ['ObjectLiteral String Key', '({ "a": {} })'],
     ['ObjectLiteral Number Key', '({ 0: {} })'],
+    ['Class computed static prototype method', 'class C { static ["prototype"]() {} }'],
     ['CallExpression spread', 'fn(...args)'],
     ['TaggedTemplateExpression', 'tag`hello`'],
     ['BinaryExpression Comma', '(0, 1)'],
@@ -136,6 +137,16 @@ test.each([
     ['nested var and lexical declaration', '{ let f; { var f } }'],
     ['strict duplicate block functions', '"use strict"; { function f() {} function f() {} }'],
 ])('Block %s is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})
+
+test.each([
+    ['method', 'class C { static prototype() {} }'],
+    ['getter', 'class C { static get prototype() {} }'],
+    ['setter', 'class C { static set prototype(value) {} }'],
+])('Class static prototype %s is a syntax error', (_name, code) => {
     expect(() => {
         compiler.compile(code)
     }).toThrow(SyntaxError)
