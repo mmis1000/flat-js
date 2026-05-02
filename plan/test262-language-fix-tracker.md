@@ -1070,4 +1070,5 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/class.test.ts src/__tests__/opcode-kitchen-sink.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/super`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/class/super`
-  - boundary reached: supported `super` runtime semantics are clear; run the broader regression scan before choosing the next class/object runtime family target
+    - fresh full `language/**` scan: `264` intended failures, `6045` out-of-scope files
+  - boundary reached: supported `super` runtime semantics are clear and the broader regression scan shows the expected drop from the previous `408` intended failures; continue with the next class/object runtime family target
