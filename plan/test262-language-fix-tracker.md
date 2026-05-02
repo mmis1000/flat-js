@@ -349,20 +349,20 @@ Reduce the `language` category failures in targeted batches:
 
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
-    - `M:\Playground\flat-js\lib\runtime\execution.js:877`
+    - `M:\Playground\flat-js\lib\runtime\execution.js:960`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - latest completed broad `language` scan: 2026-05-02T07:10:40.735Z
-      - intended-scope failing files: `1630`
-      - out-of-scope failing files: `6376`
-      - total failing files recorded: `8006`
+    - latest completed broad `language` scan: 2026-05-02T12:41:06.271Z
+      - intended-scope failing files: `1504`
+      - out-of-scope failing files: `6412`
+      - total failing files recorded: `7916`
       - intended buckets:
         - broken / needs inspection: `1081`
-        - broken early error semantics: `134`
-        - broken semantics: `251`
+        - broken semantics: `259`
         - harness issue: `1`
         - not supported: `34`
         - not supported parser syntax: `129`
+      - no intended `broken early error semantics` bucket remains
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
       - scanned Test262 `language` parse-negative files: `4389`
@@ -372,41 +372,56 @@ Reduce the `language` category failures in targeted batches:
       - host/module parse-negative files: `422`
       - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
-    - counts below are working-group estimates from focused and compiler-only scans; the next full broad scan will refresh top-line totals
-    - functions, parameters, eval, arguments env: `375` total (`375` runtime, `0` early)
+    - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
+    - functions, parameters, eval, arguments env: at least `394` core files
+      - direct eval: `165`
+      - function-code: `127`
+      - arguments-object: `47`
+      - ordinary/async function expression and statement roots: `55`
+      - adjacent indirect eval (`26`) and arrow/async-arrow (`19`) tails likely belong with this work
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
-    - supported class constructors/methods/accessors/super: `327` total (`327` runtime, `0` early)
+    - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
+      - class statements: `209`
+      - class expressions: `165`
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
-    - generators and async generators: `261` total (`261` runtime, `0` early)
+    - generators and async generators: `280` generator-root files
+      - async-generator expressions/statements: `156` / `80`
+      - generator expressions/statements: `28` / `16`
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
-    - control-flow completion and iterator close: `74` total (`74` runtime, `0` early)
-      - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
-      - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
+      - object/class method generator variants overlap with the object/class batches
+    - control-flow and iterator-close regression set: `0` detailed failures in the cleared `if`, `try`, `while`, `do-while`, and `switch` roots
+      - remaining `for` / `for-in` / `for-of` files in the broad intended set are the known parser-shape tails: `5`
     - lexical/global declarations: `43` total (`43` runtime, `0` early)
       - fix runtime global/eval declaration-instantiation conflicts and owned static checks
-    - object literal, property keys, named evaluation: `115` total (`115` runtime, `0` early) - mostly completed / validation-only
+    - object literal, property keys, named evaluation: `127` intended files plus `1` harness issue
       - object literal property semantics were implemented by `eff9eeb`
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
     - references, assignment, update/delete: `72` total (`72` runtime, `0` early) - completed / validation-only
       - reference update and delete semantics were implemented by `a929038`
       - keep this group in focused regression checks when adjacent operator/control-flow work changes reference handling
-    - RegExp runtime behavior: `7` total (`7` runtime, `0` early)
+    - RegExp runtime behavior: `5` intended files
       - document separately from parser misses and inspect runtime-only regexp failures
-  - Recommended order:
-    - control-flow completion and iterator close
-    - eval/arguments/function environment tails
-    - supported class surface
-    - generators and async generators
-    - lexical/global early errors
-    - small runtime tails
+  - Paused runtime-cluster plan:
+    - first runtime target: eval / function / arguments environments
+      - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails
+      - validation: focused scans for `language/eval-code/direct`, `language/eval-code/indirect`, `language/function-code`, `language/arguments-object`, and function / async-function expression + statement roots
+    - second runtime target: supported class / `super` / constructor semantics
+      - validate class expression and statement roots together with `language/expressions/super/**`
+    - third runtime target: generator and async-generator execution flow
+      - validate expression and statement generator roots, then object/class method generator overlaps
+    - fourth runtime target: object method / named-evaluation / property-key tails
+      - validate `language/expressions/object/**` after class and generator fixes to avoid double-counting shared causes
+    - final small tails: RegExp runtime behavior plus any residual reference/update/delete regressions
+    - do not start runtime implementation until this plan is explicitly resumed
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
     - current compiler-only parse-negative refresh: `39`
     - documented Node/browser web-compat call-assignment target path: `4`; the broad scanner classifies these exact files as out of scope
-    - invalid RegExp literals, modifiers, and named-group spellings still accepted by TypeScript: `35`
+    - invalid RegExp literals, modifiers, and named-group spellings still accepted by TypeScript: `35`; the broad scanner now classifies these as out-of-scope parser-delegation files
+    - final broad out-of-scope parser-syntax bucket: `109`
     - strict reserved words, optional-chain invalid targets, invalid loop declaration heads, directive/ASI forms, and invalid statement-body declarations are now either caught by TypeScript diagnostics or covered by custom validators
   - Host/module interaction exclusions:
     - keep these out of `runtime-semantic-cluster` because they require host/module machinery, not script runtime fixes
@@ -848,3 +863,22 @@ Reduce the `language` category failures in targeted batches:
     - `node --check plan\\test262-language-scan.js`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/assignmenttargettype`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/direct`
+- 2026-05-02T12:41:06Z: Regenerated the full [test262-language-summary.md](</M:/Playground/flat-js/plan/test262-language-summary.md:1>) after the early-error closeout.
+  - hardened resumable scan checkpoint writes after a Windows `EPERM` state-file rename interrupted the first full run
+  - final broad totals:
+    - intended-scope failing files: `1504`
+    - out-of-scope failing files: `6412`
+    - total failing files recorded: `7916`
+  - intended buckets:
+    - broken / needs inspection: `1081`
+    - broken semantics: `259`
+    - harness issue: `1`
+    - not supported: `34`
+    - not supported parser syntax: `129`
+  - no intended `broken early error semantics` bucket remains
+  - regression check: no detailed failures remain for `if`, `try`, `while`, `do-while`, or `switch` statement roots
+  - paused at runtime-cluster plan status; no runtime implementation started
+  - verified with:
+    - `node --check plan\\test262-language-scan.js`
+    - focused `language/literals/regexp/**` rerun
+    - `TEST262_SCAN_FRESH=1 TEST262_SCAN_CONCURRENCY=12 node plan\\test262-language-scan.js`
