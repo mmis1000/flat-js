@@ -1,0 +1,33 @@
+import * as ts from 'typescript';
+import { type Functions, type ParentMap, type Scopes, type VariableRoot } from '../analysis';
+import type { Op, Segment, SegmentOptions, StaticAccess } from './types';
+type IdentifierWriteOptions = {
+    mode: 'initialize' | 'assign';
+    freezeConst?: boolean;
+    popResult?: boolean;
+};
+export type CodegenContext = {
+    root: VariableRoot;
+    scopes: Scopes;
+    parentMap: ParentMap;
+    functions: Functions;
+    withPos: boolean;
+    withEval: boolean;
+    withStrict: boolean;
+    functionDeclarations: ts.FunctionDeclaration[];
+    nextOps: Map<ts.Node, Op>;
+    continueOps: Map<ts.Node, Op>;
+    generate(node: ts.Node, flag: number): Segment;
+    generateRaw(node: ts.Node, flag: number): Segment;
+    generateLeft(node: ts.Node, flag: number): Segment;
+    extractQuote(node: ts.Node): ts.Node;
+    generateStaticAccessOps(access: StaticAccess): Segment;
+    generateIdentifierGet(node: ts.Identifier): Segment;
+    generateIdentifierWrite(node: ts.Identifier, value: Segment, flag: number, options: IdentifierWriteOptions): Segment;
+    tryResolveStaticAccess(node: ts.Node, name: string): StaticAccess | null;
+    isStaticAccessUnchecked(access: StaticAccess): boolean;
+    getVariableRuntimeName(scopeNode: ts.Node, name: string): string;
+    allocateInternalName(prefix?: string): string;
+};
+export declare function createCodegenContext(root: VariableRoot, scopes: Scopes, parentMap: ParentMap, functions: Functions, evalTaintedFunctions: Set<VariableRoot>, { withPos, withEval, withStrict, preserveRuntimeBindingNames }?: SegmentOptions): CodegenContext;
+export {};

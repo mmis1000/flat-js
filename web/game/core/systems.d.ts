@@ -1,0 +1,13 @@
+import { EntityId, ScanHit, VmBarrierState, WorldState } from './types';
+export declare function enqueueMove(world: WorldState, actorId: EntityId, signedDist: number): void;
+export declare function enqueueRotateRadians(world: WorldState, actorId: EntityId, rad: number): void;
+export declare function enqueueShoot(world: WorldState, actorId: EntityId): void;
+export declare function armScanBarrier(world: WorldState, actorId: EntityId, rays: number): void;
+export declare function armLastMoveDistanceBarrier(world: WorldState, actorId: EntityId): void;
+export declare function deliverScanResult(world: WorldState, actorId: EntityId, cb: (res: ScanHit[][]) => void): void;
+export declare function deliverLastMoveDistanceResult(world: WorldState, actorId: EntityId, cb: (distance: number) => void): void;
+export declare function vmBarrierBlocksExecution(world: WorldState): boolean;
+export declare function advanceWorldOneTick(world: WorldState): void;
+export declare function getPrimaryActorId(world: WorldState): number;
+export declare function createScanMissWorldBarrier(actorId: EntityId): VmBarrierState;
+export declare function getPrimaryControllerId(): string;

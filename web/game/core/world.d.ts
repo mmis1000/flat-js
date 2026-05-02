@@ -1,0 +1,10 @@
+import { EntityId, ObjectInstance, ProjectileInstance, ScanRuntimeState, StageDefinition, WorldState } from './types';
+export declare function createWorldState(stage: StageDefinition, hooks?: WorldState['hooks']): WorldState;
+export declare function getPrimaryActor(world: WorldState): import("./types").ActorInstance | null;
+export declare function getActor(world: WorldState, actorId: EntityId): import("./types").ActorInstance | null;
+export declare function getObstacleObjects(world: WorldState): ObjectInstance[];
+export declare function getTargets(world: WorldState): import("./types").Target[];
+export declare function getAliveProjectiles(world: WorldState): ProjectileInstance[];
+export declare function setScanState(world: WorldState, scanState: ScanRuntimeState | null): void;
+export declare function clearDestroyedProjectiles(world: WorldState): void;
+export declare function createProjectile(world: WorldState, projectile: Omit<ProjectileInstance, 'id'>): number;

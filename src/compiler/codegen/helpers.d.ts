@@ -1,0 +1,18 @@
+import * as ts from 'typescript';
+import { type Scopes } from '../analysis';
+import { OpCode } from '../shared';
+import type { Op } from './types';
+export type VariableRuntimeNameResolver = (scopeNode: ts.Node, name: string) => string;
+export declare function abort(msg: string): never;
+export declare function headOf<T>(arr: T[]): T;
+export declare function getNameOfKind(kind: ts.SyntaxKind): string;
+export declare function op(op: OpCode.Nop, length: 0, preData?: never[]): Op<OpCode>;
+export declare function op(op: OpCode.NodeOffset, length?: number, preData?: (Op | ts.Node | string)[]): Op<OpCode>;
+export declare function op(op: Exclude<OpCode, OpCode.NodeOffset | OpCode.Nop>, length?: number, preData?: any[]): Op<OpCode>;
+export declare function markInternals(ops: Op<OpCode>[]): Op<OpCode>[];
+export declare function markInternal(op: Op<OpCode>): Op<OpCode>;
+export declare function getScopeDebugNames(node: ts.Node, scopes: Scopes): string[];
+export declare function generateVariableList(node: ts.Node, scopes: Scopes, getRuntimeName?: VariableRuntimeNameResolver): Op[];
+export declare function generateEnterScope(node: ts.Node, scopes: Scopes, getRuntimeName?: VariableRuntimeNameResolver): Op<OpCode>[];
+export declare function generateLeaveScope(): Op<OpCode>[];
+export declare function generateIteratorClose(suppressErrors: boolean): Op<OpCode>[];
