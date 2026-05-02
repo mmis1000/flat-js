@@ -286,18 +286,18 @@ Reduce the `language` category failures in targeted batches:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - latest completed broad `language` scan: 2026-05-01T22:11:28.439Z
-      - intended-scope failing files: `1728`
+    - latest completed broad `language` scan: 2026-05-02T07:10:40.735Z
+      - intended-scope failing files: `1630`
       - out-of-scope failing files: `6376`
-      - total failing files recorded: `8104`
+      - total failing files recorded: `8006`
       - intended buckets:
-        - broken / needs inspection: `1087`
-        - broken early error semantics: `226`
+        - broken / needs inspection: `1081`
+        - broken early error semantics: `134`
         - broken semantics: `251`
         - harness issue: `1`
         - not supported: `34`
         - not supported parser syntax: `129`
-      - regression check: the broad summary has no detailed failures under `language/statements/if/**` or `language/statements/try/**`
+      - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
       - scanned Test262 `language` parse-negative files: `4389`
       - actionable early-error files still not caught as `SyntaxError`: `123`
@@ -700,3 +700,18 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - focused Test262 reruns for the affected arrow, async-arrow, generator, and async-generator slices
+- 2026-05-02T07:10:40Z: Regenerated the full [test262-language-summary.md](</M:/Playground/flat-js/plan/test262-language-summary.md:1>) after the function-parameter and `yield` / `await` batches.
+  - totals:
+    - intended-scope failing files: `1728 -> 1630`
+    - out-of-scope failing files: `6376 -> 6376`
+    - total failing files recorded: `8104 -> 8006`
+  - intended buckets:
+    - broken / needs inspection: `1087 -> 1081`
+    - broken early error semantics: `226 -> 134`
+    - broken semantics: `251 -> 251`
+    - harness issue: `1 -> 1`
+    - not supported: `34 -> 34`
+    - not supported parser syntax: `129 -> 129`
+  - regression check: no detailed failures remain for `if`, `try`, `while`, `do-while`, or `switch` statement slices
+  - command:
+    - `TEST262_SCAN_CONCURRENCY=8 node plan\\test262-language-scan.js`
