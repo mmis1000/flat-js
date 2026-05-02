@@ -240,6 +240,29 @@ Reduce the `language` category failures in targeted batches:
     - arrow parameter bound names are now checked across identifiers, array/object binding patterns, and rest parameters
     - ordinary sloppy function duplicate-parameter compatibility is unaffected because the check is scoped to `ArrowFunction`
 
+- [x] `function-parameter-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scans after the parameter validator pass:
+    - `language/expressions/arrow-function/**`: `28` failing files -> `15`
+    - `language/expressions/async-arrow-function/**`: `11` failing files -> `8`
+    - `language/expressions/function/**`: `29` failing files -> `22`
+    - `language/statements/function/**`: `33` failing files -> `18`
+    - `language/expressions/async-function/**`: `20` failing files -> `17`
+    - `language/statements/async-function/**`: `11` failing files -> `8`
+    - `language/expressions/generators/**`: `37` failing files -> `36`
+    - `language/statements/generators/**`: `20` failing files -> `19`
+    - `language/expressions/async-generator/**`: `166` failing files -> `162`
+    - `language/statements/async-generator/**`: `83` failing files -> `82`
+  - Fixed areas:
+    - duplicate bound names are now rejected for arrow functions, async functions, generator functions, non-simple parameter lists, and strict function bodies
+    - duplicate names inside binding patterns are handled through the shared bound-name extractor
+    - function bodies now reject direct lexical declarations whose names conflict with parameter names
+    - sloppy ordinary `function f(a, a) {}` remains accepted for Annex B / legacy compatibility
+  - Remaining focused early-error tails:
+    - `yield` in generator parameter/binding positions
+    - `await` in async-arrow nested parameter positions
+    - out-of-scope class-private invalid assignment targets stay excluded from the function early-error count
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -265,7 +288,7 @@ Reduce the `language` category failures in targeted batches:
       - host/module parse-negative files: `422`
   - Actionable intended-support groups:
     - counts below are working-group estimates from focused and compiler-only scans; use the latest broad summary above for current top-line totals
-    - functions, parameters, eval, arguments env: `412` total (`375` runtime, `37` early)
+    - functions, parameters, eval, arguments env: `379` total (`375` runtime, `4` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
     - supported class constructors/methods/accessors/super: `359` total (`327` runtime, `32` early)
@@ -622,3 +645,24 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - `npm run build`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/arrow-function/syntax/early-errors`
+- 2026-05-02: Cleared the cross-family duplicate/default-parameter early-error batch.
+  - generalized the arrow duplicate-parameter validator into a function-like parameter validator in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - kept sloppy ordinary `function f(a, a) {}` accepted while rejecting duplicate names for arrows, async functions, generators, non-simple parameter lists, and strict function bodies
+  - focused reruns now record these remaining files:
+    - `language/expressions/arrow-function/**`: `15`
+    - `language/expressions/async-arrow-function/**`: `8`
+    - `language/expressions/function/**`: `22`
+    - `language/statements/function/**`: `18`
+    - `language/expressions/async-function/**`: `17`
+    - `language/statements/async-function/**`: `8`
+    - `language/expressions/generators/**`: `36`
+    - `language/statements/generators/**`: `19`
+    - `language/expressions/async-generator/**`: `162`
+    - `language/statements/async-generator/**`: `82`
+  - remaining early-error tails in these focused scans are `yield` / `await` parameter-position rules, not duplicate bound names
+  - adjusted the functions/parameters/eval/arguments estimate from `412` to `379` (`375` runtime, `4` early)
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `npm run build`
+    - focused Test262 reruns for the function, async-function, generator, async-generator, arrow, and async-arrow function-family slices

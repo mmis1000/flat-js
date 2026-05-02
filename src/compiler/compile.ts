@@ -743,25 +743,93 @@ function validateDestructuringSyntax(sourceNode: ts.SourceFile, withStrict: bool
     visit(sourceNode, false)
 }
 
-function validateArrowParameterSyntax(sourceNode: ts.SourceFile) {
-    const visit = (node: ts.Node) => {
-        if (ts.isArrowFunction(node)) {
-            const names = new Set<string>()
+function isSimpleParameterList(node: ts.FunctionLikeDeclarationBase): boolean {
+    return node.parameters.every((parameter) =>
+        parameter.dotDotDotToken == null
+        && parameter.initializer == null
+        && ts.isIdentifier(parameter.name)
+    )
+}
 
-            for (const parameter of node.parameters) {
-                for (const identifier of extractVariable(parameter.name)) {
-                    if (names.has(identifier.text)) {
-                        throwPatternSyntaxError('duplicate arrow function parameter')
-                    }
-                    names.add(identifier.text)
+function isAsyncFunctionLike(node: ts.FunctionLikeDeclarationBase): boolean {
+    return ts.canHaveModifiers(node)
+        && ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) === true
+}
+
+function isGeneratorFunctionLike(node: ts.FunctionLikeDeclarationBase): boolean {
+    return 'asteriskToken' in node && node.asteriskToken != null
+}
+
+function isRuntimeFunctionLikeDeclaration(node: ts.Node): node is ts.FunctionLikeDeclarationBase {
+    return ts.isFunctionDeclaration(node)
+        || ts.isFunctionExpression(node)
+        || ts.isArrowFunction(node)
+        || ts.isMethodDeclaration(node)
+        || ts.isConstructorDeclaration(node)
+        || ts.isGetAccessorDeclaration(node)
+        || ts.isSetAccessorDeclaration(node)
+}
+
+function validateFunctionParameterSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
+    const validateDuplicateParameterNames = (node: ts.FunctionLikeDeclarationBase, strictContext: boolean) => {
+        const names = new Set<string>()
+        const rejectDuplicates = ts.isArrowFunction(node)
+            || strictContext
+            || !isSimpleParameterList(node)
+            || isAsyncFunctionLike(node)
+            || isGeneratorFunctionLike(node)
+
+        for (const parameter of node.parameters) {
+            for (const identifier of extractVariable(parameter.name)) {
+                if (names.has(identifier.text) && rejectDuplicates) {
+                    throwPatternSyntaxError('duplicate function parameter')
                 }
+                names.add(identifier.text)
             }
         }
-
-        node.forEachChild(visit)
     }
 
-    visit(sourceNode)
+    const validateParameterBodyLexicalConflicts = (node: ts.FunctionLikeDeclarationBase) => {
+        if (!('body' in node) || node.body == null || !ts.isBlock(node.body)) {
+            return
+        }
+
+        const parameterNames = new Set(node.parameters.flatMap((parameter) =>
+            extractVariable(parameter.name).map((identifier) => identifier.text)
+        ))
+        if (parameterNames.size === 0) {
+            return
+        }
+
+        for (const statement of node.body.statements) {
+            if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.BlockScoped) {
+                for (const declaration of statement.declarationList.declarations) {
+                    for (const identifier of extractVariable(declaration.name)) {
+                        if (parameterNames.has(identifier.text)) {
+                            throwPatternSyntaxError('function parameter conflicts with body lexical declaration')
+                        }
+                    }
+                }
+            }
+
+            if (ts.isClassDeclaration(statement) && statement.name != null && parameterNames.has(statement.name.text)) {
+                throwPatternSyntaxError('function parameter conflicts with body lexical declaration')
+            }
+        }
+    }
+
+    const visit = (node: ts.Node, inheritedStrict: boolean) => {
+        const strictContext = getStrictContext(node, inheritedStrict, withStrict)
+
+        if (isRuntimeFunctionLikeDeclaration(node)) {
+            validateDuplicateParameterNames(node, strictContext)
+            validateParameterBodyLexicalConflicts(node)
+        }
+
+        node.forEachChild((child) => visit(child, strictContext))
+    }
+
+    visit(sourceNode, false)
 }
 
 function validateReferenceSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
@@ -1155,7 +1223,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateClassFieldArgumentsSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
-    validateArrowParameterSyntax(sourceNode)
+    validateFunctionParameterSyntax(sourceNode, withStrict)
     validateLoopSyntax(sourceNode, withStrict)
     validateIfStatementSyntax(sourceNode, withStrict)
     validateCatchDeclarationSyntax(sourceNode)

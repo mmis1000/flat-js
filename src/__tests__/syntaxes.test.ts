@@ -30,6 +30,7 @@ const syntaxes = [
     ['ArrowFunction destructuring parameter', '(([a, b]) => a + b)'],
     ['ArrowFunction rest', '((...args) => args.length)'],
     ['FunctionStatement', 'function a () {}'],
+    ['Sloppy FunctionStatement duplicate simple parameters', 'function sloppyDuplicate(a, a) {}'],
     ['FunctionExpression', '(function a () {})'],
     ['ObjectLiteral', '({})'],
     ['ObjectLiteral Property', '({ a: 0 })'],
@@ -130,6 +131,19 @@ test.each([
     ['object binding pattern', '(x, { x }) => 1'],
     ['rest parameter', '(x, ...x) => 1'],
 ])('ArrowFunction duplicate %s parameter is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})
+
+test.each([
+    ['non-simple ordinary function', 'function f(x = 0, x) {}'],
+    ['strict ordinary function', '"use strict"; function f(x, x) {}'],
+    ['async function', 'async function f(x, x) {}'],
+    ['generator function', 'function* f(x, x) {}'],
+    ['method', '({ m(x, x) {} })'],
+    ['body lexical declaration', 'async (x) => { let x }'],
+])('Function duplicate/conflicting %s parameter is a syntax error', (_name, code) => {
     expect(() => {
         compiler.compile(code)
     }).toThrow(SyntaxError)
