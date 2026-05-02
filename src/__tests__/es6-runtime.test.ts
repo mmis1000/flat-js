@@ -654,6 +654,30 @@ test('closures in parameter defaults observe eval-created parameter vars', () =>
     `)).toEqual(['inside', 'inside', 'inside'])
 })
 
+test('sloppy direct eval rejects var declarations over lexical eval environments', () => {
+    expect(compileAndRun(`
+        var callCount = 0
+        try {
+            (function(a = eval('var a = 42')) {
+                callCount += 1
+            })()
+        } catch (error) {
+            [error instanceof SyntaxError, callCount]
+        }
+    `)).toEqual([true, 0])
+
+    expect(compileAndRun(`
+        try {
+            (function() {
+                let x
+                eval('var x')
+            })()
+        } catch (error) {
+            error instanceof SyntaxError
+        }
+    `)).toBe(true)
+})
+
 test('parameter-expression functions resolve captured outer block bindings', () => {
     expect(compileAndRun(`
         {

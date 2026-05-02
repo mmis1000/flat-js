@@ -377,9 +377,17 @@ export const getExecution = (
         return false
     }
 
-    const defineVariableInternal = (scope: Scope, name: string, tdz: boolean, immutable: boolean, trackStaticSlot: boolean, configurable: boolean) => {
+    const defineVariableInternal = (
+        scope: Scope,
+        name: string,
+        tdz: boolean,
+        immutable: boolean,
+        trackStaticSlot: boolean,
+        configurable: boolean,
+        extraFlags: VariableFlags = VariableFlags.None
+    ) => {
         const initialValue = tdz ? TDZ_VALUE : undefined
-        const flags = immutable ? VariableFlags.Immutable : VariableFlags.None
+        const flags = extraFlags | (immutable ? VariableFlags.Immutable : VariableFlags.None)
         const hasName = hasRuntimeBindingName(name)
 
         if (hasName) {
@@ -423,9 +431,9 @@ export const getExecution = (
         switch (type) {
             case VariableType.Const:
                 // seal it later
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical)
             case VariableType.Let:
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable)
+                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical)
             case VariableType.Function:
             case VariableType.Parameter:
             case VariableType.Var:
@@ -1068,7 +1076,9 @@ export const getExecution = (
             compileFunction,
             functionRedirects,
             getDebugFunction,
-            includesLocalScope ? getCurrentFrame()[Fields.variableEnvironment] ?? null : null
+            includesLocalScope
+                ? getCurrentFrame()[Fields.variableEnvironment] ?? null
+                : getCurrentFrame()[Fields.globalThis]
         )
 
         return result

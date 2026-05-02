@@ -987,6 +987,7 @@ export const enum ResolveType {
 export const enum FunctionTypes {
     SourceFile,
     SourceFileInPlace,
+    EvalSourceFileInPlace,
     FunctionDeclaration,
     FunctionExpression,
     ArrowFunction,

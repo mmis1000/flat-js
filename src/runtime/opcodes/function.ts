@@ -44,6 +44,13 @@ const isVmConstructible = (fn: any) => {
     }
 }
 
+const isObjectEnvironmentScope = (scope: Scope) =>
+    (scope as any)[SCOPE_WITH_OBJECT] !== undefined
+
+const isSourceFileInPlace = (functionType: FunctionTypes) =>
+    functionType === FunctionTypes.SourceFileInPlace
+    || functionType === FunctionTypes.EvalSourceFileInPlace
+
 const bindFunctionSelfName = (
     functionType: FunctionTypes,
     scope: Scope,
@@ -149,7 +156,8 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 name: string,
                 fn: any,
                 thisValue: any,
-                newTargetValue: any
+                newTargetValue: any,
+                validateEvalDeclarations = false
             ) => {
                 switch (functionType) {
                     case FunctionTypes.FunctionDeclaration:
@@ -179,7 +187,17 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         }
                         ctx[OpcodeContextField.defineVariable](activationScope, SpecialVariable.NewTarget, VariableType.Var, false)
                         ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.NewTarget, newTargetValue)
-                        ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', getArgumentObject(bindingScope, fn))
+                            ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', getArgumentObject(bindingScope, fn))
+                }
+
+                if (validateEvalDeclarations && !strict) {
+                    const varNames = variables
+                        .filter((variable) =>
+                            variable[Fields.type] === VariableType.Var
+                            || variable[Fields.type] === VariableType.Function
+                        )
+                        .map((variable) => variable[Fields.name])
+                    validateSloppyEvalVarDeclarations(activationScope, varNames)
                 }
 
                 for (const variable of variables) {
@@ -203,6 +221,34 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 }
             }
 
+            const validateSloppyEvalVarDeclarations = (varEnv: Scope, names: readonly string[]) => {
+                if (names.length === 0) {
+                    return
+                }
+
+                const checkScope = (scope: Scope) => {
+                    if (isObjectEnvironmentScope(scope)) {
+                        return
+                    }
+
+                    for (const name of names) {
+                        if ((ctx[OpcodeContextField.getVariableFlag](scope, name) ?? VariableFlags.None) & VariableFlags.Lexical) {
+                            throw new SyntaxError(`Identifier '${name}' has already been declared`)
+                        }
+                    }
+                }
+
+                const scopes = ctx[OpcodeContextField.currentFrame][Fields.scopes]
+                for (let index = scopes.length - 1; index >= 0; index--) {
+                    const scope = scopes[index]!
+                    if (scope === varEnv) {
+                        break
+                    }
+                    checkScope(scope)
+                }
+                checkScope(varEnv)
+            }
+
             if (invokeType === InvokeType.Apply) {
                 const name = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
                 const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
@@ -211,12 +257,18 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 let activationScope: Scope
                 let bindingScope: Scope
 
-                if (functionType === FunctionTypes.SourceFileInPlace) {
-                    activationScope = ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment]
+                if (isSourceFileInPlace(functionType)) {
+                    const evalVariableEnvironment = ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment]
+                    const validateEvalDeclarations = functionType === FunctionTypes.EvalSourceFileInPlace
+                        && evalVariableEnvironment != null
+                    activationScope = evalVariableEnvironment
                         ?? ctx[OpcodeContextField.peak](ctx[OpcodeContextField.currentFrame][Fields.scopes])
                         ?? ctx[OpcodeContextField.currentFrame][Fields.globalThis]
                     bindingScope = activationScope
                     ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment] = activationScope
+                    ctx[OpcodeContextField.setScopeDebugPtr](ctx[OpcodeContextField.commandPtr], bindingScope)
+                    initializeVariableBindings(activationScope, bindingScope, name, fn, self, undefined, validateEvalDeclarations)
+                    break
                 } else {
                     if (hasParameterExpressions) {
                         activationScope = getEmptyObject()

@@ -373,17 +373,18 @@ Reduce the `language` category failures in targeted batches:
       - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
-    - functions, parameters, eval, arguments env: at least `378` core files
+    - functions, parameters, eval, arguments env: at least `374` core files
       - direct eval: `165`
       - function-code: `127`
       - arguments-object: `47`
-      - ordinary/async function expression and statement roots: `39`
+      - ordinary/async function expression and statement roots: `35`
       - adjacent indirect eval (`26`) and arrow/async-arrow (`19`) tails likely belong with this work
       - parameter/body environment separation is partially completed by `7751069`
       - parameter default self/later-name TDZ is now covered for ordinary function expression and statement roots
       - named function-expression self bindings are now immutable, including sloppy-silent and strict-throw assignment behavior
       - direct eval inside rest/binding-pattern parameter cleanup now keeps the active function variable environment instead of falling into synthetic scopes
-      - remaining work is eval declaration-instantiation tails, mapped arguments, and directive strictness
+      - non-strict direct eval now rejects `var` declarations that collide with lexical or non-simple parameter environments
+      - remaining work is mapped arguments, directive strictness, `with` / unscopables, and older statement-function object model tails
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
       - class expressions: `165`
@@ -925,3 +926,18 @@ Reduce the `language` category failures in targeted batches:
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
   - next runtime target remains eval/function/arguments environment behavior, especially eval declaration-instantiation `SyntaxError` tails, body lexical conflict checks, and mapped arguments
+- 2026-05-03: Cleared eval declaration-instantiation lexical-conflict tails in function roots.
+  - non-strict direct eval source now uses an eval-specific source-file entry type, so declaration-instantiation conflict checks run for real eval calls but not for top-level `compileAndRun` eval-result programs
+  - runtime bindings now track lexical declaration kind, letting eval reject `var` declarations that collide with lexical or non-simple parameter environments
+  - indirect eval passes the global variable environment for global lexical conflict checks
+  - added focused regressions in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) for `eval('var a')` in parameter defaults and `eval('var x')` over a function-body `let`
+  - focused function-root scans:
+    - `language/expressions/function/**`: intended failures `4` -> `2`; latest recorded total `8` (`2` intended, `6` out-of-scope)
+    - `language/statements/function/**`: intended failures `10` -> `8`; latest recorded total `12` (`8` intended, `4` out-of-scope)
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts -t "sloppy direct eval rejects var declarations|logical assignment evaluates"`
+    - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
+  - next runtime target remains eval/function/arguments environment behavior, especially `with` / `Symbol.unscopables` and mapped arguments

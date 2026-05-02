@@ -206,7 +206,7 @@ export function generateSegment(
 
     entry.push(...generateVariableList(node, scopes, ctx.getVariableRuntimeName))
     if (ts.isSourceFile(node) && !withStrict) {
-        entry.push(op(OpCode.Literal, 2, [FunctionTypes.SourceFileInPlace]))
+        entry.push(op(OpCode.Literal, 2, [withEval ? FunctionTypes.EvalSourceFileInPlace : FunctionTypes.SourceFileInPlace]))
     } else {
         entry.push(op(OpCode.NodeFunctionType, 2, [node]))
     }
