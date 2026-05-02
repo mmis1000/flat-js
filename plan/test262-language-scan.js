@@ -238,6 +238,45 @@ function deserializeResults(entries) {
     return new Map(Array.isArray(entries) ? entries : [])
 }
 
+const retryableFileOperationCodes = new Set(['EPERM', 'EACCES', 'EBUSY'])
+const fileRetryBuffer = new SharedArrayBuffer(4)
+const fileRetryView = new Int32Array(fileRetryBuffer)
+
+function waitForFileRetry(ms) {
+    Atomics.wait(fileRetryView, 0, 0, ms)
+}
+
+function retryFileOperation(operation) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+            operation()
+            return
+        } catch (error) {
+            if (!retryableFileOperationCodes.has(error?.code) || attempt === 9) {
+                throw error
+            }
+
+            waitForFileRetry(Math.min(1000, 25 * (2 ** attempt)))
+        }
+    }
+}
+
+function replaceFileSync(tempPath, targetPath) {
+    retryFileOperation(() => fs.renameSync(tempPath, targetPath))
+}
+
+function removeFileIfExistsSync(filePath) {
+    if (!fs.existsSync(filePath)) {
+        return
+    }
+
+    retryFileOperation(() => {
+        if (fs.existsSync(filePath)) {
+            fs.rmSync(filePath, { force: true })
+        }
+    })
+}
+
 function saveScanState({ queue, activeChunks, resultsByFile, scanNotes, processed, completed }) {
     const state = {
         version: scanStateVersion,
@@ -255,14 +294,12 @@ function saveScanState({ queue, activeChunks, resultsByFile, scanNotes, processe
     fs.mkdirSync(path.dirname(scanStatePath), { recursive: true })
     const tempPath = `${scanStatePath}.tmp`
     fs.writeFileSync(tempPath, JSON.stringify(state, null, 2))
-    fs.renameSync(tempPath, scanStatePath)
+    replaceFileSync(tempPath, scanStatePath)
 }
 
 function loadScanState() {
     if (freshScan) {
-        if (fs.existsSync(scanStatePath)) {
-            fs.rmSync(scanStatePath)
-        }
+        removeFileIfExistsSync(scanStatePath)
         return null
     }
 
@@ -838,9 +875,7 @@ async function main() {
 
     const markdown = renderSummary(resultsByFile, scanNotes)
     fs.writeFileSync(summaryPath, markdown)
-    if (fs.existsSync(scanStatePath)) {
-        fs.rmSync(scanStatePath)
-    }
+    removeFileIfExistsSync(scanStatePath)
     console.log(`Wrote ${relativeFromRoot(summaryPath)}`)
     console.log(`Failing files recorded: ${resultsByFile.size}`)
 }
