@@ -235,6 +235,7 @@ type VariableRecord = {
 export const enum VariableFlags {
     None = 0,
     Immutable = 1 << 0,
+    SloppySilentImmutable = 1 << 1,
 }
 
 type StaticVariableStore = {

@@ -334,8 +334,15 @@ export const getExecution = (
         if (readBindingValue(scope, name) === TDZ_VALUE) {
             throw new ReferenceError(`Cannot access '${name}' before initialization`)
         }
-        if ((getVariableFlag(scope, name) ?? VariableFlags.None) & VariableFlags.Immutable) {
+        const flags = getVariableFlag(scope, name) ?? VariableFlags.None
+        if (flags & VariableFlags.Immutable) {
             throw new TypeError(name + is_a_constant)
+        }
+        if (flags & VariableFlags.SloppySilentImmutable) {
+            if (currentFrame[Fields.strict]) {
+                throw new TypeError(name + is_a_constant)
+            }
+            return value
         }
         return writeBindingValue(scope, name, value)
     }
@@ -463,8 +470,15 @@ export const getExecution = (
         if (store[Fields.values][index] === TDZ_VALUE) {
             throw new ReferenceError('Cannot access lexical binding before initialization')
         }
-        if (store[Fields.flags][index] & VariableFlags.Immutable) {
+        const flags = store[Fields.flags][index]
+        if (flags & VariableFlags.Immutable) {
             throw new TypeError(is_a_constant)
+        }
+        if (flags & VariableFlags.SloppySilentImmutable) {
+            if (currentFrame[Fields.strict]) {
+                throw new TypeError(is_a_constant)
+            }
+            return value
         }
         store[Fields.values][index] = value
         const name = store[Fields.names][index]

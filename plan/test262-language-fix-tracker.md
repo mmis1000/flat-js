@@ -373,15 +373,16 @@ Reduce the `language` category failures in targeted batches:
       - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
-    - functions, parameters, eval, arguments env: at least `390` core files
+    - functions, parameters, eval, arguments env: at least `382` core files
       - direct eval: `165`
       - function-code: `127`
       - arguments-object: `47`
-      - ordinary/async function expression and statement roots: `51`
+      - ordinary/async function expression and statement roots: `43`
       - adjacent indirect eval (`26`) and arrow/async-arrow (`19`) tails likely belong with this work
       - parameter/body environment separation is partially completed by `7751069`
       - parameter default self/later-name TDZ is now covered for ordinary function expression and statement roots
-      - remaining work is eval declaration-instantiation tails, mapped arguments, directive strictness, and function-name binding immutability
+      - named function-expression self bindings are now immutable, including sloppy-silent and strict-throw assignment behavior
+      - remaining work is eval declaration-instantiation tails, mapped arguments, and directive strictness
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
       - class expressions: `165`
@@ -894,4 +895,18 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
-  - next runtime target remains eval/function/arguments environment behavior, especially eval declaration-instantiation `SyntaxError` tails and function-name binding immutability
+  - next runtime target remains eval/function/arguments environment behavior, especially function-name binding immutability and eval declaration-instantiation `SyntaxError` tails
+- 2026-05-03: Cleared named function-expression self-binding immutability tails.
+  - named function-expression self bindings now carry a runtime immutable flag that ignores sloppy writes and throws on strict writes
+  - function-name static writes now use checked static stores so immutable binding flags are honored
+  - added focused regressions in [function-expression-self-binding.test.ts](</M:/Playground/flat-js/src/__tests__/function-expression-self-binding.test.ts:1>) for direct, arrow-captured, and eval writes to the self binding plus the strict-mode TypeError path
+  - focused function-root scans:
+    - `language/expressions/function/**`: intended failures `14` -> `6`; latest recorded total `12` (`6` intended, `6` out-of-scope)
+    - `language/statements/function/**`: unchanged at `12` intended failures; latest recorded total `16` (`12` intended, `4` out-of-scope)
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts`
+    - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
+  - next runtime target remains eval/function/arguments environment behavior, especially eval declaration-instantiation `SyntaxError` tails, rest-parameter/body var scope tails, and mapped arguments

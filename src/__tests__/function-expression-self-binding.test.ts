@@ -1,5 +1,6 @@
 import * as compiler from '../compiler'
 import * as runtime from '../runtime'
+import { compileAndRun } from '../index'
 
 test('named function expression self binding shadows outer minified variable names', () => {
     const code = `
@@ -27,4 +28,28 @@ test('named function expression self binding shadows outer minified variable nam
     const [program] = compiler.compile(code, { evalMode: true })
 
     expect(runtime.run(program, 0, globalThis, [])).toBe(1)
+})
+
+test('named function expression self binding is immutable', () => {
+    expect(compileAndRun(`
+        var ref = function BindingIdentifier() {
+            BindingIdentifier = 1
+            ;(() => {
+                BindingIdentifier = 2
+            })()
+            eval('BindingIdentifier = 3')
+            return BindingIdentifier
+        }
+
+        ref() === ref
+    `)).toBe(true)
+
+    expect(() => compileAndRun(`
+        'use strict'
+        var ref = function BindingIdentifier() {
+            BindingIdentifier = 1
+        }
+
+        ref()
+    `)).toThrow(TypeError)
 })

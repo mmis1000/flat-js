@@ -13,6 +13,7 @@ import {
     Scope,
     SCOPE_WITH_OBJECT,
     VariableRecord,
+    VariableFlags,
     bindInfo,
     environments,
     functionDescriptors,
@@ -62,6 +63,12 @@ const bindFunctionSelfName = (
             if (name !== '') {
                 if (ctx[OpcodeContextField.hasBinding](scope, name)) {
                     ctx[OpcodeContextField.initializeBindingValue](scope, name, fn)
+                    ctx[OpcodeContextField.setVariableFlag](
+                        scope,
+                        name,
+                        (ctx[OpcodeContextField.getVariableFlag](scope, name) ?? VariableFlags.None)
+                            | VariableFlags.SloppySilentImmutable
+                    )
                 } else {
                     ctx[OpcodeContextField.writeScopeDebugProperty](scope, name, fn)
                 }
