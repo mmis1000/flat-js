@@ -58,6 +58,8 @@ const syntaxes = [
     ['LabeledStatement let newline identifier', 'if (false) { label: let // ASI\nvalue = 1 }'],
     ['IfStatement let newline block', 'if (false) let // ASI\n{}'],
     ['IfStatement sloppy direct function body', 'if (true) function f() {}'],
+    ['Block sloppy duplicate functions', '{ function f() {} function f() {} }'],
+    ['Function body function and var binding', 'function outer() { function f() {} var f }'],
     ['WithStatement', 'with ({ value: 1 }) { value }'],
     ['Catch destructuring', 'try { throw value } catch ({ a, b }) { a + b }'],
     ['Catch block sloppy if function sharing catch parameter', 'try {} catch (e) { if (false) function e() {} }'],
@@ -125,6 +127,17 @@ test('Catch block function redeclaring catch parameter is a syntax error', () =>
 test('Catch block labelled function redeclaring catch parameter is a syntax error', () => {
     expect(() => {
         compiler.compile('try {} catch (e) { label: function e() {} }')
+    }).toThrow(SyntaxError)
+})
+
+test.each([
+    ['duplicate lexical declarations', '{ let f; const f = 0 }'],
+    ['function and var in a block', '{ function f() {} var f }'],
+    ['nested var and lexical declaration', '{ let f; { var f } }'],
+    ['strict duplicate block functions', '"use strict"; { function f() {} function f() {} }'],
+])('Block %s is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
     }).toThrow(SyntaxError)
 })
 

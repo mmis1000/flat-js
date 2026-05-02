@@ -1339,6 +1339,95 @@ function validateCatchDeclarationSyntax(sourceNode: ts.SourceFile) {
     visit(sourceNode)
 }
 
+function validateBlockDeclarationSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
+    type LexicalKind = 'lexical' | 'sloppyFunction'
+
+    const isFunctionBodyBlock = (node: ts.Block) => {
+        const parent = node.parent
+        return parent != null
+            && ts.isFunctionLike(parent)
+            && 'body' in parent
+            && parent.body === node
+    }
+
+    const collectVarDeclaredNames = (node: ts.Node): string[] => {
+        const names: string[] = []
+
+        const visit = (current: ts.Node) => {
+            if (current !== node && (ts.isFunctionLike(current) || ts.isClassLike(current))) {
+                return
+            }
+
+            if (ts.isVariableDeclarationList(current) && !(current.flags & ts.NodeFlags.BlockScoped)) {
+                for (const declaration of current.declarations) {
+                    names.push(...extractVariable(declaration.name).map((identifier) => identifier.text))
+                }
+                return
+            }
+
+            current.forEachChild(visit)
+        }
+
+        visit(node)
+        return names
+    }
+
+    const collectDirectLexicalDeclarations = (statement: ts.Statement, strictContext: boolean): [string, LexicalKind][] => {
+        if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.BlockScoped) {
+            return statement.declarationList.declarations.flatMap((declaration) =>
+                extractVariable(declaration.name).map((identifier): [string, LexicalKind] => [identifier.text, 'lexical'])
+            )
+        }
+
+        if (ts.isClassDeclaration(statement) && statement.name != null) {
+            return [[statement.name.text, 'lexical']]
+        }
+
+        if (ts.isFunctionDeclaration(statement) && statement.name != null) {
+            return [[
+                statement.name.text,
+                !strictContext && !isNonAnnexBFunctionDeclaration(statement) ? 'sloppyFunction' : 'lexical',
+            ]]
+        }
+
+        return []
+    }
+
+    const validateStatements = (statements: readonly ts.Statement[], strictContext: boolean) => {
+        const lexicalNames = new Map<string, LexicalKind>()
+        const varNames: string[] = []
+
+        for (const statement of statements) {
+            for (const [name, kind] of collectDirectLexicalDeclarations(statement, strictContext)) {
+                const existing = lexicalNames.get(name)
+                if (existing != null && (strictContext || existing !== 'sloppyFunction' || kind !== 'sloppyFunction')) {
+                    throw new SyntaxError('duplicate lexical declaration in block')
+                }
+                lexicalNames.set(name, kind)
+            }
+            varNames.push(...collectVarDeclaredNames(statement))
+        }
+
+        for (const name of varNames) {
+            if (lexicalNames.has(name)) {
+                throw new SyntaxError('var declaration conflicts with block lexical declaration')
+            }
+        }
+    }
+
+    const visit = (node: ts.Node, inheritedStrict: boolean) => {
+        const strictContext = getStrictContext(node, inheritedStrict, withStrict)
+
+        if (ts.isBlock(node) && !isFunctionBodyBlock(node)) {
+            validateStatements(node.statements, strictContext)
+        }
+
+        node.forEachChild((child) => visit(child, strictContext))
+    }
+
+    visit(sourceNode, false)
+}
+
 function toSourceRange(locationMap: Map<number, [number, number]>, start: number, end: number): [number, number, number, number] {
     const startPos = locationMap.get(start)!
     const endPos = locationMap.get(end)!
@@ -1369,6 +1458,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateLoopSyntax(sourceNode, withStrict)
     validateIfStatementSyntax(sourceNode, withStrict)
     validateCatchDeclarationSyntax(sourceNode)
+    validateBlockDeclarationSyntax(sourceNode, withStrict)
     validateSwitchDeclarationSyntax(sourceNode, withStrict)
 
     markParent(sourceNode, parentMap)

@@ -281,6 +281,16 @@ Reduce the `language` category failures in targeted batches:
     - no intended `broken early error semantics` bucket remains in the focused arrow, async-arrow, generator, or async-generator slices
     - out-of-scope class-static-block/private-feature parse-negative files stay excluded
 
+- [x] `block-scope-redeclaration-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - `language/block-scope/syntax/redeclaration/**`: `66` failing files -> `0`
+  - Fixed areas:
+    - block statement lists now reject duplicate direct lexical declarations
+    - block lexical declarations now reject colliding `var` declarations from the same block statement list, including nested block `var` declarations
+    - sloppy duplicate ordinary block function declarations remain accepted
+    - plain function-body top-level legacy `function` / `var` compatibility remains untouched
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -300,7 +310,7 @@ Reduce the `language` category failures in targeted batches:
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `123`
+      - actionable early-error files still not caught as `SyntaxError`: `57`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
@@ -317,7 +327,7 @@ Reduce the `language` category failures in targeted batches:
     - control-flow completion and iterator close: `74` total (`74` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
       - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
-    - lexical/global declaration early errors: `132` total (`43` runtime, `89` early)
+    - lexical/global declaration early errors: `66` total (`43` runtime, `23` early)
       - fix redeclarations, global script declaration conflicts, and owned static checks
     - object literal, property keys, named evaluation: `126` total (`115` runtime, `11` early) - mostly completed / validation-only
       - object literal property semantics were implemented by `eff9eeb`
@@ -715,3 +725,12 @@ Reduce the `language` category failures in targeted batches:
   - regression check: no detailed failures remain for `if`, `try`, `while`, `do-while`, or `switch` statement slices
   - command:
     - `TEST262_SCAN_CONCURRENCY=8 node plan\\test262-language-scan.js`
+- 2026-05-02: Cleared block-scope redeclaration early errors.
+  - block statement-list validation now rejects duplicate direct lexical declarations and lexical/`var` collisions in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - sloppy duplicate ordinary block function declarations and plain function-body `function` / `var` compatibility remain accepted
+  - focused `language/block-scope/syntax/redeclaration/**` rerun is green: `0` failing files
+  - adjusted the actionable early-error estimate from `123` to `57` and the lexical/global declaration estimate from `132` to `66` (`43` runtime, `23` early)
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/block-scope/syntax/redeclaration`
