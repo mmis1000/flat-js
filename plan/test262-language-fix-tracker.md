@@ -321,6 +321,17 @@ Reduce the `language` category failures in targeted batches:
     - `new.target` now rejects an escaped `target` contextual keyword, matching Node/browser parsing
     - ordinary `new.target` remains accepted in existing function/constructor contexts
 
+- [x] `script-lexical-declaration-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scans:
+    - `language/statements/class/syntax/**`: broken early-error failures `1` -> `0`
+    - `language/global-code/**`: broken early-error failures `1` -> `0`
+  - Fixed areas:
+    - duplicate top-level lexical declarations now throw `SyntaxError`
+    - duplicate top-level class declarations now throw `SyntaxError`
+    - top-level lexical declarations of built-in restricted globals now throw `SyntaxError`
+    - dynamic host-global declaration-instantiation and `$262.evalScript` coverage remain runtime work
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -340,7 +351,7 @@ Reduce the `language` category failures in targeted batches:
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `39`
+      - actionable early-error files still not caught as `SyntaxError`: `37`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
@@ -349,7 +360,7 @@ Reduce the `language` category failures in targeted batches:
     - functions, parameters, eval, arguments env: `375` total (`375` runtime, `0` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
-    - supported class constructors/methods/accessors/super: `346` total (`327` runtime, `19` early)
+    - supported class constructors/methods/accessors/super: `345` total (`327` runtime, `18` early)
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `261` total (`261` runtime, `0` early)
@@ -357,7 +368,7 @@ Reduce the `language` category failures in targeted batches:
     - control-flow completion and iterator close: `74` total (`74` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
       - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
-    - lexical/global declaration early errors: `61` total (`43` runtime, `18` early)
+    - lexical/global declaration early errors: `60` total (`43` runtime, `17` early)
       - fix redeclarations, global script declaration conflicts, and owned static checks
     - object literal, property keys, named evaluation: `126` total (`115` runtime, `11` early) - mostly completed / validation-only
       - object literal property semantics were implemented by `eff9eeb`
@@ -795,3 +806,15 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/new.target`
+- 2026-05-02: Cleared script lexical declaration early-error singletons.
+  - source-file declaration validation now rejects duplicate top-level lexical names, duplicate top-level class names, and built-in restricted-global lexical declarations in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - focused reruns now record no broken early-error bucket for:
+    - `language/statements/class/syntax/**`
+    - `language/global-code/**`
+  - remaining focused tails are runtime/host behavior or TypeScript parser-shape issues, not this static declaration check
+  - adjusted the actionable early-error estimate from `39` to `37`, the supported class estimate from `346` to `345` (`327` runtime, `18` early), and the lexical/global declaration estimate from `61` to `60` (`43` runtime, `17` early)
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/class/syntax`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/global-code`

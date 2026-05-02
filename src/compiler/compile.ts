@@ -585,6 +585,38 @@ function validateMetaPropertySyntax(sourceNode: ts.SourceFile) {
     visit(sourceNode)
 }
 
+function validateScriptDeclarationSyntax(sourceNode: ts.SourceFile) {
+    const restrictedGlobalLexicalNames = new Set(['undefined', 'NaN', 'Infinity'])
+    const lexicalNames = new Set<string>()
+
+    const collectDirectLexicalNames = (statement: ts.Statement): string[] => {
+        if (ts.isVariableStatement(statement) && (statement.declarationList.flags & ts.NodeFlags.BlockScoped) !== 0) {
+            return statement.declarationList.declarations.flatMap((declaration) =>
+                extractVariable(declaration.name).map((identifier) => identifier.text)
+            )
+        }
+
+        if (ts.isClassDeclaration(statement) && statement.name != null) {
+            return [statement.name.text]
+        }
+
+        return []
+    }
+
+    for (const statement of sourceNode.statements) {
+        for (const name of collectDirectLexicalNames(statement)) {
+            if (lexicalNames.has(name)) {
+                throwPatternSyntaxError('duplicate script lexical declaration')
+            }
+            if (restrictedGlobalLexicalNames.has(name)) {
+                throwPatternSyntaxError('restricted global lexical declaration')
+            }
+
+            lexicalNames.add(name)
+        }
+    }
+}
+
 function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
     let current = statement
 
@@ -1528,6 +1560,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateClassStaticElementSyntax(sourceNode)
     validateVariableDeclarationSyntax(sourceNode)
     validateMetaPropertySyntax(sourceNode)
+    validateScriptDeclarationSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
     validateFunctionParameterSyntax(sourceNode, withStrict)

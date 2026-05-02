@@ -143,6 +143,16 @@ test.each([
 })
 
 test.each([
+    ['duplicate classes', 'class A {} class A {}'],
+    ['duplicate lexical declarations', 'let a; const a = 1;'],
+    ['restricted global undefined', 'let undefined;'],
+])('Script lexical declaration %s is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})
+
+test.each([
     ['method', 'class C { static prototype() {} }'],
     ['getter', 'class C { static get prototype() {} }'],
     ['setter', 'class C { static set prototype(value) {} }'],
