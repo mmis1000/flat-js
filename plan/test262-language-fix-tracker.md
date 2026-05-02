@@ -1036,3 +1036,22 @@ Reduce the `language` category failures in targeted batches:
     - `npx test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 "./node_modules/test262/test/language/expressions/generators/eval-body-proto-realm.js"`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for async functions, generators, and indirect eval
   - next runtime target: async-generator expression/statement runtime clusters; run a full language scan after the async-generator boundary to catch regressions before moving to the next family
+- 2026-05-03: Cleared async-generator expression/statement runtime clusters.
+  - async-generator requests now use an internal FIFO queue so queued `.next` / `.return` / `.throw` requests resume in spec order before unrelated promise reactions
+  - yielded promises reject and close async generators, while delegated `yield*` over manual async iterators preserves promise values instead of unwrapping them
+  - async `yield*` now supports async iterators and async-from-sync iterators, captures delegated `next` once, awaits return resumptions, and avoids probing poisoned inherited iterator getters
+  - generator-function intrinsics now expose constructor/prototype chains for generator and async-generator function objects
+  - `for await...of` now uses async iterator records plus the VM `Await` suspension path instead of the sync `for...of` iterator opcodes
+  - added focused regressions in [async.test.ts](</M:/Playground/flat-js/src/__tests__/async.test.ts:1>) for async-generator queue timing, delegated async iterator promises, explicit return awaiting, and `for await` rejection flow
+  - fresh scans:
+    - `language/expressions/async-generator/**`: `0` intended failures
+    - `language/statements/async-generator/**`: `0` intended failures
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/async.test.ts src/__tests__/generator.test.ts`
+    - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts src/__tests__/generator.test.ts src/__tests__/async.test.ts src/__tests__/opcode-kitchen-sink.test.ts`
+    - `npx jest --runInBand --no-cache src/__tests__/opcode-kitchen-sink.test.ts src/__tests__/async.test.ts src/__tests__/generator.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/async-generator`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/async-generator`
+    - fresh full `language/**` scan: `408` intended failures, `6045` out-of-scope files
+  - boundary reached: async/generator function-family roots are clear; continue with the next runtime family from the full-scan residuals

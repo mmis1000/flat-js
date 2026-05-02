@@ -58,6 +58,22 @@ type GeneratorFunctionIntrinsics = {
     prototype: object
 }
 
+type AsyncGeneratorRequestContinuation = {
+    then(
+        resolve: (result: IteratorResult<unknown>) => void,
+        reject: (reason?: unknown) => void
+    ): void
+}
+
+type AsyncGeneratorRequestResult = IteratorResult<unknown> | AsyncGeneratorRequestContinuation
+
+type AsyncGeneratorQueuedRequest = {
+    method: 'next' | 'throw' | 'return'
+    value?: unknown
+    resolve: (result: IteratorResult<unknown>) => void
+    reject: (reason?: unknown) => void
+}
+
 const generatorIntrinsicsByFunctionPrototype = new WeakMap<object, {
     generator: GeneratorFunctionIntrinsics
     asyncGenerator: GeneratorFunctionIntrinsics
@@ -68,15 +84,37 @@ const isObjectLikeValue = (value: unknown): value is object =>
 
 const createGeneratorFunctionIntrinsics = (
     functionPrototype: object,
-    objectPrototype: object
+    objectPrototype: object,
+    constructorName: string,
+    asyncGenerator: boolean
 ): GeneratorFunctionIntrinsics => {
-    const prototype = Object.create(objectPrototype)
+    const iteratorPrototype = Object.create(objectPrototype)
+    Object.defineProperty(iteratorPrototype, asyncGenerator ? Symbol.asyncIterator : Symbol.iterator, {
+        configurable: true,
+        writable: true,
+        value() { return this },
+    })
+
+    const prototype = Object.create(iteratorPrototype)
     const generatorFunctionPrototype = Object.create(functionPrototype)
     Object.defineProperty(generatorFunctionPrototype, 'prototype', {
         configurable: true,
         enumerable: false,
         writable: false,
         value: prototype,
+    })
+    const generatorFunctionConstructor = { [constructorName]: function () {} }[constructorName]
+    Object.defineProperty(generatorFunctionConstructor, 'prototype', {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: generatorFunctionPrototype,
+    })
+    Object.defineProperty(generatorFunctionPrototype, 'constructor', {
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: generatorFunctionConstructor,
     })
     return { functionPrototype: generatorFunctionPrototype, prototype }
 }
@@ -94,8 +132,8 @@ const getGeneratorFunctionIntrinsics = (
     let cached = generatorIntrinsicsByFunctionPrototype.get(functionPrototype)
     if (!cached) {
         cached = {
-            generator: createGeneratorFunctionIntrinsics(functionPrototype, objectPrototype),
-            asyncGenerator: createGeneratorFunctionIntrinsics(functionPrototype, objectPrototype),
+            generator: createGeneratorFunctionIntrinsics(functionPrototype, objectPrototype, 'GeneratorFunction', false),
+            asyncGenerator: createGeneratorFunctionIntrinsics(functionPrototype, objectPrototype, 'AsyncGeneratorFunction', true),
         }
         generatorIntrinsicsByFunctionPrototype.set(functionPrototype, cached)
     }
@@ -763,59 +801,108 @@ export const getExecution = (
             f[Fields.generator] = state
         }
 
-        let requestQueue = Promise.resolve()
-
-        const enqueueRequest = (method: 'next' | 'throw' | 'return', value?: unknown): Promise<IteratorResult<unknown>> => {
-            const request = requestQueue.then(async () => {
-                const exec = state[Fields.execution]
-                const stk = exec[Fields.stack]
-
-                if (state[Fields.completed]) {
-                    if (method === 'throw') {
-                        throw value
-                    }
-                    if (method === 'return') {
-                        return { value, done: true }
-                    }
-                    return { value: undefined, done: true }
-                }
-
-                if (!state[Fields.started]) {
-                    if (method === 'throw') {
-                        state[Fields.completed] = true
-                        state[Fields.stack] = []
-                        throw value
-                    }
-                    if (method === 'return') {
-                        state[Fields.completed] = true
-                        state[Fields.stack] = []
-                        return { value, done: true }
+        const PromiseCtor = Reflect.get(gt, 'Promise') ?? Promise
+        const promiseResolve = (value: unknown) => Reflect.get(PromiseCtor, 'resolve').call(PromiseCtor, value) as PromiseLike<unknown>
+        let requestRunning = false
+        const queuedRequests: AsyncGeneratorQueuedRequest[] = []
+        const continueWith = (
+            promise: PromiseLike<unknown>,
+            onFulfilled: (value: unknown) => AsyncGeneratorRequestResult,
+            onRejected: (error: unknown) => AsyncGeneratorRequestResult
+        ): AsyncGeneratorRequestContinuation => ({
+            then(resolve, reject) {
+                const settle = (next: AsyncGeneratorRequestResult) => {
+                    if (next && typeof (next as AsyncGeneratorRequestContinuation).then === 'function') {
+                        ;(next as AsyncGeneratorRequestContinuation).then(resolve, reject)
+                    } else {
+                        resolve(next as IteratorResult<unknown>)
                     }
                 }
 
+                promise.then(
+                    (value) => {
+                        try {
+                            settle(onFulfilled(value))
+                        } catch (error) {
+                            reject(error)
+                        }
+                    },
+                    (error) => {
+                        try {
+                            settle(onRejected(error))
+                        } catch (nextError) {
+                            reject(nextError)
+                        }
+                    }
+                )
+            }
+        })
+
+        const runRequest = (
+            method: 'next' | 'throw' | 'return',
+            value?: unknown
+        ): AsyncGeneratorRequestResult => {
+            const exec = state[Fields.execution]
+            const stk = exec[Fields.stack]
+
+            if (state[Fields.completed]) {
                 if (method === 'throw') {
-                    state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: value }
-                } else if (method === 'return') {
-                    state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: value }
-                } else {
-                    state[Fields.pendingAction] = null
+                    throw value
                 }
-
-                stk.length = 0
-                stk.push(...state[Fields.stack])
-                exec[Fields.ptr] = state[Fields.ptr]
-
-                const wasStarted = state[Fields.started]
-                state[Fields.started] = true
-
-                if (wasStarted && method === 'next') {
-                    exec[Fields.pushValue](value)
+                if (method === 'return') {
+                    return { value, done: true }
                 }
+                return { value: undefined, done: true }
+            }
 
+            if (!state[Fields.started]) {
+                if (method === 'throw') {
+                    state[Fields.completed] = true
+                    state[Fields.stack] = []
+                    throw value
+                }
+                if (method === 'return') {
+                    state[Fields.completed] = true
+                    state[Fields.stack] = []
+                    return { value, done: true }
+                }
+            }
+
+            if (method === 'throw') {
+                state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: value }
+            } else if (method === 'return') {
+                state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: value }
+            } else {
+                state[Fields.pendingAction] = null
+            }
+
+            stk.length = 0
+            stk.push(...state[Fields.stack])
+            exec[Fields.ptr] = state[Fields.ptr]
+
+            const wasStarted = state[Fields.started]
+            state[Fields.started] = true
+
+            if (wasStarted && method === 'next') {
+                exec[Fields.pushValue](value)
+            }
+
+            const runLoop = (): AsyncGeneratorRequestResult => {
                 while (true) {
                     const res = exec[Fields.step]()
                     if (isResultYield(res)) {
-                        return { value: res[Fields.value], done: false }
+                        if (res[Fields.delegate] !== undefined) {
+                            return { value: res[Fields.value], done: false }
+                        }
+                        return continueWith(
+                            promiseResolve(res[Fields.value]),
+                            (yieldedValue) => ({ value: yieldedValue, done: false }),
+                            (error) => {
+                                state[Fields.completed] = true
+                                state[Fields.stack] = []
+                                throw error
+                            }
+                        )
                     }
                     if (isResultDone(res)) {
                         state[Fields.completed] = true
@@ -828,17 +915,69 @@ export const getExecution = (
                     }
                     if (res[Fields.await]) {
                         const awaited = res as ResultAwait
-                        try {
-                            exec[Fields.pushValue](await Promise.resolve(awaited[Fields.value]))
-                        } catch (error) {
-                            exec[Fields.setPendingThrow](error)
-                        }
+                        return continueWith(
+                            promiseResolve(awaited[Fields.value]),
+                            (value) => {
+                                exec[Fields.pushValue](value)
+                                return runLoop()
+                            },
+                            (error) => {
+                                exec[Fields.setPendingThrow](error)
+                                return runLoop()
+                            }
+                        )
                     }
                 }
-            })
+            }
 
-            requestQueue = request.then(() => undefined, () => undefined)
-            return request
+            return runLoop()
+        }
+
+        const runQueuedRequest = (request: AsyncGeneratorQueuedRequest) => {
+            requestRunning = true
+            const finish = () => {
+                requestRunning = false
+                drainQueue()
+            }
+            const resolveRequest = (result: IteratorResult<unknown>) => {
+                request.resolve(result)
+                finish()
+            }
+            const rejectRequest = (error: unknown) => {
+                request.reject(error)
+                finish()
+            }
+
+            try {
+                const result = runRequest(request.method, request.value)
+                if (result && typeof (result as AsyncGeneratorRequestContinuation).then === 'function') {
+                    ;(result as AsyncGeneratorRequestContinuation).then(resolveRequest, rejectRequest)
+                } else {
+                    resolveRequest(result as IteratorResult<unknown>)
+                }
+            } catch (error) {
+                rejectRequest(error)
+            }
+        }
+
+        const drainQueue = () => {
+            if (requestRunning) {
+                return
+            }
+            const request = queuedRequests.shift()
+            if (request) {
+                runQueuedRequest(request)
+            }
+        }
+
+        const enqueueRequest = (method: 'next' | 'throw' | 'return', value?: unknown): Promise<IteratorResult<unknown>> => {
+            return new PromiseCtor((
+                resolve: (result: IteratorResult<unknown>) => void,
+                reject: (reason?: unknown) => void
+            ) => {
+                queuedRequests.push({ method, value, resolve, reject })
+                drainQueue()
+            }) as Promise<IteratorResult<unknown>>
         }
 
         const gen: any = {
@@ -894,7 +1033,6 @@ export const getExecution = (
                 try {
                     execution[Fields.setPendingThrow](error)
                     const res = runUntilAwait(execution)
-
                     if (res[Fields.done]) {
                         resolve(res[Fields.value])
                     } else if (res[Fields.await]) {
@@ -911,7 +1049,6 @@ export const getExecution = (
             continueExecution(undefined, true)
         })
     }
-
     const defineFunction = (globalThis: any, scopes: Scope[], name: PropertyKey, type: FunctionTypes, offset: number, bodyOffset: number) => {
         // TODO: types
         const scopeClone = scopes.filter((scope) => getVariableFlag(scope, SpecialVariable.SyntheticScope) === undefined)
@@ -1734,7 +1871,9 @@ export const getExecution = (
                 case OpCode.TypeofStaticReferenceUnchecked:
                 case OpCode.GetPropertyIterator:
                 case OpCode.GetIterator:
+                case OpCode.GetAsyncIterator:
                 case OpCode.IteratorNext:
+                case OpCode.AsyncIteratorNext:
                 case OpCode.IteratorClose:
                 case OpCode.NextEntry:
                 case OpCode.EntryIsDone:

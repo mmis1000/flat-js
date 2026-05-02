@@ -506,11 +506,24 @@ export const enum OpCode {
      */
     GetIterator,
     /**
+     * Creates an ECMAScript async iterator record for `for await...of`.
+     * Stack (bottom to top): iterable
+     * Result: asyncIteratorRecord
+     * Notes: Captures `next`, preferring `@@asyncIterator` and falling back to async-from-sync iteration.
+     */
+    GetAsyncIterator,
+    /**
      * Advances an ECMAScript iterator record.
      * Stack (bottom to top): iteratorRecord
      * Result: iteratorEntry
      */
     IteratorNext,
+    /**
+     * Advances an ECMAScript async iterator record.
+     * Stack (bottom to top): asyncIteratorRecord
+     * Result: promise-like iteratorEntry
+     */
+    AsyncIteratorNext,
     /**
      * Performs ECMAScript `IteratorClose` for a `for...of` iterator record.
      * Stack (bottom to top): iteratorRecord, suppressErrors

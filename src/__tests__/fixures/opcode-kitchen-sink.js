@@ -212,6 +212,16 @@ async function asyncPath(promiseLike) {
     }
 }
 
+async function* asyncCounter(start) {
+    yield start;
+}
+
+async function asyncIteratorPath() {
+    for await (const item of asyncCounter(1)) {
+        outerLet += item;
+    }
+}
+
 for (const key in target) {
     target.flag = key in target;
 }
@@ -280,6 +290,7 @@ DerivedBox.create();
 readTagged`line\nbreak`;
 counter(1);
 asyncPath(Promise.resolve(5));
+asyncIteratorPath();
 breakThroughFinally([1, 2, 3]);
 throwReferenceErrorPath;
 throwNormally;

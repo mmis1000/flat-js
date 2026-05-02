@@ -338,6 +338,42 @@ const getIteratorRecord = (iterable: unknown): IteratorRecord => {
     return { iterator, next, done: false }
 }
 
+const getAsyncIteratorRecord = (iterable: unknown): IteratorRecord => {
+    if (iterable == null) {
+        throw new TypeError('Cannot convert undefined or null to object')
+    }
+
+    const asyncMethod = (iterable as any)[Symbol.asyncIterator]
+    if (asyncMethod != null) {
+        if (typeof asyncMethod !== 'function') {
+            throw new TypeError('async iterator method must be callable')
+        }
+        const iterator = asyncMethod.call(iterable)
+        if (iterator == null || typeof iterator !== 'object') {
+            throw new TypeError('async iterator must be an object')
+        }
+        const next = iterator.next
+        if (typeof next !== 'function') {
+            throw new TypeError('iterator must have next method')
+        }
+        return { iterator, next, done: false }
+    }
+
+    const syncMethod = (iterable as any)[Symbol.iterator]
+    if (typeof syncMethod !== 'function') {
+        throw new TypeError('object is not async iterable')
+    }
+    const iterator = syncMethod.call(iterable)
+    if (iterator == null || typeof iterator !== 'object') {
+        throw new TypeError('iterator must be an object')
+    }
+    const next = iterator.next
+    if (typeof next !== 'function') {
+        throw new TypeError('iterator must have next method')
+    }
+    return { iterator, next, done: false, asyncFromSync: true }
+}
+
 const iteratorNext = (iterator: { next: unknown }, value?: unknown) => {
     const next = iterator.next
     if (typeof next !== 'function') {
@@ -361,6 +397,23 @@ const iteratorRecordNext = (record: IteratorRecord, value?: unknown) => {
         record.done = true
     }
     return result
+}
+
+const asyncIteratorRecordNext = (
+    record: IteratorRecord,
+    promiseResolve: (value: unknown) => PromiseLike<unknown>
+) => {
+    const result = record.next.call(record.iterator)
+    if (!record.asyncFromSync) {
+        return result
+    }
+
+    const syncResult = assertIteratorResult(result) as { done?: unknown, value?: unknown }
+    const done = iteratorComplete(syncResult)
+    if (done) {
+        record.done = true
+    }
+    return promiseResolve(syncResult.value).then((value) => ({ value, done }))
 }
 
 const iteratorClose = (record: IteratorRecord, suppressErrors: boolean) => {
@@ -405,9 +458,10 @@ type RefinedEnvSet = Omit<WeakSet<Frame>, 'has'> & {
 type Context = Record<string, any> | Frame
 
 type IteratorRecord = {
-    iterator: Iterator<unknown>
+    iterator: any
     next: Function
     done: boolean
+    asyncFromSync?: boolean
 }
 
 export type ScopeDebugEntry = [string, unknown, boolean]
@@ -514,6 +568,7 @@ export type InvokeParam = InvokeParamApply | InvokeParamConstruct
 
 export {
     APPLY,
+    asyncIteratorRecordNext,
     assertIteratorResult,
     BIND,
     bindInfo,
@@ -525,6 +580,7 @@ export {
     formatFunctionNameKey,
     generatorStates,
     getEmptyObject,
+    getAsyncIteratorRecord,
     getIterator,
     getIteratorRecord,
     getLiteralFromPool,

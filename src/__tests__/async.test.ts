@@ -183,6 +183,145 @@ describe('Async/Await', () => {
         expect(result).toEqual(['function', 6, undefined, true])
     })
 
+    test('async generator next starts execution synchronously', async () => {
+        const result = await compileAndRun(`
+            let callCount = 0;
+            async function* gen() {
+                callCount += 1;
+                yield 1;
+                return 2;
+            }
+            const iter = gen();
+            const first = iter.next();
+            const afterFirst = callCount;
+            const second = iter.next();
+            Promise.all([first, second]).then(([a, b]) => [
+                afterFirst,
+                callCount,
+                a.value,
+                a.done,
+                b.value,
+                b.done
+            ]);
+        `)
+        expect(result).toEqual([1, 1, 1, false, 2, true])
+    })
+
+    test('async generator closes when yielded promise rejects', async () => {
+        const result = await compileAndRun(`
+            const error = new Error('boom');
+            async function* gen() {
+                yield Promise.reject(error);
+                yield 'unreachable';
+            }
+            const iter = gen();
+            iter.next().then(
+                () => ['resolved'],
+                (reason) => iter.next().then((step) => [
+                    reason === error,
+                    step.value,
+                    step.done
+                ])
+            );
+        `)
+        expect(result).toEqual([true, undefined, true])
+    })
+
+    test('async generator yield star supports async and sync iterables', async () => {
+        const result = await compileAndRun(`
+            async function* asyncSource() {
+                yield 'a1';
+                return 'a2';
+            }
+            function* syncSource() {
+                yield Promise.resolve('s1');
+                return 's2';
+            }
+            async function* gen() {
+                const asyncReturn = yield* asyncSource();
+                const syncReturn = yield* syncSource();
+                return [asyncReturn, syncReturn];
+            }
+            const iter = gen();
+            Promise.all([
+                iter.next(),
+                iter.next('resume-sync'),
+                iter.next(),
+            ]).then(([a, b, c]) => [
+                a.value,
+                a.done,
+                b.value,
+                b.done,
+                c.value[0],
+                c.value[1],
+                c.done,
+            ]);
+        `)
+        expect(result).toEqual(['a1', false, 's1', false, 'a2', 's2', true])
+    })
+
+    test('async generator yield star preserves manual async iterator promise values', async () => {
+        const result = await compileAndRun(`
+            const inner = Promise.resolve('value');
+            const asyncIter = {
+                [Symbol.asyncIterator]() {
+                    return this;
+                },
+                next() {
+                    return { done: false, value: inner };
+                }
+            };
+            async function* gen() {
+                yield* asyncIter;
+            }
+            gen().next().then((step) => [step.value === inner, step.done]);
+        `)
+        expect(result).toEqual([true, false])
+    })
+
+    test('async generator explicit return awaits before resolving request', async () => {
+        const result = await compileAndRun(`
+            const actual = [];
+            async function* g1() {}
+            async function* g2() { return; }
+            async function* g3() { return undefined; }
+            async function* g4() { return void 0; }
+
+            const done = Promise.resolve(0)
+                .then(() => actual.push('tick 1'))
+                .then(() => actual.push('tick 2'))
+                .then(() => actual.slice());
+
+            g1().next().then(() => actual.push('g1 ret'));
+            g2().next().then(() => actual.push('g2 ret'));
+            g3().next().then(() => actual.push('g3 ret'));
+            g4().next().then(() => actual.push('g4 ret'));
+            done;
+        `)
+        expect(result).toEqual(['tick 1', 'g1 ret', 'g2 ret', 'tick 2', 'g3 ret', 'g4 ret'])
+    })
+
+    test('for await consumes async generator rejections through async iterator path', async () => {
+        const result = await compileAndRun(`
+            const error = new Error('boom');
+            async function* readFile() {
+                yield Promise.reject(error);
+                yield 'unreachable';
+            }
+            async function* gen() {
+                for await (let line of readFile()) {
+                    yield line;
+                }
+            }
+            const iter = gen();
+            iter.next().then(
+                () => ['resolved'],
+                (reason) => iter.next().then((step) => [reason === error, step.value, step.done])
+            );
+        `)
+        expect(result).toEqual([true, undefined, true])
+    })
+
     test('complex microtask interleaving', async () => {
         const result = await compileAndRun(`
             let log = '';

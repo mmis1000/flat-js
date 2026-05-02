@@ -390,6 +390,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
     }
 
     if (ts.isForOfStatement(node)) {
+        const isAwait = node.awaitModifier != null
         const nextOp = op(OpCode.Nop, 0)
         ctx.nextOps.set(node, nextOp)
 
@@ -476,7 +477,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 ...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName),
                 ...ctx.generate(node.expression, flag),
                 ...generateLeaveScope(),
-                op(OpCode.GetIterator),
+                op(isAwait ? OpCode.GetAsyncIterator : OpCode.GetIterator),
                 ...enter,
                 ...generateLoopScopeStaticAccess(node, SpecialVariable.LoopIterator, ctx),
                 op(OpCode.SetInitializedStatic),
@@ -487,7 +488,7 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                 op(OpCode.GetRecord),
                 op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
                 ...ctx.generate(node.expression, flag),
-                op(OpCode.GetIterator),
+                op(isAwait ? OpCode.GetAsyncIterator : OpCode.GetIterator),
                 op(OpCode.Set),
                 op(OpCode.Pop)
             ]
@@ -502,7 +503,8 @@ export function generateLoops(node: ts.Node, flag: number, ctx: CodegenContext):
                         op(OpCode.GetRecord),
                         op(OpCode.Literal, 2, [SpecialVariable.LoopIterator]),
                         op(OpCode.Get),
-                        op(OpCode.IteratorNext),
+                        op(isAwait ? OpCode.AsyncIteratorNext : OpCode.IteratorNext),
+                        ...(isAwait ? [op(OpCode.Await)] : []),
                     ],
                     op(OpCode.Set),
                 ],

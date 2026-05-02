@@ -36,6 +36,30 @@ function generateContainingForOfClose(node: ts.Node, ctx: CodegenContext, suppre
         : generateIteratorClose(suppressErrors)
 }
 
+function isAsyncModifier(modifier: ts.ModifierLike): boolean {
+    return modifier.kind === ts.SyntaxKind.AsyncKeyword
+}
+
+function isInsideAsyncGenerator(node: ts.Node, ctx: CodegenContext): boolean {
+    const owner = findAncient(node, ctx.parentMap, (ancestor) =>
+        ts.isFunctionLike(ancestor) && ctx.functions.has(ancestor as any)
+    )
+
+    if (
+        owner == null
+        || (
+            !ts.isFunctionDeclaration(owner)
+            && !ts.isFunctionExpression(owner)
+            && !ts.isMethodDeclaration(owner)
+        )
+    ) {
+        return false
+    }
+
+    return !!owner.asteriskToken
+        && (owner.modifiers?.some(isAsyncModifier) ?? false)
+}
+
 export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
     switch (node.kind) {
         case ts.SyntaxKind.TrueKeyword:
@@ -197,6 +221,7 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
         if (node.expression !== undefined) {
             return [
                 ...ctx.generate(node.expression, flag),
+                ...(isInsideAsyncGenerator(node, ctx) ? [op(OpCode.Await)] : []),
                 ...generateContainingForOfClose(node, ctx, false),
                 (flag & StatementFlag.TryCatchFlags) ? op(OpCode.ReturnInTryCatchFinally) : op(OpCode.Return)
             ]

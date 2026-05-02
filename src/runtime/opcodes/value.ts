@@ -3,6 +3,8 @@ import {
     Context,
     Fields,
     Frame,
+    asyncIteratorRecordNext,
+    getAsyncIteratorRecord,
     getIterator,
     getIteratorRecord,
     iteratorClose,
@@ -232,9 +234,21 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             ctx[OpcodeContextField.pushCurrentFrameStack](getIteratorRecord(value))
         }
             break
+        case OpCode.GetAsyncIterator: {
+            const value = ctx[OpcodeContextField.popCurrentFrameStack]()
+            ctx[OpcodeContextField.pushCurrentFrameStack](getAsyncIteratorRecord(value))
+        }
+            break
         case OpCode.IteratorNext: {
             const record = ctx[OpcodeContextField.popCurrentFrameStack]<IteratorRecord>()
             ctx[OpcodeContextField.pushCurrentFrameStack](iteratorRecordNext(record))
+        }
+            break
+        case OpCode.AsyncIteratorNext: {
+            const record = ctx[OpcodeContextField.popCurrentFrameStack]<IteratorRecord>()
+            const PromiseCtor = Reflect.get(ctx[OpcodeContextField.currentFrame][Fields.globalThis], 'Promise') ?? Promise
+            const promiseResolve = (value: unknown) => Reflect.get(PromiseCtor, 'resolve').call(PromiseCtor, value) as PromiseLike<unknown>
+            ctx[OpcodeContextField.pushCurrentFrameStack](asyncIteratorRecordNext(record, promiseResolve))
         }
             break
         case OpCode.IteratorClose: {
