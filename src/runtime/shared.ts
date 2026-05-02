@@ -250,6 +250,7 @@ const SCOPE_STATIC_SLOTS = Symbol()
 const SCOPE_STATIC_STORE = Symbol()
 const SCOPE_DEBUG_PTR = Symbol()
 const SCOPE_WITH_OBJECT = Symbol()
+const SCOPE_REJECT_EVAL_ARGUMENTS_VAR = Symbol()
 const IDENTIFIER_REFERENCE_FRAME = Symbol()
 const IDENTIFIER_REFERENCE_SCOPE = Symbol()
 type IdentifierReference = {
@@ -263,6 +264,7 @@ type ScopeWithInternals = Scope & {
     [SCOPE_STATIC_STORE]?: StaticVariableStore
     [SCOPE_DEBUG_PTR]?: number
     [SCOPE_WITH_OBJECT]?: object
+    [SCOPE_REJECT_EVAL_ARGUMENTS_VAR]?: boolean
 }
 
 const is_not_defined = ' is not defined'
@@ -547,6 +549,7 @@ export {
     SCOPE_STATIC_SLOTS,
     SCOPE_STATIC_STORE,
     SCOPE_WITH_OBJECT,
+    SCOPE_REJECT_EVAL_ARGUMENTS_VAR,
     TDZ_VALUE,
     TEXT_DADA_MASK,
     IDENTIFIER_REFERENCE_FRAME,

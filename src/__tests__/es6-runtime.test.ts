@@ -678,6 +678,19 @@ test('sloppy direct eval rejects var declarations over lexical eval environments
     `)).toBe(true)
 })
 
+test('sloppy direct eval rejects arguments var in parameter eval environments', () => {
+    expect(compileAndRun(`
+        var callCount = 0
+        try {
+            (function(p = eval('var arguments')) {
+                callCount += 1
+            })()
+        } catch (error) {
+            [error instanceof SyntaxError, callCount]
+        }
+    `)).toEqual([true, 0])
+})
+
 test('parameter-expression functions resolve captured outer block bindings', () => {
     expect(compileAndRun(`
         {

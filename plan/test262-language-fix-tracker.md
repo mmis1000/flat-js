@@ -375,6 +375,7 @@ Reduce the `language` category failures in targeted batches:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
     - functions, parameters, eval, arguments env: at least `372` core files
       - direct eval: `165`
+        - current focused direct-eval scan after ordinary function-code and eval-arguments cleanup: `59` intended failures, `2` out-of-scope
       - function-code: `127` - cleared for intended support on 2026-05-03
       - arguments-object: `47` - cleared for intended support on 2026-05-03
       - ordinary/async function expression and statement roots: `33`
@@ -991,3 +992,13 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "function this binding boxes|strict global this property|strict block functions"`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/function-code`
   - boundary reached: ordinary function-code intended support is clear; continue with direct/indirect eval or async/generator function-family runtime clusters
+- 2026-05-03: Cleared the direct-eval parameter-environment `arguments` declaration family.
+  - non-arrow functions with parameter expressions now mark their function variable environment so sloppy direct eval rejects `var arguments` during eval declaration instantiation
+  - this covers the generated ordinary / async / generator / async-generator function declaration and expression files where parameter initializers evaluate `eval("var arguments")` or `eval("var arguments = ...")`
+  - added a focused regression in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) for `eval('var arguments')` in a parameter initializer
+  - fresh `language/eval-code/direct/**` scan moved from `123` intended failures to `59` intended failures; `2` out-of-scope files remain
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts -t "sloppy direct eval rejects"`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/direct`
+  - next eval target: global/local eval variable-environment creation, deletion, configurability, and lexical environment distinctness

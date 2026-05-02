@@ -11,6 +11,7 @@ import {
     IDENTIFIER_REFERENCE_FRAME,
     IDENTIFIER_REFERENCE_SCOPE,
     Scope,
+    SCOPE_REJECT_EVAL_ARGUMENTS_VAR,
     SCOPE_WITH_OBJECT,
     VariableRecord,
     VariableFlags,
@@ -318,6 +319,10 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.NewTarget, newTargetValue)
                         argumentsObject = getArgumentObject(bindingScope, fn)
                         ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', argumentsObject)
+                        if (hasParameterExpressions) {
+                            const activationInternals = activationScope as Scope & { [SCOPE_REJECT_EVAL_ARGUMENTS_VAR]?: boolean }
+                            activationInternals[SCOPE_REJECT_EVAL_ARGUMENTS_VAR] = true
+                        }
                 }
 
                 if (validateEvalDeclarations && !strict) {
@@ -362,6 +367,11 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             const validateSloppyEvalVarDeclarations = (varEnv: Scope, names: readonly string[]) => {
                 if (names.length === 0) {
                     return
+                }
+
+                const varEnvInternals = varEnv as Scope & { [SCOPE_REJECT_EVAL_ARGUMENTS_VAR]?: boolean }
+                if (names.includes('arguments') && varEnvInternals[SCOPE_REJECT_EVAL_ARGUMENTS_VAR]) {
+                    throw new SyntaxError(`Identifier 'arguments' has already been declared`)
                 }
 
                 const checkScope = (scope: Scope) => {
