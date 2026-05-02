@@ -263,6 +263,24 @@ Reduce the `language` category failures in targeted batches:
     - `await` in async-arrow nested parameter positions
     - out-of-scope class-private invalid assignment targets stay excluded from the function early-error count
 
+- [x] `function-yield-await-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scans after the reserved-word parameter/body pass:
+    - `language/expressions/arrow-function/**`: `15` failing files -> `14`
+    - `language/expressions/async-arrow-function/**`: `8` failing files -> `6`
+    - `language/expressions/generators/**`: `36` failing files -> `30`
+    - `language/statements/generators/**`: `19` failing files -> `16`
+    - `language/expressions/async-generator/**`: `162` failing files -> `156`
+    - `language/statements/async-generator/**`: `82` failing files -> `80`
+  - Fixed areas:
+    - generator and async-generator parameter lists now reject `yield` across identifiers, binding patterns, nested arrow parameter lists, and default expressions
+    - generator and async-generator bodies now reject direct `yield` binding declarations without rejecting sloppy top-level `function* yield() {}`
+    - async functions now reject nested arrow parameters/defaults that contain `await` in async parameter/body contexts
+    - nested ordinary functions still allow sloppy `yield` / `await` parameter names where JavaScript permits them
+  - Remaining focused early-error tails:
+    - no intended `broken early error semantics` bucket remains in the focused arrow, async-arrow, generator, or async-generator slices
+    - out-of-scope class-static-block/private-feature parse-negative files stay excluded
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -280,21 +298,21 @@ Reduce the `language` category failures in targeted batches:
         - not supported: `34`
         - not supported parser syntax: `129`
       - regression check: the broad summary has no detailed failures under `language/statements/if/**` or `language/statements/try/**`
-    - after the 2026-05-02 compiler-only parse-negative refresh:
+    - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `177`
+      - actionable early-error files still not caught as `SyntaxError`: `123`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
   - Actionable intended-support groups:
     - counts below are working-group estimates from focused and compiler-only scans; use the latest broad summary above for current top-line totals
-    - functions, parameters, eval, arguments env: `379` total (`375` runtime, `4` early)
+    - functions, parameters, eval, arguments env: `375` total (`375` runtime, `0` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
     - supported class constructors/methods/accessors/super: `359` total (`327` runtime, `32` early)
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
-    - generators and async generators: `269` total (`261` runtime, `8` early)
+    - generators and async generators: `261` total (`261` runtime, `0` early)
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
     - control-flow completion and iterator close: `74` total (`74` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
@@ -666,3 +684,19 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - `npm run build`
     - focused Test262 reruns for the function, async-function, generator, async-generator, arrow, and async-arrow function-family slices
+- 2026-05-02: Cleared the focused `yield` / `await` function-family early-error tail.
+  - generator and async-generator contexts now reject invalid `yield` binding/parameter positions in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - async contexts now reject nested arrow parameter/default positions that contain `await`
+  - sloppy top-level `function* yield() {}` remains accepted, matching Test262 and Node behavior
+  - focused reruns now have no intended `broken early error semantics` bucket for:
+    - `language/expressions/arrow-function/**`
+    - `language/expressions/async-arrow-function/**`
+    - `language/expressions/generators/**`
+    - `language/statements/generators/**`
+    - `language/expressions/async-generator/**`
+    - `language/statements/async-generator/**`
+  - adjusted the actionable early-error estimate from `177` to `123`, the functions/parameters early count from `4` to `0`, and the generator/async-generator early count from `8` to `0`
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - focused Test262 reruns for the affected arrow, async-arrow, generator, and async-generator slices

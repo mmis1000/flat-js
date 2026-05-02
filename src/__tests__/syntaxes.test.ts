@@ -31,6 +31,9 @@ const syntaxes = [
     ['ArrowFunction rest', '((...args) => args.length)'],
     ['FunctionStatement', 'function a () {}'],
     ['Sloppy FunctionStatement duplicate simple parameters', 'function sloppyDuplicate(a, a) {}'],
+    ['Sloppy GeneratorDeclaration yield name', 'function* yield() { yield 1 }'],
+    ['Generator nested ordinary yield binding', 'function* g(){ function f(yield) { var yield } }'],
+    ['Async nested ordinary await parameter', 'async function f(){ function g(await) {} }'],
     ['FunctionExpression', '(function a () {})'],
     ['ObjectLiteral', '({})'],
     ['ObjectLiteral Property', '({ a: 0 })'],
@@ -144,6 +147,18 @@ test.each([
     ['method', '({ m(x, x) {} })'],
     ['body lexical declaration', 'async (x) => { let x }'],
 ])('Function duplicate/conflicting %s parameter is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})
+
+test.each([
+    ['generator parameter yield', 'function* g(yield) {}'],
+    ['generator body binding yield', 'function* g() { var yield }'],
+    ['generator expression name yield', 'var g = function* yield() {}'],
+    ['async arrow nested parameter default await', 'async() => { (a = await/r/g) => {} }'],
+    ['async arrow nested rest await', 'async(a = (...await) => {}) => {}'],
+])('Function reserved-context %s is a syntax error', (_name, code) => {
     expect(() => {
         compiler.compile(code)
     }).toThrow(SyntaxError)

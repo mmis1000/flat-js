@@ -771,6 +771,114 @@ function isRuntimeFunctionLikeDeclaration(node: ts.Node): node is ts.FunctionLik
 }
 
 function validateFunctionParameterSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
+    const throwForbiddenIdentifierSyntaxError = (identifier: string) => {
+        throwPatternSyntaxError(`${identifier} is not allowed in this function context`)
+    }
+
+    const isIdentifierNameOnly = (node: ts.Identifier): boolean => {
+        const parent = node.parent
+        if (parent == null) {
+            return false
+        }
+
+        return (
+            (ts.isBindingElement(parent) && parent.propertyName === node)
+            || (ts.isPropertyAssignment(parent) && parent.name === node)
+            || (ts.isPropertyAccessExpression(parent) && parent.name === node)
+            || (ts.isMethodDeclaration(parent) && parent.name === node)
+            || (ts.isGetAccessorDeclaration(parent) && parent.name === node)
+            || (ts.isSetAccessorDeclaration(parent) && parent.name === node)
+            || (ts.isPropertyDeclaration(parent) && parent.name === node)
+            || (ts.isLabeledStatement(parent) && parent.label === node)
+            || (ts.isBreakStatement(parent) && parent.label === node)
+            || (ts.isContinueStatement(parent) && parent.label === node)
+        )
+    }
+
+    const validateBindingNameDoesNotUse = (name: ts.BindingName, identifier: string) => {
+        for (const bindingIdentifier of extractVariable(name)) {
+            if (bindingIdentifier.text === identifier) {
+                throwForbiddenIdentifierSyntaxError(identifier)
+            }
+        }
+    }
+
+    const validateDeclarationIdentifierDoesNotUse = (name: ts.Identifier | undefined, identifier: string) => {
+        if (name?.text === identifier) {
+            throwForbiddenIdentifierSyntaxError(identifier)
+        }
+    }
+
+    const validateParameterSyntaxDoesNotUse = (node: ts.Node, identifier: string): void => {
+        if (ts.isArrowFunction(node)) {
+            for (const parameter of node.parameters) {
+                validateParameterSyntaxDoesNotUse(parameter, identifier)
+            }
+            return
+        }
+
+        if (ts.isFunctionLike(node)) {
+            return
+        }
+
+        if (ts.isClassLike(node)) {
+            validateDeclarationIdentifierDoesNotUse(node.name, identifier)
+            return
+        }
+
+        if (ts.isIdentifier(node)) {
+            if (node.text === identifier && !isIdentifierNameOnly(node)) {
+                throwForbiddenIdentifierSyntaxError(identifier)
+            }
+            return
+        }
+
+        node.forEachChild((child) => validateParameterSyntaxDoesNotUse(child, identifier))
+    }
+
+    const validateBodyBindingsDoNotUse = (body: ts.Block | ts.ConciseBody, identifier: string) => {
+        const visit = (node: ts.Node): void => {
+            if (ts.isArrowFunction(node)) {
+                for (const parameter of node.parameters) {
+                    validateParameterSyntaxDoesNotUse(parameter, identifier)
+                }
+                return
+            }
+
+            if (ts.isFunctionDeclaration(node)) {
+                validateDeclarationIdentifierDoesNotUse(node.name, identifier)
+                return
+            }
+
+            if (ts.isFunctionLike(node)) {
+                return
+            }
+
+            if (ts.isClassLike(node)) {
+                validateDeclarationIdentifierDoesNotUse(node.name, identifier)
+                return
+            }
+
+            if (ts.isVariableDeclaration(node)) {
+                validateBindingNameDoesNotUse(node.name, identifier)
+                if (node.initializer != null) {
+                    visit(node.initializer)
+                }
+                return
+            }
+
+            if (ts.isCatchClause(node) && node.variableDeclaration != null) {
+                validateBindingNameDoesNotUse(node.variableDeclaration.name, identifier)
+                visit(node.block)
+                return
+            }
+
+            node.forEachChild(visit)
+        }
+
+        visit(body)
+    }
+
     const validateDuplicateParameterNames = (node: ts.FunctionLikeDeclarationBase, strictContext: boolean) => {
         const names = new Set<string>()
         const rejectDuplicates = ts.isArrowFunction(node)
@@ -786,6 +894,38 @@ function validateFunctionParameterSyntax(sourceNode: ts.SourceFile, withStrict: 
                 }
                 names.add(identifier.text)
             }
+        }
+    }
+
+    const validateGeneratorYieldIdentifiers = (node: ts.FunctionLikeDeclarationBase, strictContext: boolean) => {
+        if (!isGeneratorFunctionLike(node)) {
+            return
+        }
+
+        if (ts.isFunctionExpression(node) || (strictContext && ts.isFunctionDeclaration(node))) {
+            validateDeclarationIdentifierDoesNotUse(node.name, 'yield')
+        }
+
+        for (const parameter of node.parameters) {
+            validateParameterSyntaxDoesNotUse(parameter, 'yield')
+        }
+
+        if ('body' in node && node.body != null) {
+            validateBodyBindingsDoNotUse(node.body, 'yield')
+        }
+    }
+
+    const validateAsyncAwaitIdentifiers = (node: ts.FunctionLikeDeclarationBase) => {
+        if (!isAsyncFunctionLike(node)) {
+            return
+        }
+
+        for (const parameter of node.parameters) {
+            validateParameterSyntaxDoesNotUse(parameter, 'await')
+        }
+
+        if ('body' in node && node.body != null) {
+            validateBodyBindingsDoNotUse(node.body, 'await')
         }
     }
 
@@ -823,6 +963,8 @@ function validateFunctionParameterSyntax(sourceNode: ts.SourceFile, withStrict: 
 
         if (isRuntimeFunctionLikeDeclaration(node)) {
             validateDuplicateParameterNames(node, strictContext)
+            validateGeneratorYieldIdentifiers(node, strictContext)
+            validateAsyncAwaitIdentifiers(node)
             validateParameterBodyLexicalConflicts(node)
         }
 
