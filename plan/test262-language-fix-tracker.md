@@ -312,6 +312,15 @@ Reduce the `language` category failures in targeted batches:
     - switch case/default statement-list positions are covered
     - `for-in` / `for-of` declaration heads remain valid without an initializer
 
+- [x] `new-target-escaped-target-early-error`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - `language/expressions/new.target/**`: early-error failures `1` -> `0`
+    - remaining focused slice: `1` runtime semantic failure, `2` TypeScript parser-shape failures
+  - Fixed areas:
+    - `new.target` now rejects an escaped `target` contextual keyword, matching Node/browser parsing
+    - ordinary `new.target` remains accepted in existing function/constructor contexts
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -331,7 +340,7 @@ Reduce the `language` category failures in targeted batches:
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `40`
+      - actionable early-error files still not caught as `SyntaxError`: `39`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
@@ -340,7 +349,7 @@ Reduce the `language` category failures in targeted batches:
     - functions, parameters, eval, arguments env: `375` total (`375` runtime, `0` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
-    - supported class constructors/methods/accessors/super: `347` total (`327` runtime, `20` early)
+    - supported class constructors/methods/accessors/super: `346` total (`327` runtime, `19` early)
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `261` total (`261` runtime, `0` early)
@@ -775,3 +784,14 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/const/syntax`
+- 2026-05-02: Cleared escaped `new.target` early errors.
+  - meta-property validation now rejects `new.t\\u0061rget` while keeping ordinary `new.target` handling unchanged in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - focused `language/expressions/new.target/**` rerun now records:
+    - `0` early-error failures
+    - `1` runtime semantic failure
+    - `2` TypeScript parser-shape failures
+  - adjusted the actionable early-error estimate from `40` to `39` and the supported class/new-target estimate from `347` to `346` (`327` runtime, `19` early)
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/new.target`

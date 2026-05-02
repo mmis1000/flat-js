@@ -163,6 +163,12 @@ test.each([
     }).toThrow(SyntaxError)
 })
 
+test('new.target with escaped target is a syntax error', () => {
+    expect(() => {
+        compiler.compile(String.raw`function f() { new.t\u0061rget; }`)
+    }).toThrow(SyntaxError)
+})
+
 test.each([
     ['identifier', '(x, x) => 1'],
     ['array binding pattern', '(x, [x]) => 1'],

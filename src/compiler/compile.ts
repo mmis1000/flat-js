@@ -568,6 +568,23 @@ function validateVariableDeclarationSyntax(sourceNode: ts.SourceFile) {
     visit(sourceNode)
 }
 
+function validateMetaPropertySyntax(sourceNode: ts.SourceFile) {
+    const visit = (node: ts.Node) => {
+        if (
+            ts.isMetaProperty(node)
+            && node.keywordToken === ts.SyntaxKind.NewKeyword
+            && node.name.text === 'target'
+            && node.name.getText(sourceNode) !== 'target'
+        ) {
+            throwPatternSyntaxError('new.target must not contain escaped characters')
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
+}
+
 function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
     let current = statement
 
@@ -1510,6 +1527,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateClassFieldArgumentsSyntax(sourceNode)
     validateClassStaticElementSyntax(sourceNode)
     validateVariableDeclarationSyntax(sourceNode)
+    validateMetaPropertySyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
     validateFunctionParameterSyntax(sourceNode, withStrict)
