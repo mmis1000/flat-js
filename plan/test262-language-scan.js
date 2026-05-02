@@ -72,6 +72,11 @@ const webCompatHostBehaviorFiles = new Set([
     'language/expressions/assignmenttargettype/parenthesized-callexpression.js',
 ])
 
+function isParserDelegationRegExpFile(file) {
+    return file.startsWith('language/literals/regexp/early-err-')
+        || file.startsWith('language/literals/regexp/named-groups/invalid-')
+}
+
 function toPosix(value) {
     return value.split(path.sep).join('/')
 }
@@ -556,6 +561,10 @@ function isOutOfScope(file, attrs, messages) {
         return true
     }
 
+    if (isParserDelegationRegExpFile(file)) {
+        return true
+    }
+
     if (outOfScopePrefixes.some((prefix) => file.startsWith(prefix))) {
         return true
     }
@@ -591,6 +600,9 @@ function classifyFailure(file, attrsList, messages) {
     }
 
     if (scope === 'out-of-scope') {
+        if (isParserDelegationRegExpFile(file)) {
+            return { scope, type: 'not intended / parser syntax unsupported', features, negativePhase: parseNegative ? 'parse' : null }
+        }
         if (/Unknown node |not support yet|not supported|unsupported/i.test(combined)) {
             return { scope, type: 'not intended / unsupported syntax', features, negativePhase: parseNegative ? 'parse' : null }
         }
