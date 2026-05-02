@@ -551,6 +551,30 @@ test('destructured and default parameters keep arguments unmapped', () => {
     `)).toEqual([1, 2, 10, '3,4'])
 })
 
+test('parameter defaults observe parameter TDZ before body activation', () => {
+    expect(compileAndRun(`
+        var callCount = 0
+        try {
+            (function (x = x) {
+                callCount += 1
+            })()
+        } catch (error) {
+            [error instanceof ReferenceError, callCount]
+        }
+    `)).toEqual([true, 0])
+
+    expect(compileAndRun(`
+        var callCount = 0
+        try {
+            (function (x = y, y) {
+                callCount += 1
+            })()
+        } catch (error) {
+            [error instanceof ReferenceError, callCount]
+        }
+    `)).toEqual([true, 0])
+})
+
 test('parameter defaults cannot see body function bindings before body activation', () => {
     expect(() => compileAndRun(`
         {

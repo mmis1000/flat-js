@@ -284,7 +284,6 @@ export function createCodegenContext(
     function isStaticAccessUnchecked(access: StaticAccess) {
         return access.type === VariableType.Var
             || access.type === VariableType.Function
-            || access.type === VariableType.Parameter
     }
 
     function bindingNameAlwaysNeeded(name: string, type: VariableType) {

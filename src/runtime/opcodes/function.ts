@@ -176,7 +176,10 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 }
 
                 for (const variable of variables) {
-                    ctx[OpcodeContextField.defineVariable](bindingScope, variable[Fields.name], variable[Fields.type])
+                    const variableType = hasParameterExpressions && variable[Fields.type] === VariableType.Parameter
+                        ? VariableType.Let
+                        : variable[Fields.type]
+                    ctx[OpcodeContextField.defineVariable](bindingScope, variable[Fields.name], variableType)
                 }
 
                 bindFunctionSelfName(functionType, bindingScope, name, fn, ctx)

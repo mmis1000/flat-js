@@ -373,14 +373,15 @@ Reduce the `language` category failures in targeted batches:
       - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
-    - functions, parameters, eval, arguments env: at least `394` core files
+    - functions, parameters, eval, arguments env: at least `390` core files
       - direct eval: `165`
       - function-code: `127`
       - arguments-object: `47`
-      - ordinary/async function expression and statement roots: `55`
+      - ordinary/async function expression and statement roots: `51`
       - adjacent indirect eval (`26`) and arrow/async-arrow (`19`) tails likely belong with this work
       - parameter/body environment separation is partially completed by `7751069`
-      - remaining work is eval scope tails, mapped arguments, and directive strictness
+      - parameter default self/later-name TDZ is now covered for ordinary function expression and statement roots
+      - remaining work is eval declaration-instantiation tails, mapped arguments, directive strictness, and function-name binding immutability
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
       - class expressions: `165`
@@ -403,8 +404,8 @@ Reduce the `language` category failures in targeted batches:
       - keep this group in focused regression checks when adjacent operator/control-flow work changes reference handling
     - RegExp runtime behavior: `5` intended files
       - document separately from parser misses and inspect runtime-only regexp failures
-  - Paused runtime-cluster plan:
-    - first runtime target: eval / function / arguments environments
+  - Active runtime-cluster plan:
+    - first runtime target: eval / function / arguments environments - in progress
       - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails
       - validation: focused scans for `language/eval-code/direct`, `language/eval-code/indirect`, `language/function-code`, `language/arguments-object`, and function / async-function expression + statement roots
     - second runtime target: supported class / `super` / constructor semantics
@@ -414,7 +415,6 @@ Reduce the `language` category failures in targeted batches:
     - fourth runtime target: object method / named-evaluation / property-key tails
       - validate `language/expressions/object/**` after class and generator fixes to avoid double-counting shared causes
     - final small tails: RegExp runtime behavior plus any residual reference/update/delete regressions
-    - do not start runtime implementation until this plan is explicitly resumed
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
@@ -882,3 +882,16 @@ Reduce the `language` category failures in targeted batches:
     - `node --check plan\\test262-language-scan.js`
     - focused `language/literals/regexp/**` rerun
     - `TEST262_SCAN_FRESH=1 TEST262_SCAN_CONCURRENCY=12 node plan\\test262-language-scan.js`
+- 2026-05-03: Started the runtime-semantic cluster with default-parameter TDZ semantics.
+  - parameter static reads now use checked scope access, and parameter-expression functions define parameter bindings in TDZ until the parameter prologue initializes them
+  - added a focused regression in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) for `function(x = x)` and `function(x = y, y)` throwing `ReferenceError` before body execution
+  - focused function-root scans:
+    - `language/expressions/function/**`: intended failures `16` -> `14`; latest recorded total `20` (`14` intended, `6` out-of-scope)
+    - `language/statements/function/**`: intended failures `14` -> `12`; latest recorded total `16` (`12` intended, `4` out-of-scope)
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts -t "parameter defaults observe parameter TDZ"`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
+  - next runtime target remains eval/function/arguments environment behavior, especially eval declaration-instantiation `SyntaxError` tails and function-name binding immutability
