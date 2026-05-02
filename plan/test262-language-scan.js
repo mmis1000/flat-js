@@ -65,6 +65,13 @@ const outOfScopeNodeNames = new Set([
     'ImportKeyword',
 ])
 
+const webCompatHostBehaviorFiles = new Set([
+    'language/expressions/assignmenttargettype/direct-callexpression-in-compound-assignment.js',
+    'language/expressions/assignmenttargettype/direct-callexpression.js',
+    'language/expressions/assignmenttargettype/parenthesized-callexpression-in-compound-assignment.js',
+    'language/expressions/assignmenttargettype/parenthesized-callexpression.js',
+])
+
 function toPosix(value) {
     return value.split(path.sep).join('/')
 }
@@ -508,6 +515,10 @@ function normalizeFeatures(value) {
 }
 
 function isOutOfScope(file, attrs, messages) {
+    if (webCompatHostBehaviorFiles.has(file)) {
+        return true
+    }
+
     if (outOfScopePrefixes.some((prefix) => file.startsWith(prefix))) {
         return true
     }
@@ -564,7 +575,7 @@ function classifyFailure(file, attrsList, messages) {
     }
 
     if (/Expected test to throw error of type /i.test(combined)) {
-        return { scope, type: 'broken early error semantics', features, negativePhase: parseNegative ? 'parse' : null }
+        return { scope, type: parseNegative ? 'broken early error semantics' : 'broken semantics', features, negativePhase: parseNegative ? 'parse' : null }
     }
 
     if (/Expected no error, got /i.test(combined)) {

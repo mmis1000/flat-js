@@ -332,6 +332,21 @@ Reduce the `language` category failures in targeted batches:
     - top-level lexical declarations of built-in restricted globals now throw `SyntaxError`
     - dynamic host-global declaration-instantiation and `$262.evalScript` coverage remain runtime work
 
+- [x] `early-error-accounting-closeout`
+  - Status: completed 2026-05-02.
+  - Scanner accounting changes:
+    - runtime-negative `SyntaxError` misses are classified as runtime `broken semantics`; only Test262 `negative.phase: parse` misses stay in `broken early error semantics`
+    - the four call-expression assignment target parse-negative files are tracked as a documented Node/browser web-compat exception instead of actionable compiler early-error work
+  - Fresh focused scans:
+    - `language/statements/block/early-errors/**`: `0` intended failures; only out-of-scope class-private invalid-name files remain
+    - `language/expressions/function/early-errors/**`: `0` intended failures; only out-of-scope class-private invalid-name files remain
+    - `language/statements/function/early-errors/**`: `0` intended failures; only out-of-scope class-private invalid-name files remain
+    - `language/expressions/assignmenttargettype/**`: `0` intended failures; `4` web-compat call-assignment files and `6` import-call files are out of scope
+    - `language/eval-code/direct/**`: no `broken early error semantics` bucket; `var-env-global-lex-non-strict.js` is runtime declaration-instantiation semantics
+  - Result:
+    - supported parse-time early-error cluster is complete
+    - remaining `SyntaxError` expectations are runtime eval/declaration-instantiation behavior, parser-delegation gaps, unsupported features, or host/module exclusions
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -349,18 +364,19 @@ Reduce the `language` category failures in targeted batches:
         - not supported: `34`
         - not supported parser syntax: `129`
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
-    - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
+    - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `37`
-      - non-actionable parser-delegation files: `39`
+      - actionable supported parse-time early-error files still not caught as `SyntaxError`: `0`
+      - non-actionable parser-delegation / web-compat files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
+      - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
-    - counts below are working-group estimates from focused and compiler-only scans; use the latest broad summary above for current top-line totals
+    - counts below are working-group estimates from focused and compiler-only scans; the next full broad scan will refresh top-line totals
     - functions, parameters, eval, arguments env: `375` total (`375` runtime, `0` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
-    - supported class constructors/methods/accessors/super: `345` total (`327` runtime, `18` early)
+    - supported class constructors/methods/accessors/super: `327` total (`327` runtime, `0` early)
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
     - generators and async generators: `261` total (`261` runtime, `0` early)
@@ -368,9 +384,9 @@ Reduce the `language` category failures in targeted batches:
     - control-flow completion and iterator close: `74` total (`74` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
       - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
-    - lexical/global declaration early errors: `60` total (`43` runtime, `17` early)
-      - fix redeclarations, global script declaration conflicts, and owned static checks
-    - object literal, property keys, named evaluation: `126` total (`115` runtime, `11` early) - mostly completed / validation-only
+    - lexical/global declarations: `43` total (`43` runtime, `0` early)
+      - fix runtime global/eval declaration-instantiation conflicts and owned static checks
+    - object literal, property keys, named evaluation: `115` total (`115` runtime, `0` early) - mostly completed / validation-only
       - object literal property semantics were implemented by `eff9eeb`
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
     - references, assignment, update/delete: `72` total (`72` runtime, `0` early) - completed / validation-only
@@ -389,7 +405,7 @@ Reduce the `language` category failures in targeted batches:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
     - current compiler-only parse-negative refresh: `39`
-    - documented Node/browser web-compat call-assignment target path: `4`
+    - documented Node/browser web-compat call-assignment target path: `4`; the broad scanner classifies these exact files as out of scope
     - invalid RegExp literals, modifiers, and named-group spellings still accepted by TypeScript: `35`
     - strict reserved words, optional-chain invalid targets, invalid loop declaration heads, directive/ASI forms, and invalid statement-body declarations are now either caught by TypeScript diagnostics or covered by custom validators
   - Host/module interaction exclusions:
@@ -818,3 +834,17 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/class/syntax`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/global-code`
+- 2026-05-02: Closed out the supported parse-time early-error accounting cluster.
+  - scanner classification now keeps runtime-negative `SyntaxError` misses in `broken semantics` and treats only Test262 `negative.phase: parse` misses as `broken early error semantics`
+  - exact call-expression assignment target parse-negative files are classified as the documented Node/browser web-compat exception
+  - focused reruns now record:
+    - `language/statements/block/early-errors/**`: `0` intended failures
+    - `language/expressions/function/early-errors/**`: `0` intended failures
+    - `language/statements/function/early-errors/**`: `0` intended failures
+    - `language/expressions/assignmenttargettype/**`: `0` intended failures, `10` out-of-scope files
+    - `language/eval-code/direct/**`: no `broken early error semantics` bucket; `var-env-global-lex-non-strict.js` is runtime semantics
+  - adjusted the actionable supported parse-time early-error estimate from `37` to `0`
+  - verified with:
+    - `node --check plan\\test262-language-scan.js`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/assignmenttargettype`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/eval-code/direct`
