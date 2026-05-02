@@ -541,6 +541,33 @@ function validateClassStaticElementSyntax(sourceNode: ts.SourceFile) {
     visit(sourceNode)
 }
 
+function validateVariableDeclarationSyntax(sourceNode: ts.SourceFile) {
+    const isForInOrOfDeclaration = (node: ts.VariableDeclaration) => {
+        const list = node.parent
+        const parent = list?.parent
+        return ts.isVariableDeclarationList(list)
+            && parent != null
+            && (ts.isForInStatement(parent) || ts.isForOfStatement(parent))
+            && parent.initializer === list
+    }
+
+    const visit = (node: ts.Node) => {
+        if (
+            ts.isVariableDeclaration(node)
+            && ts.isVariableDeclarationList(node.parent)
+            && (node.parent.flags & ts.NodeFlags.Const) !== 0
+            && node.initializer == null
+            && !isForInOrOfDeclaration(node)
+        ) {
+            throwPatternSyntaxError('const declarations require an initializer')
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
+}
+
 function unwrapLabeledStatementItem(statement: ts.Statement): ts.Statement {
     let current = statement
 
@@ -1482,6 +1509,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateObjectLiteralSyntax(sourceNode)
     validateClassFieldArgumentsSyntax(sourceNode)
     validateClassStaticElementSyntax(sourceNode)
+    validateVariableDeclarationSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
     validateFunctionParameterSyntax(sourceNode, withStrict)

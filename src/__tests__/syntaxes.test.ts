@@ -153,6 +153,17 @@ test.each([
 })
 
 test.each([
+    ['missing initializer', 'const a;'],
+    ['mixed declarations', 'const a = 1, b;'],
+    ['switch case declaration', 'switch (true) { case true: const a; }'],
+    ['switch default declaration', 'switch (true) { default: const a; }'],
+])('Const declaration %s is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})
+
+test.each([
     ['identifier', '(x, x) => 1'],
     ['array binding pattern', '(x, [x]) => 1'],
     ['object binding pattern', '(x, { x }) => 1'],

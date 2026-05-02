@@ -302,6 +302,16 @@ Reduce the `language` category failures in targeted batches:
     - computed names such as `static ["prototype"]() {}` remain accepted
     - class fields, private names, and static blocks remain out of scope for this batch
 
+- [x] `const-missing-initializer-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - `language/statements/const/syntax/**`: `5` failing files -> `0`
+  - Fixed areas:
+    - `const` declarations without initializers now throw `SyntaxError`
+    - mixed declaration lists such as `const a = 1, b;` now throw `SyntaxError`
+    - switch case/default statement-list positions are covered
+    - `for-in` / `for-of` declaration heads remain valid without an initializer
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -321,7 +331,7 @@ Reduce the `language` category failures in targeted batches:
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus focused early-error batches:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `45`
+      - actionable early-error files still not caught as `SyntaxError`: `40`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
@@ -338,7 +348,7 @@ Reduce the `language` category failures in targeted batches:
     - control-flow completion and iterator close: `74` total (`74` runtime, `0` early)
       - fix completion values and abrupt completion through loops, `switch`, and `try/finally`
       - the statement-position declaration early-error tail is cleared; remaining work is runtime completion and scope behavior
-    - lexical/global declaration early errors: `66` total (`43` runtime, `23` early)
+    - lexical/global declaration early errors: `61` total (`43` runtime, `18` early)
       - fix redeclarations, global script declaration conflicts, and owned static checks
     - object literal, property keys, named evaluation: `126` total (`115` runtime, `11` early) - mostly completed / validation-only
       - object literal property semantics were implemented by `eff9eeb`
@@ -757,3 +767,11 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/class/elements/syntax/early-errors`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/class/elements/syntax/early-errors`
+- 2026-05-02: Cleared `const` missing-initializer early errors.
+  - `const` declarations now require an initializer outside `for-in` / `for-of` declaration heads in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - focused `language/statements/const/syntax/**` rerun is green: `0` failing files
+  - adjusted the actionable early-error estimate from `45` to `40` and the lexical/global declaration estimate from `66` to `61` (`43` runtime, `18` early)
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/const/syntax`
