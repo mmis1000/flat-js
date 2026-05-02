@@ -74,7 +74,7 @@ export function generateClassValue(
             op(OpCode.Get)
         )
     } else {
-        res.push(op(OpCode.NullLiteral))
+        res.push(op(OpCode.UndefinedLiteral))
     }
 
     res.push(usesStackName ? op(OpCode.UndefinedLiteral) : op(OpCode.Literal, 2, [className]))
@@ -117,6 +117,7 @@ export function generateClassValue(
                 res.push(op(OpCode.Literal, 2, [0]))
                 res.push(op(OpCode.DefineSetter))
             } else {
+                res.push(op(OpCode.Literal, 2, [0]))
                 res.push(op(OpCode.DefineMethod))
             }
 

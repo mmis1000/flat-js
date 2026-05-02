@@ -27,6 +27,7 @@ export const enum SpecialVariable {
     IteratorEntry = '[entry]',
     SyntheticScope = '[syntheticScope]',
     Super = '[super]',
+    SuperHomeObject = '[superHome]',
     NewTarget = '[newTarget]',
 }
 
@@ -925,8 +926,8 @@ export const enum OpCode {
      */
     CreateClass,
     /**
-     * Defines a non-enumerable method and preserves the target object.
-     * Stack (bottom to top): object, name, fn
+     * Defines a method and preserves the target object.
+     * Stack (bottom to top): object, name, fn, enumerable
      * Result: object
      */
     DefineMethod,
@@ -994,6 +995,13 @@ export const enum OpCode {
      * Notes: Reuses the same object for the same program site and realm, and defines a frozen non-enumerable `raw` array.
      */
     TemplateObject,
+    /**
+     * Creates a `super` property reference from a captured receiver and raw property name.
+     * Stack (bottom to top): actualThis, propertyName
+     * Result: superReference, propertyName
+     * Notes: Captures the current home object's prototype before later ToPropertyKey conversion.
+     */
+    MakeSuperReference,
 }
 
 export const enum ResolveType {

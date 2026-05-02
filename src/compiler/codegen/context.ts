@@ -472,6 +472,26 @@ export function createCodegenContext(
             ]
         }
 
+        if (ts.isPropertyAccessExpression(rawNode) && rawNode.expression.kind === ts.SyntaxKind.SuperKeyword) {
+            return [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.This]),
+                op(OpCode.Get),
+                op(OpCode.Literal, 2, [rawNode.name.text]),
+                op(OpCode.MakeSuperReference),
+            ]
+        }
+
+        if (ts.isElementAccessExpression(rawNode) && rawNode.expression.kind === ts.SyntaxKind.SuperKeyword) {
+            return [
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [SpecialVariable.This]),
+                op(OpCode.Get),
+                ...generate(rawNode.argumentExpression, flag),
+                op(OpCode.MakeSuperReference),
+            ]
+        }
+
         if (ts.isPropertyAccessExpression(rawNode) && ts.isIdentifier(rawNode.name)) {
             return [
                 ...generate(rawNode.expression, flag),

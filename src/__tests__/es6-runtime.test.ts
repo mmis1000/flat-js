@@ -161,6 +161,165 @@ test('spread works for new, super, and super property calls', () => {
     expect(result).toEqual(['3,4', 28])
 })
 
+test('super property references use home object and receiver semantics', () => {
+    const result = compileAndRun(`
+        const log = []
+        const proto = {
+            p: 'ok',
+            get value() {
+                return this.marker
+            },
+            method(v) {
+                this.count += v
+                return this.count
+            },
+            set saved(v) {
+                this.savedThis = this
+                this.savedValue = v
+            }
+        }
+        const changedProto = { p: 'bad' }
+        const obj = {
+            __proto__: proto,
+            marker: 'obj',
+            count: 1,
+            run(key) {
+                log.push(super.value)
+                log.push(super.method(2))
+                super.saved = 7
+                return () => super[key]
+            }
+        }
+        const key = {
+            toString() {
+                Object.setPrototypeOf(obj, changedProto)
+                return 'p'
+            }
+        }
+
+        const read = obj.run(key);
+        [
+            log.join(','),
+            obj.savedThis === obj,
+            obj.savedValue,
+            read(),
+            Object.getPrototypeOf(obj) === changedProto
+        ]
+    `)
+
+    expect(result).toEqual(['obj,3', true, 7, 'ok', true])
+})
+
+test('static super properties and object spread in super arguments keep stack shape', () => {
+    const result = compileAndRun(`
+        class Parent {
+            static get x() {
+                return 2
+            }
+            constructor(obj) {
+                this.keyCount = Object.keys(obj).length
+            }
+        }
+        class Child extends Parent {
+            constructor() {
+                super({...null})
+            }
+            static read() {
+                return super.x
+            }
+        }
+
+        const child = new Child();
+        [Child.read(), child.keyCount]
+    `)
+
+    expect(result).toEqual([2, 0])
+})
+
+test('super calls bind this once and evaluate to the constructed receiver', () => {
+    const result = compileAndRun(`
+        const customThis = { custom: true }
+        let value
+        let secondSuperError
+        function Parent() {
+            return customThis
+        }
+        class Child extends Parent {
+            constructor() {
+                value = super()
+                try {
+                    super()
+                } catch (err) {
+                    secondSuperError = err
+                }
+            }
+        }
+
+        new Child();
+        [value === customThis, secondSuperError instanceof ReferenceError]
+    `)
+
+    expect(result).toEqual([true, true])
+})
+
+test('super constructor lookup is dynamic after argument evaluation', () => {
+    const result = compileAndRun(`
+        let evaluatedArg = false
+        let caught
+        class C extends Object {
+            constructor() {
+                try {
+                    super(evaluatedArg = true)
+                } catch (err) {
+                    caught = err
+                }
+            }
+        }
+
+        Object.setPrototypeOf(C, parseInt)
+        try {
+            new C();
+        } catch (err) {}
+
+        [evaluatedArg, caught instanceof TypeError]
+    `)
+
+    expect(result).toEqual([true, true])
+})
+
+test('extends null and sloppy object super assignment follow super reference rules', () => {
+    const result = compileAndRun(`
+        let nullProtoError
+        class NullBase extends null {
+            method() {
+                try {
+                    super.x
+                } catch (err) {
+                    nullProtoError = err
+                }
+            }
+        }
+        NullBase.prototype.method();
+
+        const obj = {
+            method() {
+                super.x = 8
+                Object.freeze(obj)
+                super.y = 9
+            }
+        }
+        obj.method();
+
+        [
+            nullProtoError instanceof TypeError,
+            Object.prototype.hasOwnProperty.call(obj, 'x'),
+            Object.prototype.hasOwnProperty.call(obj, 'y')
+        ]
+    `)
+
+    expect(result).toEqual([true, true, false])
+})
+
 test('tagged templates keep cooked/raw strings, freezing, and per-site identity', () => {
     const result = compileAndRun(`
         function tag(strings) {

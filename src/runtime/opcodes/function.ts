@@ -6,6 +6,7 @@ import {
     Fields,
     Frame,
     FrameType,
+    FunctionFrame,
     GeneratorState,
     HOST_FUNCTION,
     IDENTIFIER_REFERENCE_FRAME,
@@ -13,6 +14,7 @@ import {
     Scope,
     SCOPE_REJECT_EVAL_ARGUMENTS_VAR,
     SCOPE_WITH_OBJECT,
+    SUPER_REFERENCE_THIS,
     VariableRecord,
     VariableFlags,
     bindInfo,
@@ -51,14 +53,38 @@ const isObjectEnvironmentScope = (scope: Scope) =>
 const isObjectLike = (value: unknown): value is object =>
     (typeof value === 'object' && value !== null) || typeof value === 'function'
 
+const getActiveFunctionFrame = (ctx: RuntimeOpcodeContext): FunctionFrame | undefined => {
+    for (let i = ctx[OpcodeContextField.stack].length - 1; i >= 0; i--) {
+        const frame = ctx[OpcodeContextField.stack][i]
+        if (frame[Fields.type] === FrameType.Function) {
+            return frame as FunctionFrame
+        }
+    }
+    return undefined
+}
+
 type ConstructTarget = { new(...args: any[]): any, prototype?: unknown }
 
 const createConstructThis = (newTarget: ConstructTarget, globalThis: any) => {
     const newTargetPrototype = (newTarget as { prototype?: unknown }).prototype
     const prototype = isObjectLike(newTargetPrototype)
         ? newTargetPrototype
-        : globalThis?.Object?.prototype ?? Object.prototype
+        : getDefaultPrototypeFromConstructor(newTarget, globalThis)
     return Object.create(prototype)
+}
+
+const getDefaultPrototypeFromConstructor = (newTarget: ConstructTarget, globalThis: any) => {
+    const descriptor = functionDescriptors.get(newTarget)
+    if (descriptor) {
+        return descriptor[Fields.globalThis]?.Object?.prototype ?? Object.prototype
+    }
+
+    const objectCtor = globalThis?.Object ?? Object
+    try {
+        return Reflect.getPrototypeOf(Reflect.construct(objectCtor, [], newTarget))
+    } catch {
+        return globalThis?.Object?.prototype ?? Object.prototype
+    }
 }
 
 const isSourceFileInPlace = (functionType: FunctionTypes) =>
@@ -320,6 +346,11 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         }
                         ctx[OpcodeContextField.defineVariable](activationScope, SpecialVariable.NewTarget, VariableType.Var, false)
                         ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.NewTarget, newTargetValue)
+                        const homeObject = functionDescriptors.get(fn)?.[Fields.homeObject]
+                        if (homeObject !== undefined) {
+                            ctx[OpcodeContextField.defineVariable](activationScope, SpecialVariable.SuperHomeObject, VariableType.Var, false)
+                            ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.SuperHomeObject, homeObject)
+                        }
                         argumentsObject = getArgumentObject(bindingScope, fn)
                         ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', argumentsObject)
                         if (hasParameterExpressions) {
@@ -654,11 +685,16 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 && typeof envOrRecord === 'object'
                 && IDENTIFIER_REFERENCE_FRAME in envOrRecord
                 && IDENTIFIER_REFERENCE_SCOPE in envOrRecord
+            const isSuperReference = envOrRecord != null
+                && typeof envOrRecord === 'object'
+                && SUPER_REFERENCE_THIS in envOrRecord
             if (isIdentifierReference) {
                 const scope = (envOrRecord as any)[IDENTIFIER_REFERENCE_SCOPE]
                 if (scope != null && (scope as any)[SCOPE_WITH_OBJECT] !== undefined) {
                     self = (scope as any)[SCOPE_WITH_OBJECT]
                 }
+            } else if (isSuperReference) {
+                self = (envOrRecord as any)[SUPER_REFERENCE_THIS]
             } else if (!environments.has(envOrRecord)) {
                 self = envOrRecord
             }
@@ -821,8 +857,12 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 parameters.unshift(ctx[OpcodeContextField.popCurrentFrameStack]())
             }
 
-            const fn = ctx[OpcodeContextField.popCurrentFrameStack]<(...args: any[]) => any>()
+            let fn = ctx[OpcodeContextField.popCurrentFrameStack]<(...args: any[]) => any>()
             const newTarget = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
+            const activeFunction = getActiveFunctionFrame(ctx)?.[Fields.function]
+            if (activeFunction != null && (typeof activeFunction === 'object' || typeof activeFunction === 'function')) {
+                fn = Reflect.getPrototypeOf(activeFunction) as (...args: any[]) => any
+            }
 
             if (!functionDescriptors.has(fn)) {
                 const instance = Reflect.construct(fn, parameters, newTarget)

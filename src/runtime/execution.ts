@@ -40,6 +40,9 @@ import {
     IDENTIFIER_REFERENCE_FRAME,
     IDENTIFIER_REFERENCE_SCOPE,
     IdentifierReference,
+    SUPER_REFERENCE_BASE,
+    SUPER_REFERENCE_THIS,
+    SuperReference,
     VariableFlags,
     toPropertyKey,
 } from "./shared"
@@ -253,6 +256,10 @@ export const getExecution = (
         isObjectLike(value)
         && IDENTIFIER_REFERENCE_FRAME in value
         && IDENTIFIER_REFERENCE_SCOPE in value
+    const isSuperReference = (value: unknown): value is SuperReference =>
+        isObjectLike(value)
+        && SUPER_REFERENCE_BASE in value
+        && SUPER_REFERENCE_THIS in value
     const createIdentifierReference = (frame: Frame, scope: Scope | null): IdentifierReference => ({
         [IDENTIFIER_REFERENCE_FRAME]: frame,
         [IDENTIFIER_REFERENCE_SCOPE]: scope,
@@ -261,6 +268,7 @@ export const getExecution = (
         name === SpecialVariable.This
         || name === SpecialVariable.NewTarget
         || name === SpecialVariable.Super
+        || name === SpecialVariable.SuperHomeObject
         || name === SpecialVariable.SwitchValue
         || name === SpecialVariable.LoopIterator
         || name === SpecialVariable.IteratorEntry
@@ -1189,6 +1197,10 @@ export const getExecution = (
                 }
                 throw new ReferenceError(String(name) + is_not_defined)
             }
+            if (isSuperReference(ctx)) {
+                const propertyKey = toPropertyKey(name)
+                return Reflect.get(toObjectInCurrentRealm(ctx[SUPER_REFERENCE_BASE]), propertyKey, ctx[SUPER_REFERENCE_THIS])
+            }
             if (ctx == null) {
                 throw new TypeError('Cannot convert undefined or null to object')
             }
@@ -1227,6 +1239,23 @@ export const getExecution = (
                 const currentGlobal = env[Fields.globalThis] as Record<PropertyKey, any>
                 currentGlobal[name] = value
                 return value
+            }
+            if (isSuperReference(ctx)) {
+                try {
+                    const propertyKey = toPropertyKey(name)
+                    const success = Reflect.set(
+                        toObjectInCurrentRealm(ctx[SUPER_REFERENCE_BASE]),
+                        propertyKey,
+                        value,
+                        ctx[SUPER_REFERENCE_THIS]
+                    )
+                    if (!success && currentFrame[Fields.strict]) {
+                        throw new TypeError(`Cannot assign to read only property '${String(propertyKey)}'`)
+                    }
+                    return value
+                } catch (e) {
+                    rethrowNativeErrorInRealm(e, getCurrentFrame()[Fields.globalThis])
+                }
             }
             try {
                 if (ctx == null) {
@@ -1769,6 +1798,7 @@ export const getExecution = (
                 case OpCode.Duplicate:
                 case OpCode.DuplicateSecond:
                 case OpCode.Swap:
+                case OpCode.MakeSuperReference:
                 case OpCode.GetRecord:
                 case OpCode.GetStatic:
                 case OpCode.GetStaticKeepCtx:

@@ -38,11 +38,16 @@ function isStrictRoot(node: VariableRoot, parentMap: ParentMap, withStrict: bool
         }
 
         if (ts.isFunctionLike(current) && 'body' in current && current.body != null && ts.isBlock(current.body)) {
+            const functionParent = parentMap.get(current)?.node
             if (
-                ts.isMethodDeclaration(current)
-                || ts.isGetAccessorDeclaration(current)
-                || ts.isSetAccessorDeclaration(current)
-                || ts.isConstructorDeclaration(current)
+                functionParent != null
+                && ts.isClassLike(functionParent)
+                && (
+                    ts.isMethodDeclaration(current)
+                    || ts.isGetAccessorDeclaration(current)
+                    || ts.isSetAccessorDeclaration(current)
+                    || ts.isConstructorDeclaration(current)
+                )
             ) {
                 return true
             }

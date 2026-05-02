@@ -1055,3 +1055,19 @@ Reduce the `language` category failures in targeted batches:
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/async-generator`
     - fresh full `language/**` scan: `408` intended failures, `6045` out-of-scope files
   - boundary reached: async/generator function-family roots are clear; continue with the next runtime family from the full-scan residuals
+- 2026-05-03: Cleared the supported `super` runtime cluster.
+  - `super` property references now carry a real home-object based reference with the correct receiver, so object methods, class instance/static methods, accessors, computed keys, compound writes, updates, and arrows using lexical `super` share one VM path
+  - object literal methods/accessors now install home-object metadata without forcing sloppy object methods into strict mode; class methods remain strict through their class parent
+  - `super(...)` now evaluates to the constructed receiver, rejects rebinding derived-constructor `this`, and looks up the super constructor dynamically after argument evaluation
+  - `class extends null` now gives the class prototype a null prototype while keeping constructor wiring for methods, so `super.x` produces the expected TypeError
+  - object literal spread no longer leaves an extra duplicate literal target on the stack, fixing `super({...obj})` argument stack shape
+  - added focused regressions in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) for object/class `super` property references, static `super`, `super()` result/rebinding, dynamic super-constructor lookup, `extends null`, and sloppy super-property writes
+  - fresh scans:
+    - `language/expressions/super/**`: runtime failures cleared; remaining `9` intended files are TypeScript parser-delegation syntax cases
+    - `language/statements/class/super/**`: `0` intended failures
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/class.test.ts src/__tests__/opcode-kitchen-sink.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/super`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/class/super`
+  - boundary reached: supported `super` runtime semantics are clear; run the broader regression scan before choosing the next class/object runtime family target

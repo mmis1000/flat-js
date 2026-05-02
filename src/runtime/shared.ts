@@ -172,6 +172,7 @@ export const enum Fields {
     flags,
     values,
     savedEvalResult,
+    homeObject,
 }
 
 interface BaseFrame {
@@ -254,9 +255,15 @@ const SCOPE_WITH_OBJECT = Symbol()
 const SCOPE_REJECT_EVAL_ARGUMENTS_VAR = Symbol()
 const IDENTIFIER_REFERENCE_FRAME = Symbol()
 const IDENTIFIER_REFERENCE_SCOPE = Symbol()
+const SUPER_REFERENCE_BASE = Symbol()
+const SUPER_REFERENCE_THIS = Symbol()
 type IdentifierReference = {
     [IDENTIFIER_REFERENCE_FRAME]: Frame
     [IDENTIFIER_REFERENCE_SCOPE]: Scope | null
+}
+type SuperReference = {
+    [SUPER_REFERENCE_BASE]: object
+    [SUPER_REFERENCE_THIS]: unknown
 }
 
 type ScopeWithInternals = Scope & {
@@ -483,6 +490,7 @@ type FunctionDescriptor = {
     [Fields.scopes]: Scope[],
     [Fields.programSection]: number[],
     [Fields.globalThis]: any
+    [Fields.homeObject]?: object
 }
 
 const isGeneratorType = (t: FunctionTypes) =>
@@ -611,6 +619,8 @@ export {
     TEXT_DADA_MASK,
     IDENTIFIER_REFERENCE_FRAME,
     IDENTIFIER_REFERENCE_SCOPE,
+    SUPER_REFERENCE_BASE,
+    SUPER_REFERENCE_THIS,
     toNumeric,
     toPropertyKey,
 }
@@ -632,5 +642,6 @@ export type {
     StaticVariableStore,
     TryFrame,
     IdentifierReference,
+    SuperReference,
     VariableRecord,
 }

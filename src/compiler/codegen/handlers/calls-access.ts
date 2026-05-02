@@ -152,19 +152,6 @@ function generateArgumentArray(args: readonly ts.Expression[], flag: number, ctx
     return res
 }
 
-function generateArgumentArrayWithThis(args: readonly ts.Expression[], flag: number, ctx: CodegenContext): Segment {
-    const res: Segment = [
-        op(OpCode.ArrayLiteral),
-        op(OpCode.Literal, 2, [0]),
-        op(OpCode.GetRecord),
-        op(OpCode.Literal, 2, [SpecialVariable.This]),
-        op(OpCode.Get),
-        op(OpCode.SetKeepCtx),
-    ]
-    appendArrayElements(res, args, flag, ctx, 1)
-    return res
-}
-
 export function generateDirectCall(
     self: ts.Node,
     args: Segment,
@@ -192,30 +179,8 @@ export function generateDirectCall(
         res.push(op(OpCode.SuperCall))
 
         res.push(op(OpCode.SetInitialized))
-        res.push(op(OpCode.Pop))
-        res.push(op(OpCode.UndefinedLiteral))
 
         return res
-    }
-
-    if (ts.isPropertyAccessExpression(self) && self.expression.kind === ts.SyntaxKind.SuperKeyword) {
-        return [
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.Super]),
-            op(OpCode.Get),
-            op(OpCode.Literal, 2, ['prototype']),
-            op(OpCode.Get),
-            op(OpCode.Literal, 2, [self.name.text]),
-            op(OpCode.Get),
-
-            op(OpCode.Literal, 2, ['call']),
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.This]),
-            op(OpCode.Get),
-            ...args,
-            op(OpCode.Literal, 2, [argCount + 1]),
-            op(OpCode.Call)
-        ]
     }
 
     if (ts.isElementAccessExpression(self) || ts.isPropertyAccessExpression(self) || ts.isIdentifier(self)) {
@@ -280,25 +245,6 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
                     op(OpCode.SuperCall),
 
                     op(OpCode.SetInitialized),
-                    op(OpCode.Pop),
-                    op(OpCode.UndefinedLiteral),
-                ]
-            }
-
-            if (ts.isPropertyAccessExpression(self) && self.expression.kind === ts.SyntaxKind.SuperKeyword) {
-                return [
-                    op(OpCode.GetRecord),
-                    op(OpCode.Literal, 2, [SpecialVariable.Super]),
-                    op(OpCode.Get),
-                    op(OpCode.Literal, 2, ['prototype']),
-                    op(OpCode.Get),
-                    op(OpCode.Literal, 2, [self.name.text]),
-                    op(OpCode.Get),
-
-                    op(OpCode.Literal, 2, ['call']),
-                    ...generateArgumentArrayWithThis(node.arguments, flag, ctx),
-                    op(OpCode.ExpandArgumentArray),
-                    op(OpCode.Call)
                 ]
             }
 
@@ -382,7 +328,6 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
 
         for (const item of node.properties) {
             if (ts.isSpreadAssignment(item)) {
-                res.push(op(OpCode.Duplicate))
                 res.push(...ctx.generate(item.expression, flag))
                 res.push(op(OpCode.ObjectSpread))
                 continue
@@ -415,7 +360,8 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
             if (ts.isMethodDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
                 res.push(...generateFunctionDefinitionWithStackName(item))
-                res.push(op(OpCode.DefineKeepCtx))
+                res.push(op(OpCode.Literal, 2, [1]))
+                res.push(op(OpCode.DefineMethod))
             } else if (ts.isGetAccessorDeclaration(item)) {
                 res.push(op(OpCode.Duplicate))
                 res.push(...generateFunctionDefinitionWithStackName(item))
@@ -458,18 +404,6 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
             op(OpCode.Literal, 2, [source]),
             op(OpCode.Literal, 2, [flags]),
             op(OpCode.RegexpLiteral)
-        ]
-    }
-
-    if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.SuperKeyword) {
-        return [
-            op(OpCode.GetRecord),
-            op(OpCode.Literal, 2, [SpecialVariable.Super]),
-            op(OpCode.Get),
-            op(OpCode.Literal, 2, ['prototype']),
-            op(OpCode.Get),
-            op(OpCode.Literal, 2, [node.name.text]),
-            op(OpCode.Get),
         ]
     }
 

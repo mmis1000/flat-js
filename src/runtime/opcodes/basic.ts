@@ -1,4 +1,4 @@
-import { OpCode, SetFlag } from "../../compiler"
+import { OpCode, SetFlag, SpecialVariable } from "../../compiler"
 import { STATIC_SLOT_NAMELESS } from "../../compiler/shared"
 import {
     Context,
@@ -7,6 +7,8 @@ import {
     IDENTIFIER_REFERENCE_SCOPE,
     REGEXP,
     Scope,
+    SUPER_REFERENCE_BASE,
+    SUPER_REFERENCE_THIS,
     TDZ_VALUE,
     TEXT_DADA_MASK,
     VariableFlags,
@@ -78,6 +80,26 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const second = ctx[OpcodeContextField.popCurrentFrameStack]()
             ctx[OpcodeContextField.pushCurrentFrameStack](top)
             ctx[OpcodeContextField.pushCurrentFrameStack](second)
+        }
+            break
+        case OpCode.MakeSuperReference: {
+            const name = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const actualThis = ctx[OpcodeContextField.popCurrentFrameStack]()
+            const homeObject = ctx[OpcodeContextField.getValue](
+                ctx[OpcodeContextField.currentFrame],
+                SpecialVariable.SuperHomeObject
+            )
+            const base = Reflect.getPrototypeOf(homeObject)
+
+            if (base == null) {
+                throw new TypeError('Cannot convert undefined or null to object')
+            }
+
+            ctx[OpcodeContextField.pushCurrentFrameStack]({
+                [SUPER_REFERENCE_BASE]: base,
+                [SUPER_REFERENCE_THIS]: actualThis,
+            })
+            ctx[OpcodeContextField.pushCurrentFrameStack](name)
         }
             break
         case OpCode.GetRecord:
@@ -160,6 +182,12 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const env = ctx[OpcodeContextField.popCurrentFrameStack]<Frame | object>()
             const scope = getResolvedBindingScope(env)
                 ?? ctx[OpcodeContextField.findScope](env as Frame, name)!
+            if (
+                name === SpecialVariable.This
+                && ctx[OpcodeContextField.readBindingValue](scope, name) !== TDZ_VALUE
+            ) {
+                throw new ReferenceError('this has already been initialized')
+            }
             ctx[OpcodeContextField.initializeBindingValue](scope, name, value)
             ctx[OpcodeContextField.pushCurrentFrameStack](value)
         }
