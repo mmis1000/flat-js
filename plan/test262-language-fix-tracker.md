@@ -373,15 +373,16 @@ Reduce the `language` category failures in targeted batches:
       - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
     - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
-    - functions, parameters, eval, arguments env: at least `382` core files
+    - functions, parameters, eval, arguments env: at least `378` core files
       - direct eval: `165`
       - function-code: `127`
       - arguments-object: `47`
-      - ordinary/async function expression and statement roots: `43`
+      - ordinary/async function expression and statement roots: `39`
       - adjacent indirect eval (`26`) and arrow/async-arrow (`19`) tails likely belong with this work
       - parameter/body environment separation is partially completed by `7751069`
       - parameter default self/later-name TDZ is now covered for ordinary function expression and statement roots
       - named function-expression self bindings are now immutable, including sloppy-silent and strict-throw assignment behavior
+      - direct eval inside rest/binding-pattern parameter cleanup now keeps the active function variable environment instead of falling into synthetic scopes
       - remaining work is eval declaration-instantiation tails, mapped arguments, and directive strictness
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
@@ -910,3 +911,17 @@ Reduce the `language` category failures in targeted batches:
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
     - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
   - next runtime target remains eval/function/arguments environment behavior, especially eval declaration-instantiation `SyntaxError` tails, rest-parameter/body var scope tails, and mapped arguments
+- 2026-05-03: Cleared rest-parameter direct-eval variable-environment tails.
+  - TryFrames now carry the active function variable environment, so direct eval inside iterator-cleanup-protected binding-pattern code writes `var` declarations to the function variable environment instead of a synthetic destructuring scope
+  - nested closures inside eval-tainted functions no longer statically skip an eval-tainted ancestor that could gain `var` bindings dynamically
+  - added a focused regression in [es6-runtime.test.ts](</M:/Playground/flat-js/src/__tests__/es6-runtime.test.ts:1>) for closures created before, during, and after rest-parameter eval seeing the eval-created function var
+  - focused function-root scans:
+    - `language/expressions/function/**`: intended failures `6` -> `4`; latest recorded total `10` (`4` intended, `6` out-of-scope)
+    - `language/statements/function/**`: intended failures `12` -> `10`; latest recorded total `14` (`10` intended, `4` out-of-scope)
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts -t "closures in parameter defaults observe eval-created parameter vars"`
+    - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/function`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
+  - next runtime target remains eval/function/arguments environment behavior, especially eval declaration-instantiation `SyntaxError` tails, body lexical conflict checks, and mapped arguments

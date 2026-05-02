@@ -638,6 +638,22 @@ test('later parameter defaults read eval-created vars before falling back to out
     `)).toEqual([0, 2, 3])
 })
 
+test('closures in parameter defaults observe eval-created parameter vars', () => {
+    expect(compileAndRun(`
+        var x = 'outside'
+        var probe1, probe2, probeBody
+
+        ;(function(
+            _ = probe1 = function() { return x },
+            ...[__ = (eval('var x = "inside"'), probe2 = function() { return x })]
+        ) {
+            probeBody = function() { return x }
+        })();
+
+        [probe1(), probe2(), probeBody()]
+    `)).toEqual(['inside', 'inside', 'inside'])
+})
+
 test('parameter-expression functions resolve captured outer block bindings', () => {
     expect(compileAndRun(`
         {

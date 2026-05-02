@@ -361,6 +361,9 @@ export function createCodegenContext(
                     }
                     return { depth, index, type: declaration.type }
                 }
+                if (functions.has(current as VariableRoot) && evalTaintedFunctions.has(current as VariableRoot)) {
+                    return null
+                }
                 depth++
                 if (!ts.isSourceFile(current) && functions.has(current as VariableRoot) && hasParameterExpressions(current as VariableRoot)) {
                     depth++
