@@ -322,6 +322,12 @@ export function createCodegenContext(
         return indexMap.get(name) ?? null
     }
 
+    function hasOwnImplicitArgumentsBinding(scopeNode: ts.Node, name: string) {
+        return name === 'arguments'
+            && ts.isFunctionLike(scopeNode)
+            && !ts.isArrowFunction(scopeNode)
+    }
+
     function tryResolveStaticAccess(node: ts.Node, name: string): StaticAccess | null {
         if (!staticResolutionEnabled) {
             return null
@@ -361,6 +367,9 @@ export function createCodegenContext(
                         throw new Error('missing static slot for ' + name)
                     }
                     return { depth, index, type: declaration.type }
+                }
+                if (hasOwnImplicitArgumentsBinding(current, name)) {
+                    return null
                 }
                 if (functions.has(current as VariableRoot) && evalTaintedFunctions.has(current as VariableRoot)) {
                     return null

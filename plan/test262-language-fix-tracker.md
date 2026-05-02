@@ -964,3 +964,17 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "function objects use realm prototypes|sloppy arguments callee|function var arguments"`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/function`
   - boundary reached: ordinary function expression/statement roots have no intended failures left; continue with adjacent `function-code`, arguments-object, async/generator function runtime clusters
+- 2026-05-03: Cleared the intended `arguments-object` runtime cluster.
+  - arguments objects now use the active realm `Object.prototype` and `%Array.prototype.values%` iterator
+  - implicit ordinary-function `arguments` bindings now stop static resolution from accidentally capturing an outer `var arguments`; arrows still inherit lexically
+  - mapped arguments now expose ordinary data descriptors while a proxy-backed parameter map preserves argument/parameter aliasing, descriptor updates, unmapping on accessors, deletion, and non-writable transitions
+  - strict arguments `callee` is now a non-configurable poison accessor, while sloppy `callee` remains writable/configurable
+  - VM-created functions expose an own `caller: undefined` property so legacy `arguments.callee.caller` probes do not trip host strict-function poison pills
+  - added focused regressions in [basic-programs.test.ts](</M:/Playground/flat-js/src/__tests__/basic-programs.test.ts:1>) for implicit `arguments` shadowing, descriptor attributes, mapped unmapping, and strict poisoned `callee`
+  - fresh `language/arguments-object/**` scan is now at `0` intended failures; latest recorded total `60`, all out-of-scope class-private method cases
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts -t "arguments object descriptors|strict arguments callee|implicit function arguments|sloppy arguments callee|function var arguments"`
+    - `npx jest --runInBand --no-cache src/__tests__/function-expression-self-binding.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/static-scope-resolution.test.ts src/__tests__/basic-programs.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/arguments-object`
+  - boundary reached: ordinary function roots and arguments-object intended support are clear; continue with `function-code` or async/generator function-family runtime clusters

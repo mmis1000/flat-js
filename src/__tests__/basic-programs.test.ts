@@ -445,6 +445,15 @@ function fn () {
 }
 print(fn(42))
 `, ['object'], printProvider)
+testRuntime('implicit function arguments shadows outer arguments binding', `
+function outer () {
+    var arguments
+    return (function () {
+        return arguments.length
+    })(1, 2)
+}
+print(outer())
+`, [2], printProvider)
 testRuntime('function statement covered by ParenthesizedExpression', 'print((a)()); function a () { return 0 }', [0], printProvider)
 testRuntime('function expression', 'const a = function a () { return 0 }; print(a());', [0], printProvider)
 testRuntime('arrow function', 'const a = () => 0; print(a());', [0], printProvider)
@@ -457,6 +466,35 @@ var result = (function () {
 })(0)
 print(result)
 `, [1], printProvider)
+testRuntime('arguments object descriptors and mapped unmapping', `
+function fn (a) {
+    print(Object.getPrototypeOf(arguments) === Object.prototype)
+    var lengthDesc = Object.getOwnPropertyDescriptor(arguments, 'length')
+    print(lengthDesc.writable, lengthDesc.enumerable, lengthDesc.configurable)
+    var zeroDesc = Object.getOwnPropertyDescriptor(arguments, '0')
+    print(zeroDesc.value, zeroDesc.writable, zeroDesc.enumerable, zeroDesc.configurable)
+    Object.defineProperty(arguments, '0', { configurable: false })
+    a = 2
+    print(Object.getOwnPropertyDescriptor(arguments, '0').value)
+    Object.defineProperty(arguments, '0', { writable: false })
+    a = 3
+    print(arguments[0], a)
+}
+fn(1)
+`, [true, true, false, true, 1, true, true, true, 2, 2, 3], printProvider)
+testRuntime('strict arguments callee is poisoned', `
+'use strict'
+function fn () {
+    var desc = Object.getOwnPropertyDescriptor(arguments, 'callee')
+    print(desc.configurable, desc.enumerable, 'get' in desc, 'set' in desc)
+    try {
+        arguments.callee
+    } catch (error) {
+        print(error instanceof TypeError)
+    }
+}
+fn()
+`, [false, false, true, true, true], printProvider)
 testRuntime('object method', 'const a = { b () { return 0 } }; print(a.b());', [0], printProvider)
 testRuntime('object method covered by ParenthesizedExpression', 'const a = { b () { return 0 } }; print((a.b)());', [0], printProvider)
 testRuntime('this reference get', 'const a = { a: 0, b () { return this.a } }; print(a.b());', [0], printProvider)

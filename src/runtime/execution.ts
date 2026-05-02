@@ -502,15 +502,14 @@ export const getExecution = (
         return value
     }
 
-    const MyArgument: { new(): {} } = function MyArgument () {} as any
-
-    const createArgumentObject = () => {
-        const obj = new MyArgument()
-        Reflect.setPrototypeOf(obj, Object.prototype)
+    const createArgumentObject = (globalThis: any) => {
+        const objectPrototype = globalThis?.Object?.prototype ?? Object.prototype
+        const obj = Object.create(objectPrototype)
+        const iterator = globalThis?.Array?.prototype?.[Symbol.iterator] ?? Array.prototype[Symbol.iterator]
         Object.defineProperty(obj, Symbol.iterator, {
             configurable: true,
             writable: true,
-            value: Array.prototype[Symbol.iterator],
+            value: iterator,
         })
         return obj
     }
@@ -901,6 +900,7 @@ export const getExecution = (
         }
 
         Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
+        Object.defineProperty(fn, 'caller', { value: undefined, configurable: true })
         const functionPrototype = globalThis?.Function?.prototype
         if (functionPrototype && Object.getPrototypeOf(fn) !== functionPrototype) {
             Object.setPrototypeOf(fn, functionPrototype)

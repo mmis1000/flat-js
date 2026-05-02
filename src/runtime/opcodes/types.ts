@@ -117,7 +117,7 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.setStaticVariableValue](frame: Frame, depth: number, index: number, value: any): any
     [OpcodeContextField.setStaticVariableValueChecked](frame: Frame, depth: number, index: number, value: any): any
 
-    [OpcodeContextField.createArgumentObject](): Record<string, any>
+    [OpcodeContextField.createArgumentObject](globalThis: any): Record<string, any>
     [OpcodeContextField.defineFunction](globalThis: any, scopes: Scope[], name: PropertyKey, type: FunctionTypes, offset: number, bodyOffset: number): any
     [OpcodeContextField.createGeneratorFromExecution](
         program: number[],

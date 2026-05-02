@@ -128,40 +128,136 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             ctx[OpcodeContextField.currentFrame][Fields.strict] = strict
 
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
-                const obj = ctx[OpcodeContextField.createArgumentObject]()
+                const obj = ctx[OpcodeContextField.createArgumentObject](
+                    ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+                )
                 const bindingLength = Math.min(argumentNameCount, parameterCount)
                 const mapsArguments = simpleParameterList && !strict
+                const mappedParameters = new Map<PropertyKey, string>()
+                const isAccessorDescriptor = (descriptor: PropertyDescriptor) =>
+                    'get' in descriptor || 'set' in descriptor
+                const getMappedParameter = (property: PropertyKey) =>
+                    typeof property === 'string' ? mappedParameters.get(property) : undefined
 
                 for (let i = 0; i < parameterCount; i++) {
-                    if (mapsArguments && i < bindingLength) {
-                        Object.defineProperty(obj, i, {
-                            enumerable: true,
-                            configurable: true,
-                            get() {
-                                return ctx[OpcodeContextField.readBindingValue](scope, argumentNames[i])
-                            },
-                            set(v) {
-                                ctx[OpcodeContextField.writeBindingValue](scope, argumentNames[i], v)
-                            },
-                        })
-                    } else {
-                        obj[i] = parameters[i]
+                    Object.defineProperty(obj, i, {
+                        enumerable: true,
+                        configurable: true,
+                        writable: true,
+                        value: parameters[i],
+                    })
+                }
+
+                if (mapsArguments) {
+                    const mappedNames = new Set<string>()
+                    for (let i = bindingLength - 1; i >= 0; i--) {
+                        const parameterName = argumentNames[i]
+                        if (!mappedNames.has(parameterName)) {
+                            mappedNames.add(parameterName)
+                            mappedParameters.set(String(i), parameterName)
+                        }
                     }
                 }
 
                 Object.defineProperty(obj, 'length', {
                     enumerable: false,
                     configurable: true,
+                    writable: true,
                     value: parameterCount,
                 })
-                Object.defineProperty(obj, 'callee', {
-                    enumerable: false,
-                    configurable: true,
-                    writable: !strict,
-                    value: callee,
-                })
 
-                return obj
+                if (strict) {
+                    const throwTypeError = () => {
+                        const TypeErrorCtor = ctx[OpcodeContextField.currentFrame][Fields.globalThis]?.TypeError
+                        throw typeof TypeErrorCtor === 'function'
+                            ? new TypeErrorCtor('Invalid arguments object callee access')
+                            : new TypeError('Invalid arguments object callee access')
+                    }
+                    Object.defineProperty(obj, 'callee', {
+                        enumerable: false,
+                        configurable: false,
+                        get: throwTypeError,
+                        set: throwTypeError,
+                    })
+                } else {
+                    Object.defineProperty(obj, 'callee', {
+                        enumerable: false,
+                        configurable: true,
+                        writable: true,
+                        value: callee,
+                    })
+                }
+
+                if (!mapsArguments) {
+                    return obj
+                }
+
+                return new Proxy(obj, {
+                    get(target, property, receiver) {
+                        const mappedName = getMappedParameter(property)
+                        if (mappedName !== undefined) {
+                            return ctx[OpcodeContextField.readBindingValue](scope, mappedName)
+                        }
+                        return Reflect.get(target, property, receiver)
+                    },
+                    set(target, property, value, receiver) {
+                        const mappedName = getMappedParameter(property)
+                        if (mappedName === undefined) {
+                            return Reflect.set(target, property, value, receiver)
+                        }
+
+                        const descriptor = Reflect.getOwnPropertyDescriptor(target, property)
+                        if (descriptor && 'writable' in descriptor && descriptor.writable === false) {
+                            return false
+                        }
+
+                        ctx[OpcodeContextField.writeBindingValue](scope, mappedName, value)
+                        if (descriptor && 'value' in descriptor) {
+                            return Reflect.defineProperty(target, property, { ...descriptor, value })
+                        }
+                        return Reflect.set(target, property, value, receiver)
+                    },
+                    getOwnPropertyDescriptor(target, property) {
+                        const descriptor = Reflect.getOwnPropertyDescriptor(target, property)
+                        const mappedName = getMappedParameter(property)
+                        if (descriptor && mappedName !== undefined && 'value' in descriptor) {
+                            return {
+                                ...descriptor,
+                                value: ctx[OpcodeContextField.readBindingValue](scope, mappedName),
+                            }
+                        }
+                        return descriptor
+                    },
+                    defineProperty(target, property, descriptor) {
+                        const mappedName = getMappedParameter(property)
+                        const accessorDescriptor = isAccessorDescriptor(descriptor)
+                        let nextDescriptor = descriptor
+
+                        if (mappedName !== undefined && !accessorDescriptor) {
+                            if ('value' in descriptor) {
+                                ctx[OpcodeContextField.writeBindingValue](scope, mappedName, descriptor.value)
+                            } else if (descriptor.writable === false) {
+                                nextDescriptor = {
+                                    ...descriptor,
+                                    value: ctx[OpcodeContextField.readBindingValue](scope, mappedName),
+                                }
+                            }
+                        }
+
+                        const success = Reflect.defineProperty(target, property, nextDescriptor)
+                        if (success && mappedName !== undefined && (accessorDescriptor || descriptor.writable === false)) {
+                            mappedParameters.delete(property)
+                        }
+                        return success
+                    },
+                    deleteProperty(target, property) {
+                        const success = Reflect.deleteProperty(target, property)
+                        if (success) {
+                            mappedParameters.delete(property)
+                        }
+                        return success
+                    },
+                })
             }
 
             const initializeVariableBindings = (
