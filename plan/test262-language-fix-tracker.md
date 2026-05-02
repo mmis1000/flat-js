@@ -232,6 +232,14 @@ Reduce the `language` category failures in targeted batches:
     - destructured catch bindings still evaluate parameter initializers before the catch block lexical scope exists
     - the catch block itself now enters its own lexical scope before evaluating statements, so closures created before a later `let` declaration capture the block binding rather than an outer binding
 
+- [x] `arrow-duplicate-parameters-early-errors`
+  - Status: completed 2026-05-02.
+  - Fresh focused scan:
+    - `language/expressions/arrow-function/syntax/early-errors/**`: `11` failing files -> `0`
+  - Fixed areas:
+    - arrow parameter bound names are now checked across identifiers, array/object binding patterns, and rest parameters
+    - ordinary sloppy function duplicate-parameter compatibility is unaffected because the check is scoped to `ArrowFunction`
+
 - [ ] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:877`
@@ -251,13 +259,13 @@ Reduce the `language` category failures in targeted batches:
       - regression check: the broad summary has no detailed failures under `language/statements/if/**` or `language/statements/try/**`
     - after the 2026-05-02 compiler-only parse-negative refresh:
       - scanned Test262 `language` parse-negative files: `4389`
-      - actionable early-error files still not caught as `SyntaxError`: `188`
+      - actionable early-error files still not caught as `SyntaxError`: `177`
       - non-actionable parser-delegation files: `39`
       - out-of-scope unsupported-feature parse-negative files: `451`
       - host/module parse-negative files: `422`
   - Actionable intended-support groups:
     - counts below are working-group estimates from focused and compiler-only scans; use the latest broad summary above for current top-line totals
-    - functions, parameters, eval, arguments env: `423` total (`375` runtime, `48` early)
+    - functions, parameters, eval, arguments env: `412` total (`375` runtime, `37` early)
       - parameter/body environment separation is partially completed by `7751069`
       - remaining work is eval scope tails, mapped arguments, and directive strictness
     - supported class constructors/methods/accessors/super: `359` total (`327` runtime, `32` early)
@@ -605,3 +613,12 @@ Reduce the `language` category failures in targeted batches:
   - regression check: no detailed failures remain for `language/statements/if/**` or `language/statements/try/**`
   - command:
     - `TEST262_SCAN_CONCURRENCY=8 node plan\\test262-language-scan.js`
+- 2026-05-02: Cleared arrow duplicate-parameter early errors.
+  - added an `ArrowFunction`-scoped bound-name duplicate check in [compile.ts](</M:/Playground/flat-js/src/compiler/compile.ts:1>)
+  - focused `language/expressions/arrow-function/syntax/early-errors/**` rerun is green: `0` failing files
+  - adjusted the actionable early-error count from `188` to `177`
+  - verified with:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/syntaxes.test.ts`
+    - `npm run build`
+    - `node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/arrow-function/syntax/early-errors`

@@ -123,3 +123,14 @@ test('Catch block labelled function redeclaring catch parameter is a syntax erro
         compiler.compile('try {} catch (e) { label: function e() {} }')
     }).toThrow(SyntaxError)
 })
+
+test.each([
+    ['identifier', '(x, x) => 1'],
+    ['array binding pattern', '(x, [x]) => 1'],
+    ['object binding pattern', '(x, { x }) => 1'],
+    ['rest parameter', '(x, ...x) => 1'],
+])('ArrowFunction duplicate %s parameter is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})

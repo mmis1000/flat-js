@@ -743,6 +743,27 @@ function validateDestructuringSyntax(sourceNode: ts.SourceFile, withStrict: bool
     visit(sourceNode, false)
 }
 
+function validateArrowParameterSyntax(sourceNode: ts.SourceFile) {
+    const visit = (node: ts.Node) => {
+        if (ts.isArrowFunction(node)) {
+            const names = new Set<string>()
+
+            for (const parameter of node.parameters) {
+                for (const identifier of extractVariable(parameter.name)) {
+                    if (names.has(identifier.text)) {
+                        throwPatternSyntaxError('duplicate arrow function parameter')
+                    }
+                    names.add(identifier.text)
+                }
+            }
+        }
+
+        node.forEachChild(visit)
+    }
+
+    visit(sourceNode)
+}
+
 function validateReferenceSyntax(sourceNode: ts.SourceFile, withStrict: boolean) {
     const validateUpdateTarget = (target: ts.Expression, strictContext: boolean) => {
         const rawTarget = unwrapParenthesizedExpression(target)
@@ -1134,6 +1155,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     validateClassFieldArgumentsSyntax(sourceNode)
     validateReferenceSyntax(sourceNode, withStrict)
     validateDestructuringSyntax(sourceNode, withStrict)
+    validateArrowParameterSyntax(sourceNode)
     validateLoopSyntax(sourceNode, withStrict)
     validateIfStatementSyntax(sourceNode, withStrict)
     validateCatchDeclarationSyntax(sourceNode)
