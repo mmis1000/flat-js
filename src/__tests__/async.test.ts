@@ -50,6 +50,25 @@ describe('Async/Await', () => {
         expect(result).toBe(101)
     })
 
+    test('awaiting native promises bypasses patched own then', async () => {
+        const result = await compileAndRun(`
+            let thenCallCount = 0;
+            const patched = Promise.resolve(42);
+            patched.then = function(...args) {
+                thenCallCount++;
+                return Promise.prototype.then.apply(this, args);
+            };
+
+            async function f() {
+                return await patched;
+            }
+
+            f().then((value) => [value, thenCallCount]);
+        `)
+
+        expect(result).toEqual([42, 0])
+    })
+
     test('sequential awaits', async () => {
         const result = await compileAndRun(`
             async function f() {

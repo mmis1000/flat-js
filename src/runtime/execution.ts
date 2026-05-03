@@ -904,6 +904,17 @@ export const getExecution = (
 
         const PromiseCtor = Reflect.get(gt, 'Promise') ?? Promise
         const promiseResolve = (value: unknown) => Reflect.get(PromiseCtor, 'resolve').call(PromiseCtor, value) as PromiseLike<unknown>
+        const performPromiseThen = (
+            promise: PromiseLike<unknown>,
+            onFulfilled: (value: unknown) => unknown,
+            onRejected: (error: unknown) => unknown
+        ) => {
+            const then = Reflect.get(PromiseCtor.prototype, 'then')
+            if (typeof then === 'function') {
+                return Reflect.apply(then, promise, [onFulfilled, onRejected])
+            }
+            return promise.then(onFulfilled, onRejected)
+        }
         let requestRunning = false
         const queuedRequests: AsyncGeneratorQueuedRequest[] = []
         const continueWith = (
@@ -920,7 +931,8 @@ export const getExecution = (
                     }
                 }
 
-                promise.then(
+                performPromiseThen(
+                    promise,
                     (value) => {
                         try {
                             settle(onFulfilled(value))
@@ -1107,6 +1119,17 @@ export const getExecution = (
         const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
         const PromiseCtor = Reflect.get(gt, 'Promise') ?? Promise
         const promiseResolve = (value: unknown) => Reflect.get(PromiseCtor, 'resolve').call(PromiseCtor, value) as PromiseLike<unknown>
+        const performPromiseThen = (
+            promise: PromiseLike<unknown>,
+            onFulfilled: (value: unknown) => unknown,
+            onRejected: (error: unknown) => unknown
+        ) => {
+            const then = Reflect.get(PromiseCtor.prototype, 'then')
+            if (typeof then === 'function') {
+                return Reflect.apply(then, promise, [onFulfilled, onRejected])
+            }
+            return promise.then(onFulfilled, onRejected)
+        }
 
         return new PromiseCtor((resolve: (value: unknown) => void, reject: (reason?: unknown) => void) => {
             const continueExecution = (value: unknown, isFirst: boolean) => {
@@ -1120,7 +1143,8 @@ export const getExecution = (
                     if (res[Fields.done]) {
                         resolve(res[Fields.value])
                     } else if (res[Fields.await]) {
-                        promiseResolve(res[Fields.value]).then(
+                        performPromiseThen(
+                            promiseResolve(res[Fields.value]),
                             (val: unknown) => continueExecution(val, false),
                             (err: unknown) => continueWithThrow(err)
                         )
@@ -1137,7 +1161,8 @@ export const getExecution = (
                     if (res[Fields.done]) {
                         resolve(res[Fields.value])
                     } else if (res[Fields.await]) {
-                        promiseResolve(res[Fields.value]).then(
+                        performPromiseThen(
+                            promiseResolve(res[Fields.value]),
                             (val: unknown) => continueExecution(val, false),
                             (err: unknown) => continueWithThrow(err)
                         )

@@ -1262,3 +1262,10 @@ Reduce the `language` category failures in targeted batches:
     - async await: `await-monkey-patched-promise.js` observes a monkey-patched native promise `then`
   - validation:
     - fresh full `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js`, resumed once from state after the one-hour shell timeout
+- 2026-05-03: Cleared the await monkey-patched native Promise tail.
+  - async functions and async generators now resume awaited native promises through the realm `Promise.prototype.then`, bypassing patched own `then` properties while preserving the existing realm `Promise.resolve` assimilation path
+  - fresh `language/expressions/await/**` scan no longer records the monkey-patched Promise semantic failure; only the known TypeScript parser-shape `await` identifier file remains
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/async.test.ts src/__tests__/generator.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/await`
