@@ -1248,6 +1248,12 @@ test('eval declaration instantiation uses eval lexical and variable environments
         eval('let __flatEvalLexical = 1')
         var lexicalHidden = typeof __flatEvalLexical === 'undefined'
 
+        let __flatEvalOutside = 23
+        eval('let __flatEvalOutside; let __flatEvalHidden = 1')
+        var directEvalLexicalHidden = typeof __flatEvalHidden === 'undefined'
+        ;(0, eval)('let __flatEvalOutside; let __flatIndirectEvalHidden = 1')
+        var indirectEvalLexicalHidden = typeof __flatIndirectEvalHidden === 'undefined'
+
         eval('initialExisting = __flatEvalExisting; var __flatEvalExisting = 45')
         var existingDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__flatEvalExisting')
 
@@ -1272,11 +1278,13 @@ test('eval declaration instantiation uses eval lexical and variable environments
             newDescriptor.configurable,
             localInitial,
             localDeleted(),
-            strictFunctionType
+            strictFunctionType,
+            directEvalLexicalHidden,
+            indirectEvalLexicalHidden
         ]
         delete globalThis.__flatEvalNew
         out
-    `, global)).toEqual([true, 23, 45, false, 11, true, undefined, true, 'undefined'])
+    `, global)).toEqual([true, 23, 45, false, 11, true, undefined, true, 'undefined', true, true])
 })
 
 test('global script declarations use global environment record semantics', () => {

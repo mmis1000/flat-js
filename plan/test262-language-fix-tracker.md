@@ -1207,3 +1207,12 @@ Reduce the `language` category failures in targeted batches:
   - validation:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/class.test.ts`
+- 2026-05-03: Cleared eval lexical-environment distinctness tails.
+  - runtime eval source files no longer run GlobalDeclarationInstantiation validation; only real script source files do
+  - direct and indirect eval lexical declarations now bind in the temporary eval lexical environment, so `let` / `const` / class names can shadow outer lexical/global names and disappear after eval returns
+  - focused scans:
+    - `language/eval-code/indirect/**`: `0` intended failures; only `2` import/export out-of-scope behavior files remain
+    - `language/eval-code/direct/**`: runtime failures cleared; remaining intended files are TypeScript parser-delegation syntax cases for `arguments`, `new.target`, and `super` inside eval strings
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`

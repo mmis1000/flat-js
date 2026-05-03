@@ -382,7 +382,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 }
 
                 if (
-                    isSourceFileInPlace(functionType)
+                    functionType === FunctionTypes.SourceFileInPlace
                     && isGlobalVariableEnvironment(activationScope)
                     && activationScope !== globalThis
                 ) {
