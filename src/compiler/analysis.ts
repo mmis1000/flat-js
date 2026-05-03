@@ -290,6 +290,13 @@ export function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, func
                 scopes.set(current, new Map())
         }
 
+        if (
+            (ts.isClassDeclaration(current) || ts.isClassExpression(current))
+            && current.name != null
+        ) {
+            scopes.set(current, new Map())
+        }
+
         current.forEachChild(visit)
     }
 
@@ -362,6 +369,16 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
             }
             scopes.get(block)!.set(current.name.text, {
                 type: VariableType.Let
+            })
+        }
+
+        if ((ts.isClassDeclaration(current) || ts.isClassExpression(current)) && current.name) {
+            const scope = scopes.get(current)
+            if (scope === undefined) {
+                throw new Error('unresolvable class name binding')
+            }
+            scope.set(current.name.text, {
+                type: VariableType.Const
             })
         }
 

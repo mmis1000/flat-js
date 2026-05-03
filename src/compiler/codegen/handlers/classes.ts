@@ -2,7 +2,7 @@ import * as ts from 'typescript'
 
 import { FunctionTypes, OpCode, SpecialVariable, VariableType } from '../../shared'
 import { generateFunctionDefinitionWithStackName, getExpectedArgumentCount } from './functions'
-import { markInternals, op } from '../helpers'
+import { generateEnterScope, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
@@ -27,6 +27,10 @@ export function generateClassValue(
     )
     const superExpr = extendsClause?.types[0]?.expression
     const hasSuper = superExpr !== undefined
+    const classBindingName = node.name?.text
+    const classBindingAccess = classBindingName != null && node.name != null
+        ? ctx.tryResolveStaticAccess(node.name, classBindingName)
+        : null
 
     const ctorMember = node.members.find(
         (member: ts.ClassElement) => ts.isConstructorDeclaration(member)
@@ -41,6 +45,28 @@ export function generateClassValue(
             op(OpCode.Literal, 2, [1]),
             op(OpCode.EnterScope)
         )
+    }
+
+    if (classBindingName != null) {
+        res.push(...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName))
+
+        if (classBindingAccess != null) {
+            res.push(
+                ...markInternals([
+                    ...ctx.generateStaticAccessOps(classBindingAccess),
+                    op(OpCode.FreezeVariableStatic),
+                ])
+            )
+        } else {
+            res.push(
+                op(OpCode.GetRecord),
+                op(OpCode.Literal, 2, [classBindingName]),
+                op(OpCode.FreezeVariable)
+            )
+        }
+    }
+
+    if (hasSuper) {
         res.push(
             op(OpCode.GetRecord),
             op(OpCode.Literal, 2, [SpecialVariable.Super]),
@@ -79,6 +105,19 @@ export function generateClassValue(
 
     res.push(usesStackName ? op(OpCode.UndefinedLiteral) : op(OpCode.Literal, 2, [className]))
     res.push(op(OpCode.CreateClass))
+
+    if (classBindingName != null) {
+        if (classBindingAccess != null) {
+            res.push(
+                op(OpCode.Duplicate),
+                ...ctx.generateStaticAccessOps(classBindingAccess),
+                op(OpCode.SetInitializedStatic),
+                op(OpCode.Pop)
+            )
+        } else {
+            res.push(op(OpCode.SetInitialized))
+        }
+    }
 
     for (const member of node.members) {
         if (ts.isConstructorDeclaration(member)) continue
@@ -125,6 +164,10 @@ export function generateClassValue(
         }
     }
 
+    if (classBindingName != null) {
+        res.push(op(OpCode.LeaveScope))
+    }
+
     if (hasSuper) {
         res.push(op(OpCode.LeaveScope))
     }
@@ -144,13 +187,7 @@ export function generateClasses(node: ts.Node, flag: number, ctx: CodegenContext
             ...ctx.generateLeft(node.name, flag),
             ...res,
             op(OpCode.SetInitialized),
-            op(OpCode.Pop),
-            ...markInternals([
-                ...ctx.generateLeft(node.name, flag),
-                op(OpCode.FreezeVariable),
-                op(OpCode.Pop),
-                op(OpCode.Pop)
-            ])
+            op(OpCode.Pop)
         ]
     }
 

@@ -423,6 +423,76 @@ test('anonymous class expressions infer names from variable initializers', () =>
     expect(result).toEqual(['C', 'D', 'E'])
 })
 
+test('class name bindings are inner immutable bindings', () => {
+    const result = compileAndRun(`
+        var outer = 'outside'
+        var Expr = class outer {
+            method() {
+                return outer
+            }
+            update() {
+                outer = null
+            }
+        }
+
+        var exprBefore = outer
+        var exprMethod = new Expr().method() === Expr
+        var exprAssignError
+        try {
+            new Expr().update()
+        } catch (err) {
+            exprAssignError = err
+        }
+
+        var declaredBefore
+        var declaredMethod
+        var declaredAssignError
+        class Declared {
+            method() {
+                return Declared
+            }
+            update() {
+                Declared = null
+            }
+        }
+        var DeclaredRef = Declared
+        Declared = 'changed outside'
+        declaredBefore = Declared
+        declaredMethod = new DeclaredRef().method() === DeclaredRef
+        try {
+            new DeclaredRef().update()
+        } catch (err) {
+            declaredAssignError = err
+        }
+
+        var heritageProbe
+        var Heritage = class Heritage extends (
+            heritageProbe = function() { return Heritage },
+            Object
+        ) {}
+
+        var heritageError
+        try {
+            class Bad extends Bad {}
+        } catch (err) {
+            heritageError = err
+        }
+
+        [
+            exprBefore,
+            exprMethod,
+            exprAssignError instanceof TypeError,
+            declaredBefore,
+            declaredMethod,
+            declaredAssignError instanceof TypeError,
+            heritageProbe() === Heritage,
+            heritageError instanceof ReferenceError
+        ]
+    `)
+
+    expect(result).toEqual(['outside', true, true, 'changed outside', true, true, true, true])
+})
+
 test('tagged templates keep cooked/raw strings, freezing, and per-site identity', () => {
     const result = compileAndRun(`
         function tag(strings) {

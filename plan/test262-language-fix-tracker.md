@@ -399,10 +399,13 @@ Reduce the `language` category failures in targeted batches:
         - `language/statements/class/definition/**`: `9` focused failures -> `0`
         - `language/expressions/object/method-definition/**`: runtime method-shape failures cleared; remaining focused intended files are parser-delegation / harness tails
         - `language/statements/class/subclass/**`: `24` intended focused failures -> `10`; remaining actionable runtime tails are built-in `GeneratorFunction` / `TypedArray` subclassing, plus parser-delegation arrow-`super` files
+        - `language/statements/class/name-binding/**`: `4` focused failures -> `0`
+        - six expression/statement `scope-name-lex-*` class-name binding files now pass through direct Test262 harness validation
       - fixed class/method runtime areas include:
         - class prototype descriptor shape and class constructor prototype realm
         - method/accessor/object-method function object shape with no own `prototype`, `caller`, or `arguments`
         - anonymous class expression binding-name inference
+        - class expression/declaration inner name bindings, including heritage TDZ, immutable captured class self bindings, and mutable outer class declaration bindings
         - class constructors throwing when called without `new`
         - derived constructors rejecting primitive returns outside the constructor body's own `try`/`catch`
         - superclass constructibility checks before `prototype` lookup, including VM-bound generator functions and Proxy-wrapped VM generators
