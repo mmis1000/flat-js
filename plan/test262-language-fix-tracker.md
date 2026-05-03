@@ -352,13 +352,13 @@ Reduce the `language` category failures in targeted batches:
     - `M:\Playground\flat-js\lib\runtime\execution.js:960`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - latest completed broad `language` scan: 2026-05-03T05:12:59.202Z
-      - intended-scope failing files: `195`
+    - latest completed broad `language` scan: 2026-05-03T09:47:37.634Z
+      - intended-scope failing files: `175`
       - out-of-scope failing files: `6042`
-      - total failing files recorded: `6237`
+      - total failing files recorded: `6217`
       - intended buckets:
-        - broken / needs inspection: `49`
-        - broken semantics: `21`
+        - broken / needs inspection: `32`
+        - broken semantics: `18`
         - harness issue: `1`
         - not supported: `1`
         - not supported parser syntax: `123`
@@ -484,6 +484,11 @@ Reduce the `language` category failures in targeted batches:
       - out-of-scope failing files: `6043 -> 6042`
       - total failing files recorded: `6270 -> 6237`
       - regression check: no detailed runtime regressions appeared under `language/statements/class/name-binding/**`, `language/statements/class/subclass/**`, the targeted `scope-name-lex-*` class files, or the touched cleared control-flow roots
+    - 2026-05-03 small runtime-tail batch full `language` scan:
+      - intended-scope failing files: `195 -> 175`
+      - out-of-scope failing files: unchanged at `6042`
+      - total failing files recorded: `6237 -> 6217`
+      - regression check: no detailed failures appeared under the newly cleared focused roots (`language/expressions/array/**`, `language/expressions/instanceof/**`, `language/rest-parameters/**`, `language/statementList/**`, assignment named-evaluation files, or the RegExp realm file); `language/expressions/delete/**` is down to one TypeScript parser-delegation `super` file
 
 ## TypeScript Diagnostic Early-Error Cases
 
@@ -1115,3 +1120,19 @@ Reduce the `language` category failures in targeted batches:
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/statements/class/super`
     - fresh full `language/**` scan: `264` intended failures, `6045` out-of-scope files
   - boundary reached: supported `super` runtime semantics are clear and the broader regression scan shows the expected drop from the previous `408` intended failures; continue with the next class/object runtime family target
+- 2026-05-03: Cleared small runtime-tail roots and refreshed the full `language` scan.
+  - RegExp literals now use the active VM realm `RegExp`, clearing the realm identity file and the statement-list eval regexp-literal files
+  - rest parameter arrays now use the active VM realm `Array.prototype`
+  - delete of `super` property references now throws `ReferenceError` before property-key coercion
+  - ordinary function prototype objects now use the active VM realm `Object.prototype`, clearing the focused `instanceof` slice
+  - array literal fixed elements now define own data properties, clearing the focused array-expression slice
+  - fresh full `language/**` scan:
+    - intended-scope failing files: `195 -> 175`
+    - out-of-scope failing files: unchanged at `6042`
+    - total failing files recorded: `6237 -> 6217`
+  - validation:
+    - `npm run build:tsc`
+    - focused Jest slices in `src/__tests__/es6-runtime.test.ts` plus adjacent class/function self-binding checks where prototypes were touched
+    - fresh focused scans for `language/literals/regexp`, `language/statementList`, `language/rest-parameters`, `language/expressions/delete`, `language/expressions/instanceof`, and `language/expressions/array`
+    - full `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js`, resumed from state after the one-hour shell timeout
+  - boundary reached: no regressions appeared in the touched focused roots; continue with the next runtime cluster from the remaining broad-scan residuals
