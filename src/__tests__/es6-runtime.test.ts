@@ -1259,6 +1259,44 @@ test('array and object literals use the provided realm prototypes', () => {
     expect(result).toEqual([true, true, true])
 })
 
+test('array literal elements define own properties over inherited readonly indexes', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    const result = compileAndRun(`
+        let first
+        let second
+        Object.defineProperty(Array.prototype, '0', {
+            value: 100,
+            writable: false,
+            configurable: true,
+        })
+        Object.defineProperty(Array.prototype, '1', {
+            value: 200,
+            writable: false,
+            configurable: true,
+        })
+
+        try {
+            const one = [101]
+            const two = [101, 12]
+            first = [one.hasOwnProperty('0'), one[0]]
+            second = [two.hasOwnProperty('1'), two[1]]
+        } finally {
+            delete Array.prototype[0]
+            delete Array.prototype[1]
+        }
+
+        [first, second]
+    `, vmGlobal)
+
+    expect(result).toEqual([[true, 101], [true, 12]])
+})
+
 test('ordinary function prototype objects use the provided realm Object prototype', () => {
     const context = vm.createContext({ console, require })
     const vmGlobal = vm.runInContext(`

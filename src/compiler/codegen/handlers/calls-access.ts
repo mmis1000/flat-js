@@ -137,11 +137,11 @@ function appendArrayElements(
             res.push(op(OpCode.Literal, 2, ['length']))
             res.push(op(OpCode.Get))
             res.push(...ctx.generate(element, flag))
-            res.push(op(OpCode.SetKeepCtx))
+            res.push(op(OpCode.DefineKeepCtx))
         } else {
             res.push(op(OpCode.Literal, 2, [nextIndex++]))
             res.push(...ctx.generate(element, flag))
-            res.push(op(OpCode.SetKeepCtx))
+            res.push(op(OpCode.DefineKeepCtx))
         }
     }
 }
