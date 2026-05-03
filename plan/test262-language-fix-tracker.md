@@ -430,6 +430,7 @@ Reduce the `language` category failures in targeted batches:
     - object literal, property keys, named evaluation: `127` intended files plus `1` harness issue
       - object literal property semantics were implemented by `eff9eeb`
       - `language/expressions/array/**` now has `0` focused failures after array literal elements switched to own data-property definition semantics
+      - `language/expressions/tagged-template/**` and `language/expressions/template-literal/**` now have `0` focused failures after tagged invalid escapes and raw line terminator normalization were fixed
       - assignment-expression named evaluation now covers anonymous function, generator, arrow, and class RHS values assigned to unparenthesized identifier references
       - focused `language/expressions/assignment/**` scan is down to two parser-delegation `super` target files
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
@@ -1155,3 +1156,11 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts src/__tests__/function-expression-self-binding.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/call`
+- 2026-05-03: Cleared template literal raw/cooked tails.
+  - tagged template cooked parts now become `undefined` when TypeScript marks a template token with the invalid-escape flag
+  - raw template parts now normalize CRLF and CR line terminators to LF while preserving LS/PS
+  - focused scans now record `0` failures for `language/expressions/tagged-template/**` and `language/expressions/template-literal/**`
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for tagged templates and template literals

@@ -651,6 +651,20 @@ test('tagged templates keep cooked/raw strings, freezing, and per-site identity'
     expect(result).toEqual([true, true, true, true, true])
 })
 
+test('tagged templates preserve invalid escapes and normalize raw line terminators', () => {
+    expect(compileAndRun(
+        "(strings => [strings[0], strings.raw[0]])`\\01`"
+    )).toEqual([undefined, '\\01'])
+
+    expect(compileAndRun(
+        "(strings => [strings[0], strings.raw[0]])`\\\r\n\\\n\\\r`"
+    )).toEqual(['', '\\\n\\\n\\\n'])
+
+    expect(compileAndRun(
+        "(strings => [strings[0], strings.raw[0]])`\r\n\n\r`"
+    )).toEqual(['\n\n\n', '\n\n\n'])
+})
+
 test('tagged template method calls preserve this', () => {
     expect(compileAndRun(`
         const obj = {

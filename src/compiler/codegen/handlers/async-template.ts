@@ -14,22 +14,39 @@ function pushTemplatePart(ops: Segment, value: string | undefined) {
     }
 }
 
+type TemplatePart = ts.NoSubstitutionTemplateLiteral | ts.TemplateHead | ts.TemplateMiddle | ts.TemplateTail
+const TEMPLATE_CONTAINS_INVALID_ESCAPE = 2048
+
+function getTemplateFlags(part: TemplatePart) {
+    return (part as TemplatePart & { templateFlags?: ts.TokenFlags }).templateFlags ?? ts.TokenFlags.None
+}
+
+function getCookedTemplateText(part: TemplatePart) {
+    return (getTemplateFlags(part) & TEMPLATE_CONTAINS_INVALID_ESCAPE) !== 0
+        ? undefined
+        : part.text
+}
+
+function getRawTemplateText(part: TemplatePart) {
+    return (part.rawText ?? part.text).replace(/\r\n?/g, '\n')
+}
+
 function getTemplateParts(template: ts.NoSubstitutionTemplateLiteral | ts.TemplateExpression) {
     if (ts.isNoSubstitutionTemplateLiteral(template)) {
         return {
-            cooked: [template.text as string | undefined],
-            raw: [template.rawText ?? template.text],
+            cooked: [getCookedTemplateText(template)],
+            raw: [getRawTemplateText(template)],
         }
     }
 
     return {
         cooked: [
-            template.head.text as string | undefined,
-            ...template.templateSpans.map((span) => span.literal.text as string | undefined),
+            getCookedTemplateText(template.head),
+            ...template.templateSpans.map((span) => getCookedTemplateText(span.literal)),
         ],
         raw: [
-            template.head.rawText ?? template.head.text,
-            ...template.templateSpans.map((span) => span.literal.rawText ?? span.literal.text),
+            getRawTemplateText(template.head),
+            ...template.templateSpans.map((span) => getRawTemplateText(span.literal)),
         ],
     }
 }
