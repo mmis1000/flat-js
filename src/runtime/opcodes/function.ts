@@ -171,6 +171,16 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 return thisValue
             }
 
+            const createRealmArray = (values: any[]) => {
+                const arr = [...values]
+                const vmArray = Reflect.get(ctx[OpcodeContextField.currentFrame][Fields.globalThis], 'Array')
+                const prototype = vmArray?.prototype
+                if (prototype && Object.getPrototypeOf(arr) !== prototype) {
+                    Object.setPrototypeOf(arr, prototype)
+                }
+                return arr
+            }
+
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                 const obj = ctx[OpcodeContextField.createArgumentObject](
                     ctx[OpcodeContextField.currentFrame][Fields.globalThis]
@@ -395,7 +405,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
                 bindFunctionSelfName(functionType, bindingScope, name, fn, ctx)
 
-                const restValues = hasRestParameter ? parameters.slice(restParameterIndex) : null
+                const restValues = hasRestParameter ? createRealmArray(parameters.slice(restParameterIndex)) : null
                 for (const [index, parameterName] of argumentNames.entries()) {
                     ctx[OpcodeContextField.initializeBindingValue](
                         bindingScope,

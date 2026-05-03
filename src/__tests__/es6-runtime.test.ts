@@ -16,6 +16,29 @@ test('rest parameters create an unmapped arguments object', () => {
     expect(result).toEqual([1, 10, 20, 2, 2])
 })
 
+test('rest parameters use the provided realm Array prototype', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    const result = compileAndRun(`
+        function collect(...items) {
+            return [
+                items.constructor === Array,
+                Array.isArray(items),
+                Object.getPrototypeOf(items) === Array.prototype,
+            ]
+        }
+
+        collect(1)
+    `, vmGlobal)
+
+    expect(result).toEqual([true, true, true])
+})
+
 test('arrow rest parameters work without a synthetic prelude', () => {
     expect(compileAndRun(`
         const collect = (...args) => args.join(',')
