@@ -388,6 +388,7 @@ Reduce the `language` category failures in targeted batches:
       - function-expression root now has `0` intended failures; only out-of-scope class-static/class-private files remain there
       - function-statement, arguments-object, and function-code roots now have `0` intended failures
       - rest-parameters root now has `0` focused failures after rest arrays were moved onto the active VM realm `Array.prototype`
+      - `language/expressions/instanceof/**` now has `0` focused failures after ordinary function prototype objects were moved onto the active VM realm `Object.prototype`
       - remaining work is direct-eval parser-delegation cases, one indirect-eval cross-realm harness tail, and async/generator function-family runtime tails
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`

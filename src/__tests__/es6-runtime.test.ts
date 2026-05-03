@@ -1259,6 +1259,30 @@ test('array and object literals use the provided realm prototypes', () => {
     expect(result).toEqual([true, true, true])
 })
 
+test('ordinary function prototype objects use the provided realm Object prototype', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    const result = compileAndRun(`
+        function MyFunct() {}
+        const instance = new MyFunct();
+
+        [
+            instance instanceof MyFunct,
+            instance instanceof Object,
+            instance instanceof Function,
+            Object.getPrototypeOf(MyFunct.prototype) === Object.prototype,
+            MyFunct.prototype.constructor === MyFunct,
+        ]
+    `, vmGlobal)
+
+    expect(result).toEqual([true, true, false, true, true])
+})
+
 test('regexp literals use the provided realm constructor', () => {
     const context = vm.createContext({ console, require })
     const vmGlobal = vm.runInContext(`

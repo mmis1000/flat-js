@@ -1212,6 +1212,16 @@ export const getExecution = (
             if (functionPrototype && Object.getPrototypeOf(fn) !== functionPrototype) {
                 Object.setPrototypeOf(fn, functionPrototype)
             }
+            const objectPrototype = globalThis?.Object?.prototype
+            const ownPrototype = hasOwnPrototype(type) ? Reflect.get(fn, 'prototype') : undefined
+            if (
+                objectPrototype
+                && ownPrototype
+                && (typeof ownPrototype === 'object' || typeof ownPrototype === 'function')
+                && Object.getPrototypeOf(ownPrototype) !== objectPrototype
+            ) {
+                Object.setPrototypeOf(ownPrototype, objectPrototype)
+            }
         }
 
         functionDescriptors.set(fn, des)
