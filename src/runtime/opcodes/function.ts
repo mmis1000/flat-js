@@ -181,6 +181,33 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 return arr
             }
 
+            const ensureSloppyLegacyFunctionProperties = (fn: any) => {
+                if (
+                    strict
+                    || (
+                        functionType !== FunctionTypes.FunctionDeclaration
+                        && functionType !== FunctionTypes.FunctionExpression
+                    )
+                    || (typeof fn !== 'function' && (fn == null || typeof fn !== 'object'))
+                ) {
+                    return
+                }
+
+                for (const name of ['caller', 'arguments']) {
+                    if (!Object.prototype.hasOwnProperty.call(fn, name)) {
+                        try {
+                            Object.defineProperty(fn, name, {
+                                configurable: true,
+                                writable: true,
+                                value: undefined,
+                            })
+                        } catch {
+                            // Non-extensible functions should still be callable.
+                        }
+                    }
+                }
+            }
+
             const getArgumentObject = (scope: Record<any, any>, callee: any) => {
                 const obj = ctx[OpcodeContextField.createArgumentObject](
                     ctx[OpcodeContextField.currentFrame][Fields.globalThis]
@@ -361,6 +388,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                             ctx[OpcodeContextField.defineVariable](activationScope, SpecialVariable.SuperHomeObject, VariableType.Var, false)
                             ctx[OpcodeContextField.initializeBindingValue](activationScope, SpecialVariable.SuperHomeObject, homeObject)
                         }
+                        ensureSloppyLegacyFunctionProperties(fn)
                         argumentsObject = getArgumentObject(bindingScope, fn)
                         ctx[OpcodeContextField.writeScopeDebugProperty](activationScope, 'arguments', argumentsObject)
                         if (hasParameterExpressions) {

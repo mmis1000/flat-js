@@ -519,6 +519,25 @@ var result = (function () {
 })(0)
 print(result)
 `, [1], printProvider)
+testRuntime('sloppy arguments callee caller does not inherit poisoned function accessors', `
+var called = false
+function test1(flag) {
+    if (flag !== true) {
+        test2()
+    } else {
+        called = true
+    }
+}
+function test2() {
+    if (arguments.callee.caller === undefined) {
+        called = true
+    } else {
+        arguments.callee.caller(true)
+    }
+}
+test1()
+print(called)
+`, [true], printProvider)
 testRuntime('arguments object descriptors and mapped unmapping', `
 function fn (a) {
     print(Object.getPrototypeOf(arguments) === Object.prototype)

@@ -1226,3 +1226,12 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
     - `npx test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 "./node_modules/test262/test/language/line-terminators/comment-single-lf.js"`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/line-terminators`
+- 2026-05-03: Cleared the legacy sloppy `arguments.callee.caller` tail.
+  - ordinary sloppy VM functions now lazily shadow inherited poisoned `Function.prototype.caller` / `arguments` accessors with configurable own `undefined` values when they enter execution
+  - strict functions, bound functions, and forbidden-extension checks still inherit the poisoned accessors and keep no own restricted properties
+  - fresh `language/arguments-object/**` scan now records `0` intended failures; remaining `60` files are out-of-scope private class method syntax cases
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts src/__tests__/es6-runtime.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/arguments-object`
+    - focused forbidden-extension scans for `language/expressions/function/forbidden-ext/**` and `language/statements/function/forbidden-ext/**`
