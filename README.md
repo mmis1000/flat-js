@@ -33,9 +33,9 @@ Public API (`src/index.ts`): `compile`, `run`, `getExecution`, and `compileAndRu
 
 - The core compiler/runtime supports the main debugger workflows and a broad ES feature set, but language coverage is still actively being improved.
 - Focused Test262 work is tracked under `plan/test262-language-fix-tracker.md`, with generated summary files in `plan/test262-*-summary.md`; static scope name-elision follow-up is tracked under `plan/static-scope-name-elision-tracker.md`; larger current-scan JSON artifacts may also be produced locally during investigation.
-- Test262 status as of 2026-05-02:
+- Test262 status as of 2026-05-03:
   - The dedicated Test262 harness slice is mostly passing: `228/232` harness tests pass. The remaining failures are same-realm host tests that need `$262` realm support (`assert-throws-same-realm.js` and `asyncHelpers-throwsAsync-same-realm.js`, each in default and strict scenarios).
-  - `language` is not green yet. The latest full language scan records `7916` failing files: `1504` intended-scope and `6412` out-of-scope. Recent focused slices cleared intended failures for logical assignment, compound assignment, `switch`, `if`, `try`, `while`, `do-while`, duplicate function parameters, generator/async `yield` / `await`, and supported parse-time early errors; the broad intended early-error bucket is now gone.
+  - `language` is not green yet. The latest full language scan records `6237` failing files: `195` intended-scope and `6042` out-of-scope. Recent focused slices cleared intended failures for logical assignment, compound assignment, control-flow completion / iterator-close roots, function and generator families, supported class name-binding / subclass runtime semantics, and supported parse-time early errors; the broad intended early-error bucket remains gone.
 - The web app includes the Monaco debugger plus the robot arena simulation, deterministic browser `Math.random`, and VM-compiled host polyfills for callback-heavy array methods.
 - VM state serialization is not implemented yet. The current design and implementation phases are captured in `plan/vm-state-serialization-plan.md`.
 

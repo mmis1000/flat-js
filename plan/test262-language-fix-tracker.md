@@ -352,13 +352,13 @@ Reduce the `language` category failures in targeted batches:
     - `M:\Playground\flat-js\lib\runtime\execution.js:960`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - latest completed broad `language` scan: 2026-05-03T03:03:13.028Z
-      - intended-scope failing files: `227`
-      - out-of-scope failing files: `6043`
-      - total failing files recorded: `6270`
+    - latest completed broad `language` scan: 2026-05-03T05:12:59.202Z
+      - intended-scope failing files: `195`
+      - out-of-scope failing files: `6042`
+      - total failing files recorded: `6237`
       - intended buckets:
-        - broken / needs inspection: `72`
-        - broken semantics: `30`
+        - broken / needs inspection: `49`
+        - broken semantics: `21`
         - harness issue: `1`
         - not supported: `1`
         - not supported parser syntax: `123`
@@ -436,7 +436,7 @@ Reduce the `language` category failures in targeted batches:
     - first runtime target: eval / function / arguments environments - completed for ordinary function-code / arguments-object roots; direct-eval parser-delegation tails remain
       - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails
       - validation: focused scans for `language/eval-code/direct`, `language/eval-code/indirect`, `language/function-code`, `language/arguments-object`, and function / async-function expression + statement roots
-    - second runtime target: supported class / `super` / constructor semantics - in progress; core supported method/constructor/super roots are mostly reduced to parser-delegation and built-in subclass tails
+    - second runtime target: supported class / `super` / constructor semantics - completed for supported runtime semantics; remaining supported-class tails are parser-delegation syntax cases or unsupported class element features
       - validate class expression and statement roots together with `language/expressions/super/**`
     - third runtime target: generator and async-generator execution flow
       - validate expression and statement generator roots, then object/class method generator overlaps
@@ -470,6 +470,11 @@ Reduce the `language` category failures in targeted batches:
       - out-of-scope failing files: `6045 -> 6043`
       - total failing files recorded: `6309 -> 6270`
       - regression check: no detailed runtime regressions appeared under the touched supported class definition, object method-shape, super, or constructor-return roots
+    - 2026-05-03 class name-binding / heritage-scope / GeneratorFunction subclass batch full `language` scan:
+      - intended-scope failing files: `227 -> 195`
+      - out-of-scope failing files: `6043 -> 6042`
+      - total failing files recorded: `6270 -> 6237`
+      - regression check: no detailed runtime regressions appeared under `language/statements/class/name-binding/**`, `language/statements/class/subclass/**`, the targeted `scope-name-lex-*` class files, or the touched cleared control-flow roots
 
 ## TypeScript Diagnostic Early-Error Cases
 
