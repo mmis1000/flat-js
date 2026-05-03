@@ -1,4 +1,4 @@
-import { InvokeType, OpCode, ResolveType, SpecialVariable, TryCatchFinallyState } from "../../compiler"
+import { FunctionTypes, InvokeType, OpCode, ResolveType, SpecialVariable, TryCatchFinallyState } from "../../compiler"
 import {
     Fields,
     FrameType,
@@ -6,6 +6,7 @@ import {
     GeneratorState,
     TryFrame,
     environments,
+    functionDescriptors,
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
 
@@ -24,6 +25,9 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
             const returnAddr = functionFrame[Fields.return]
             const genState = functionFrame[Fields.generator] as GeneratorState | undefined
             const isGenBase = !!(genState && genState[Fields.baseFrame] === functionFrame)
+            const descriptor = functionDescriptors.get(functionFrame[Fields.function])
+            const isDerivedConstructor = descriptor?.[Fields.type] === FunctionTypes.DerivedConstructor
+            const resultIsObject = result !== null && (typeof result === 'function' || typeof result === 'object')
 
             if (topWasFunction && !functionFrame[Fields.generator] && topResidue > 0) {
                 throw new Error('bad return')
@@ -54,10 +58,13 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                     return BREAK_COMMAND
                 }
 
-                if (result !== null && (typeof result === 'function' || typeof result === 'object')) {
+                if (resultIsObject) {
                     ctx[OpcodeContextField.returnsExternal] = true
                     ctx[OpcodeContextField.returnValue] = result
                     return BREAK_COMMAND
+                }
+                if (isDerivedConstructor && result !== undefined) {
+                    throw new TypeError('Derived constructors may only return object or undefined')
                 }
 
                 ctx[OpcodeContextField.returnsExternal] = true
@@ -70,9 +77,12 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
             const prevFrame = ctx[OpcodeContextField.peak](ctx[OpcodeContextField.stack])
             if (functionFrame[Fields.invokeType] === InvokeType.Apply) {
                 prevFrame[Fields.valueStack].push(result)
-            } else if (result !== null && (typeof result === 'function' || typeof result === 'object')) {
+            } else if (resultIsObject) {
                 prevFrame[Fields.valueStack].push(result)
             } else {
+                if (isDerivedConstructor && result !== undefined) {
+                    throw new TypeError('Derived constructors may only return object or undefined')
+                }
                 prevFrame[Fields.valueStack].push(ctx[OpcodeContextField.getValue](functionFrame, SpecialVariable.This))
             }
 

@@ -352,16 +352,16 @@ Reduce the `language` category failures in targeted batches:
     - `M:\Playground\flat-js\lib\runtime\execution.js:960`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - latest completed broad `language` scan: 2026-05-02T12:41:06.271Z
-      - intended-scope failing files: `1504`
-      - out-of-scope failing files: `6412`
-      - total failing files recorded: `7916`
+    - latest completed broad `language` scan: 2026-05-03T03:03:13.028Z
+      - intended-scope failing files: `227`
+      - out-of-scope failing files: `6043`
+      - total failing files recorded: `6270`
       - intended buckets:
-        - broken / needs inspection: `1081`
-        - broken semantics: `259`
+        - broken / needs inspection: `72`
+        - broken semantics: `30`
         - harness issue: `1`
-        - not supported: `34`
-        - not supported parser syntax: `129`
+        - not supported: `1`
+        - not supported parser syntax: `123`
       - no intended `broken early error semantics` bucket remains
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
     - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
@@ -372,7 +372,7 @@ Reduce the `language` category failures in targeted batches:
       - host/module parse-negative files: `422`
       - runtime/declaration-instantiation `SyntaxError` misses are counted under the runtime groups below
   - Actionable intended-support groups:
-    - counts below are path-family counts from the 2026-05-02T12:41:06Z broad summary; overlapping features such as method generators and `super` should be reconciled inside the chosen batch
+    - original path-family estimates below came from the 2026-05-02T12:41:06Z broad summary; focused notes and the 2026-05-03 broad scan record the completed reductions
     - functions, parameters, eval, arguments env: at least `372` core files
       - direct eval: `165`
         - current focused direct-eval scan after ordinary function-code, eval-arguments, and eval declaration-instantiation cleanup: `42` intended parser-delegation failures, `2` out-of-scope
@@ -393,6 +393,20 @@ Reduce the `language` category failures in targeted batches:
       - class expressions: `165`
       - fix class name binding, constructors, methods, `super`, `new.target`, and async/generator methods
       - exclude class fields, private names, and static blocks from this cluster
+      - 2026-05-03 progress:
+        - `language/expressions/super/**`: `61` focused failures -> `9` parser-delegation syntax tails after real super references and home-object metadata
+        - `language/statements/class/super/**`: `0` focused failures
+        - `language/statements/class/definition/**`: `9` focused failures -> `0`
+        - `language/expressions/object/method-definition/**`: runtime method-shape failures cleared; remaining focused intended files are parser-delegation / harness tails
+        - `language/statements/class/subclass/**`: `24` intended focused failures -> `10`; remaining actionable runtime tails are built-in `GeneratorFunction` / `TypedArray` subclassing, plus parser-delegation arrow-`super` files
+      - fixed class/method runtime areas include:
+        - class prototype descriptor shape and class constructor prototype realm
+        - method/accessor/object-method function object shape with no own `prototype`, `caller`, or `arguments`
+        - anonymous class expression binding-name inference
+        - class constructors throwing when called without `new`
+        - derived constructors rejecting primitive returns outside the constructor body's own `try`/`catch`
+        - superclass constructibility checks before `prototype` lookup, including VM-bound generator functions and Proxy-wrapped VM generators
+        - generator and async-generator function wrappers are now natively non-constructible while preserving their own generator `prototype` property
     - generators and async generators: `280` generator-root files
       - async-generator expressions/statements: `156` / `80`
       - generator expressions/statements: `28` / `16`
@@ -411,10 +425,10 @@ Reduce the `language` category failures in targeted batches:
     - RegExp runtime behavior: `5` intended files
       - document separately from parser misses and inspect runtime-only regexp failures
   - Active runtime-cluster plan:
-    - first runtime target: eval / function / arguments environments - in progress
+    - first runtime target: eval / function / arguments environments - completed for ordinary function-code / arguments-object roots; direct-eval parser-delegation tails remain
       - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails
       - validation: focused scans for `language/eval-code/direct`, `language/eval-code/indirect`, `language/function-code`, `language/arguments-object`, and function / async-function expression + statement roots
-    - second runtime target: supported class / `super` / constructor semantics
+    - second runtime target: supported class / `super` / constructor semantics - in progress; core supported method/constructor/super roots are mostly reduced to parser-delegation and built-in subclass tails
       - validate class expression and statement roots together with `language/expressions/super/**`
     - third runtime target: generator and async-generator execution flow
       - validate expression and statement generator roots, then object/class method generator overlaps
@@ -441,6 +455,13 @@ Reduce the `language` category failures in targeted batches:
       - bound to module syntax handling and parse goal separation
     - `import.meta` host metadata: `5`
       - requires host-provided module metadata
+
+  - Boundary validation:
+    - 2026-05-03 class/method constructor batch full `language` scan:
+      - intended-scope failing files: `264 -> 227`
+      - out-of-scope failing files: `6045 -> 6043`
+      - total failing files recorded: `6309 -> 6270`
+      - regression check: no detailed runtime regressions appeared under the touched supported class definition, object method-shape, super, or constructor-return roots
 
 ## TypeScript Diagnostic Early-Error Cases
 

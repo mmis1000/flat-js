@@ -320,6 +320,109 @@ test('extends null and sloppy object super assignment follow super reference rul
     expect(result).toEqual([true, true, false])
 })
 
+test('class and method function objects expose ECMAScript shape', () => {
+    const result = compileAndRun(`
+        class C {
+            method() {}
+            get value() {}
+            set value(v) {}
+        }
+        const instance = new C()
+        const accessor = Object.getOwnPropertyDescriptor(C.prototype, 'value')
+        const classPrototype = Object.getOwnPropertyDescriptor(C, 'prototype')
+        const objectMethod = { method() {} }.method;
+
+        [
+            classPrototype.writable,
+            Object.prototype.hasOwnProperty.call(instance.method, 'prototype'),
+            Object.prototype.hasOwnProperty.call(instance.method, 'caller'),
+            Object.prototype.hasOwnProperty.call(instance.method, 'arguments'),
+            Object.prototype.hasOwnProperty.call(accessor.get, 'prototype'),
+            Object.prototype.hasOwnProperty.call(accessor.set, 'prototype'),
+            Object.prototype.hasOwnProperty.call(objectMethod, 'prototype'),
+            Object.prototype.hasOwnProperty.call(objectMethod, 'caller')
+        ]
+    `)
+
+    expect(result).toEqual([false, false, false, false, false, false, false, false])
+})
+
+test('class constructors require new and derived constructors reject primitive returns', () => {
+    const result = compileAndRun(`
+        let callError
+        let returnError
+        let catchReturnError
+        let boundGeneratorError
+        let boundGeneratorPrototypeReached = false
+        class Base {}
+        class Derived extends Base {
+            constructor() {
+                super()
+                return 0
+            }
+        }
+        class CatchDerived extends Base {
+            constructor() {
+                super()
+                try {
+                    return 0
+                } catch (err) {
+                    return {}
+                }
+            }
+        }
+        const BoundGenerator = (function* () {}).bind()
+        Object.defineProperty(BoundGenerator, 'prototype', {
+            get() {
+                boundGeneratorPrototypeReached = true
+                return {}
+            }
+        })
+
+        try {
+            Base()
+        } catch (err) {
+            callError = err
+        }
+        try {
+            new Derived()
+        } catch (err) {
+            returnError = err
+        }
+        try {
+            new CatchDerived()
+        } catch (err) {
+            catchReturnError = err
+        }
+        try {
+            class Bad extends BoundGenerator {}
+        } catch (err) {
+            boundGeneratorError = err
+        }
+
+        [
+            callError instanceof TypeError,
+            returnError instanceof TypeError,
+            catchReturnError instanceof TypeError,
+            boundGeneratorError instanceof TypeError,
+            boundGeneratorPrototypeReached
+        ]
+    `)
+
+    expect(result).toEqual([true, true, true, true, false])
+})
+
+test('anonymous class expressions infer names from variable initializers', () => {
+    const result = compileAndRun(`
+        var C = class {};
+        let D = class {};
+        const E = class {};
+        [C.name, D.name, E.name]
+    `)
+
+    expect(result).toEqual(['C', 'D', 'E'])
+})
+
 test('tagged templates keep cooked/raw strings, freezing, and per-site identity', () => {
     const result = compileAndRun(`
         function tag(strings) {

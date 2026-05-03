@@ -507,6 +507,13 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 const fn = ctx[OpcodeContextField.popCurrentFrameStack]()
                 const self = ctx[OpcodeContextField.popCurrentFrameStack]()
 
+                if (
+                    functionType === FunctionTypes.Constructor
+                    || functionType === FunctionTypes.DerivedConstructor
+                ) {
+                    throw new TypeError('Class constructor cannot be invoked without new')
+                }
+
                 let activationScope: Scope
                 let bindingScope: Scope
 

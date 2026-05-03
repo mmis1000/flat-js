@@ -3,12 +3,13 @@ import * as ts from 'typescript'
 import { findAncient } from '../../analysis'
 import { OpCode, SpecialVariable, StatementFlag } from '../../shared'
 import { generateBindingInitialization } from '../binding-patterns'
+import { generateClassValue } from './classes'
 import { generateFunctionDefinition } from './functions'
 import { generateEnterScope, generateIteratorClose, generateLeaveScope, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
-function generateNamedInitializer(initializer: ts.Expression, name: string, ctx: CodegenContext): Segment | undefined {
+function generateNamedInitializer(initializer: ts.Expression, name: string, flag: number, ctx: CodegenContext): Segment | undefined {
     const rawInitializer = ctx.extractQuote(initializer)
 
     if (ts.isArrowFunction(rawInitializer)) {
@@ -17,6 +18,10 @@ function generateNamedInitializer(initializer: ts.Expression, name: string, ctx:
 
     if (ts.isFunctionExpression(rawInitializer) && rawInitializer.name == null) {
         return generateFunctionDefinition(rawInitializer, name)
+    }
+
+    if (ts.isClassExpression(rawInitializer) && rawInitializer.name == null) {
+        return generateClassValue(rawInitializer, flag, ctx, name)
     }
 }
 
@@ -117,6 +122,7 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
                 const initializer = generateNamedInitializer(
                     declaration.initializer,
                     declaration.name.text,
+                    flag,
                     ctx
                 ) ?? ctx.generate(declaration.initializer, flag)
 

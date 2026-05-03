@@ -1,6 +1,40 @@
-import { OpCode } from "../../compiler"
-import { Fields, formatFunctionName, functionDescriptors } from "../shared"
+import { FunctionTypes, OpCode } from "../../compiler"
+import { bindInfo, Fields, formatFunctionName, functionDescriptors } from "../shared"
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
+
+const isVmConstructible = (fn: any) => {
+    const bound = bindInfo.get(fn)
+    if (bound) {
+        return isVmConstructible(bound[Fields.function])
+    }
+
+    const descriptor = functionDescriptors.get(fn)
+    if (!descriptor) {
+        if (typeof fn !== 'function') {
+            return false
+        }
+        try {
+            new (new Proxy(fn, {
+                construct() {
+                    return {}
+                }
+            }))()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    switch (descriptor[Fields.type]) {
+        case FunctionTypes.FunctionDeclaration:
+        case FunctionTypes.FunctionExpression:
+        case FunctionTypes.Constructor:
+        case FunctionTypes.DerivedConstructor:
+            return true
+        default:
+            return false
+    }
+}
 
 export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): void => {
     switch (command) {
@@ -9,6 +43,7 @@ export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const superClass = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
             const ctorFn = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
             const hasHeritage = superClass !== undefined
+            const vmGlobal = ctx[OpcodeContextField.currentFrame][Fields.globalThis]
             const className = formatFunctionName(
                 name === undefined
                     ? ctx[OpcodeContextField.peak]<PropertyKey>(ctx[OpcodeContextField.currentFrameStack])
@@ -19,28 +54,60 @@ export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             if (ctorFn === undefined) {
                 if (hasHeritage) {
                     classFn = function (this: any, ...args: any[]) {
+                        if (!new.target) {
+                            throw new TypeError('Class constructor cannot be invoked without new')
+                        }
                         return Reflect.construct(superClass, args, new.target)
                     }
                 } else {
-                    classFn = function () {}
+                    classFn = function () {
+                        if (!new.target) {
+                            throw new TypeError('Class constructor cannot be invoked without new')
+                        }
+                    }
                 }
                 Object.defineProperty(classFn, 'name', { value: className, configurable: true })
             } else {
                 classFn = ctorFn
             }
 
+            let prototypeParent = vmGlobal?.Object?.prototype ?? Object.prototype
+            let constructorParent = vmGlobal?.Function?.prototype ?? Function.prototype
             if (hasHeritage) {
-                classFn.prototype = Object.create(superClass === null ? null : superClass.prototype)
-                Object.defineProperty(classFn.prototype, 'constructor', {
-                    value: classFn,
-                    writable: true,
-                    configurable: true,
-                    enumerable: false,
-                })
-                if (superClass !== null) {
-                    Object.setPrototypeOf(classFn, superClass)
+                if (superClass === null) {
+                    prototypeParent = null
+                } else {
+                    if (!isVmConstructible(superClass)) {
+                        throw new TypeError('Class extends value is not a constructor or null')
+                    }
+                    prototypeParent = superClass.prototype
+                    if (
+                        prototypeParent !== null
+                        && (typeof prototypeParent !== 'object' && typeof prototypeParent !== 'function')
+                    ) {
+                        throw new TypeError('Class extends value has invalid prototype property')
+                    }
+                    constructorParent = superClass
                 }
             }
+
+            if (Object.getPrototypeOf(classFn) !== constructorParent) {
+                Object.setPrototypeOf(classFn, constructorParent)
+            }
+
+            const classPrototype = Object.create(prototypeParent)
+            Object.defineProperty(classPrototype, 'constructor', {
+                value: classFn,
+                writable: true,
+                configurable: true,
+                enumerable: false,
+            })
+            Object.defineProperty(classFn, 'prototype', {
+                value: classPrototype,
+                writable: false,
+                configurable: false,
+                enumerable: false,
+            })
 
             const descriptor = functionDescriptors.get(classFn)
             if (descriptor) {

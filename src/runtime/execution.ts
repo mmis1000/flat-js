@@ -2,6 +2,7 @@ import { FunctionTypes, InvokeType, OpCode, ResolveType, SpecialVariable, TryCat
 import { STATIC_SLOT_NAMELESS } from "../compiler/shared"
 import {
     bindInfo,
+    BIND,
     environments,
     Execution,
     Fields,
@@ -165,6 +166,34 @@ const getGeneratorInstancePrototype = (
 
     return getGeneratorFunctionIntrinsics(globalThis, asyncGenerator).prototype
 }
+
+const hasOwnPrototype = (functionType: FunctionTypes) => {
+    switch (functionType) {
+        case FunctionTypes.FunctionDeclaration:
+        case FunctionTypes.FunctionExpression:
+        case FunctionTypes.Constructor:
+        case FunctionTypes.DerivedConstructor:
+        case FunctionTypes.GeneratorDeclaration:
+        case FunctionTypes.GeneratorExpression:
+        case FunctionTypes.GeneratorMethod:
+        case FunctionTypes.AsyncGeneratorDeclaration:
+        case FunctionTypes.AsyncGeneratorExpression:
+        case FunctionTypes.AsyncGeneratorMethod:
+            return true
+        default:
+            return false
+    }
+}
+
+const hasLegacyRestrictedOwnProperties = (functionType: FunctionTypes) =>
+    functionType === FunctionTypes.FunctionDeclaration
+    || functionType === FunctionTypes.FunctionExpression
+
+const usesOrdinaryFunctionWrapper = (functionType: FunctionTypes) =>
+    functionType === FunctionTypes.FunctionDeclaration
+    || functionType === FunctionTypes.FunctionExpression
+    || functionType === FunctionTypes.Constructor
+    || functionType === FunctionTypes.DerivedConstructor
 
 export const getExecution = (
     program: number[],
@@ -1074,7 +1103,8 @@ export const getExecution = (
             [Fields.globalThis]: globalThis
         }
 
-        const fn = function (this: any, ...args: any[]) {
+        let fn: any
+        const invoke = function (this: any, ...args: any[]) {
             const invokeData: InvokeParam = new.target
                 ? {
                     [Fields.type]: InvokeType.Construct,
@@ -1115,19 +1145,28 @@ export const getExecution = (
                 [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects
             )
         }
+        fn = usesOrdinaryFunctionWrapper(type)
+            ? invoke
+            : {
+                [functionName](this: any, ...args: any[]) {
+                    return Reflect.apply(invoke, this, args)
+                }
+            }[functionName]
 
         Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
-        if (!isAsyncType(type) && !isGeneratorType(type) && !isAsyncGeneratorType(type)) {
+        if (hasLegacyRestrictedOwnProperties(type)) {
             Object.defineProperty(fn, 'caller', { value: undefined, configurable: true })
         }
         if (isGeneratorType(type) || isAsyncGeneratorType(type)) {
             const intrinsics = getGeneratorFunctionIntrinsics(globalThis, isAsyncGeneratorType(type))
-            Object.defineProperty(fn, 'prototype', {
-                configurable: false,
-                enumerable: false,
-                writable: true,
-                value: Object.create(intrinsics.prototype),
-            })
+            if (hasOwnPrototype(type)) {
+                Object.defineProperty(fn, 'prototype', {
+                    configurable: false,
+                    enumerable: false,
+                    writable: true,
+                    value: Object.create(intrinsics.prototype),
+                })
+            }
             Object.setPrototypeOf(fn, intrinsics.functionPrototype)
         } else {
             const functionPrototype = globalThis?.Function?.prototype
@@ -1146,9 +1185,10 @@ export const getExecution = (
             return undefined
         }
 
-        const bindFn = function (...additionalArgs: any[]) {
+        const target = function (...additionalArgs: any[]) {
             return Reflect.apply(fn, self, [...args, ...additionalArgs])
         }
+        const bindFn = Reflect.apply(BIND, target, [undefined])
 
         bindInfo.set(bindFn, {
             [Fields.function]: fn,
@@ -1407,6 +1447,14 @@ export const getExecution = (
 
                 if (returnAddr < 0) {
                     // leave the whole function
+                    const descriptor = functionDescriptors.get(frame[Fields.function])
+                    if (
+                        descriptor?.[Fields.type] === FunctionTypes.DerivedConstructor
+                        && value !== undefined
+                        && (value === null || (typeof value !== 'object' && typeof value !== 'function'))
+                    ) {
+                        throw new TypeError('Derived constructors may only return object or undefined')
+                    }
                     returnsExternal = true
                     returnValue = value
                     return value
@@ -1422,6 +1470,13 @@ export const getExecution = (
                     ) {
                         peak(stack)[Fields.valueStack].push(value)
                     } else {
+                        const descriptor = functionDescriptors.get(frame[Fields.function])
+                        if (
+                            descriptor?.[Fields.type] === FunctionTypes.DerivedConstructor
+                            && value !== undefined
+                        ) {
+                            throw new TypeError('Derived constructors may only return object or undefined')
+                        }
                         peak(stack)[Fields.valueStack].push(getValue(frame, SpecialVariable.This))
                     }
                 }
