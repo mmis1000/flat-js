@@ -3,6 +3,7 @@ import {
     Context,
     Fields,
     Frame,
+    SUPER_REFERENCE_BASE,
     asyncIteratorRecordNext,
     getAsyncIteratorRecord,
     getIterator,
@@ -423,6 +424,9 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
         case OpCode.Delete: {
             const name = ctx[OpcodeContextField.popCurrentFrameStack]()
             const target = ctx[OpcodeContextField.popCurrentFrameStack]<Record<PropertyKey, any> | null | undefined>()
+            if (target != null && typeof target === 'object' && SUPER_REFERENCE_BASE in target) {
+                throw new ReferenceError('Cannot delete super property')
+            }
             if (!environments.has(target)) {
                 if (target == null) {
                     throw new TypeError('Cannot convert undefined or null to object')

@@ -1630,6 +1630,33 @@ test('delete uses ECMAScript delete results for globals and properties', () => {
     `)).toThrow(TypeError)
 })
 
+test('delete super references throw before property key coercion', () => {
+    expect(compileAndRun(`
+        let coerced = false
+        const key = {
+            toString() {
+                coerced = true
+                return 'method'
+            }
+        }
+        const base = {
+            method() {}
+        }
+        const obj = {
+            __proto__: base,
+            method() {
+                try {
+                    delete super[key]
+                } catch (error) {
+                    return [error instanceof ReferenceError, coerced]
+                }
+            }
+        }
+
+        obj.method()
+    `)).toEqual([true, false])
+})
+
 test('strict update re-checks unresolved globals during PutValue', () => {
     const context = vm.createContext({ console, require })
     const vmGlobal = vm.runInContext(`
