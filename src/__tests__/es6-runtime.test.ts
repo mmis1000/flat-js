@@ -464,6 +464,30 @@ test('anonymous class expressions infer names from variable initializers', () =>
     expect(result).toEqual(['C', 'D', 'E'])
 })
 
+test('anonymous function and class assignments infer names from identifier targets', () => {
+    const result = compileAndRun(`
+        var fn
+        var arrow
+        var gen
+        var cls
+        var cover
+        var xCover
+        var lhsCover
+
+        fn = function() {}
+        arrow = () => {}
+        gen = function*() {}
+        cls = class {}
+        cover = (function() {})
+        xCover = (0, function() {})
+        ;(lhsCover) = function() {}
+
+        ;[fn.name, arrow.name, gen.name, cls.name, cover.name, xCover.name, lhsCover.name]
+    `)
+
+    expect(result).toEqual(['fn', 'arrow', 'gen', 'cls', 'cover', '', ''])
+})
+
 test('class name bindings are inner immutable bindings', () => {
     const result = compileAndRun(`
         var outer = 'outside'

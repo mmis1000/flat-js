@@ -426,6 +426,8 @@ Reduce the `language` category failures in targeted batches:
       - fix runtime global/eval declaration-instantiation conflicts and owned static checks
     - object literal, property keys, named evaluation: `127` intended files plus `1` harness issue
       - object literal property semantics were implemented by `eff9eeb`
+      - assignment-expression named evaluation now covers anonymous function, generator, arrow, and class RHS values assigned to unparenthesized identifier references
+      - focused `language/expressions/assignment/**` scan is down to two parser-delegation `super` target files
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
     - references, assignment, update/delete: `72` total (`72` runtime, `0` early) - completed / validation-only
       - reference update and delete semantics were implemented by `a929038`

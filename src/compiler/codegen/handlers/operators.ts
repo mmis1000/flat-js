@@ -315,7 +315,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                     op(OpCode.NodeOffset, 2, [headOf(shortCircuit)]),
                     ...conditionOps,
                     op(OpCode.Pop),
-                    ...generateNamedAssignmentValue(node.right, left, flag, ctx),
+                    ...generateNamedAssignmentValue(node.right, node.left, flag, ctx),
                     op(OpCode.Set),
                     op(OpCode.NodeOffset, 2, [headOf(exit)]),
                     op(OpCode.Jump),
@@ -360,7 +360,7 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                     if (staticAccess) {
                         if (kind === ts.SyntaxKind.EqualsToken) {
                             return [
-                                ...ctx.generate(node.right, flag),
+                                ...generateNamedAssignmentValue(node.right, node.left, flag, ctx),
                                 ...ctx.generateStaticAccessOps(staticAccess),
                                 op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.SetStaticUnchecked : OpCode.SetStatic)
                             ]
@@ -403,7 +403,9 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                             : shouldResolveIdentifier
                                 ? [op(OpCode.ResolveScopeGetValue)]
                                 : [op(OpCode.GetKeepCtx)]),
-                        ...ctx.generate(node.right, flag),
+                        ...(kind === ts.SyntaxKind.EqualsToken
+                            ? generateNamedAssignmentValue(node.right, node.left, flag, ctx)
+                            : ctx.generate(node.right, flag)),
                         ...assignmentOps
                     ]
                 }
