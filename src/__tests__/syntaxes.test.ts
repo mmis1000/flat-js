@@ -180,6 +180,17 @@ test('new.target with escaped target is a syntax error', () => {
 })
 
 test.each([
+    ['legacy octal numeric literal', String.raw`"use strict"; 077`],
+    ['non-octal decimal integer literal', String.raw`"use strict"; 09`],
+    ['legacy octal string escape', String.raw`"use strict"; "\1"`],
+    ['non-octal decimal string escape', String.raw`"use strict"; "\8"`],
+])('Strict %s is a syntax error', (_name, code) => {
+    expect(() => {
+        compiler.compile(code)
+    }).toThrow(SyntaxError)
+})
+
+test.each([
     ['identifier', '(x, x) => 1'],
     ['array binding pattern', '(x, [x]) => 1'],
     ['object binding pattern', '(x, { x }) => 1'],

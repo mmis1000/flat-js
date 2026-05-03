@@ -276,6 +276,13 @@ const strictOnlySemanticDiagnosticCodes = new Set([
     1213, // 'yield' is reserved in strict mode and class bodies.
 ])
 
+const nonStrictLegacyLiteralDiagnosticCodes = new Set([
+    1121, // Legacy octal numeric literals are allowed in sloppy script code.
+    1487, // Legacy octal string escapes are allowed in sloppy script code.
+    1488, // Non-octal decimal string escapes are allowed in sloppy script code.
+    1489, // Non-octal decimal integer literals are allowed in sloppy script code.
+])
+
 function findSmallestNodeContainingSpan(root: ts.SourceFile, start: number, end: number): ts.Node | null {
     let found: ts.Node | null = null
 
@@ -318,6 +325,17 @@ function isNonStrictOnlySemanticDiagnostic(sourceNode: ts.SourceFile, diagnostic
     return node != null && !isNodeInStrictContext(node, withStrict)
 }
 
+function isNonStrictLegacyLiteralDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.Diagnostic, withStrict: boolean): boolean {
+    if (!nonStrictLegacyLiteralDiagnosticCodes.has(diagnostic.code) || diagnostic.start == null) {
+        return false
+    }
+
+    const node = findSmallestNodeContainingSpan(sourceNode, diagnostic.start, diagnostic.start + (diagnostic.length ?? 0))
+    return node != null
+        && !isNodeInStrictContext(node, withStrict)
+        && (ts.isStringLiteral(node) || ts.isNumericLiteral(node))
+}
+
 function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>, withStrict: boolean) {
     const validationSourceNode = ts.createSourceFile(
         'output.ts',
@@ -355,7 +373,9 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
     }) as ts.CompilerHost
 
     const program = ts.createProgram(['output.ts'], { target: ts.ScriptTarget.ESNext, noLib: true }, servicesHost)
-    const syntacticDiagnostics = program.getSyntacticDiagnostics(validationSourceNode)
+    const syntacticDiagnostics = program.getSyntacticDiagnostics(validationSourceNode).filter((diagnostic) => (
+        !isNonStrictLegacyLiteralDiagnostic(sourceNode, diagnostic, withStrict)
+    ))
     const diagnostics = syntacticDiagnostics.length > 0
         ? syntacticDiagnostics
         : program.getSemanticDiagnostics(validationSourceNode).filter((diagnostic) => (

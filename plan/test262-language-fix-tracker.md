@@ -363,7 +363,7 @@ Reduce the `language` category failures in targeted batches:
         - not supported parser syntax: `123`
       - no intended `broken early error semantics` bucket remains
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
-      - post-scan focused cleanup: `await-monkey-patched-promise.js` and `literal-property-name-bigint.js` are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
+      - post-scan focused cleanup: `await-monkey-patched-promise.js`, `literal-property-name-bigint.js`, and sloppy legacy string/numeric literal parser-diagnostic tails are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
     - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
       - scanned Test262 `language` parse-negative files: `4389`
       - actionable supported parse-time early-error files still not caught as `SyntaxError`: `0`
@@ -446,6 +446,10 @@ Reduce the `language` category failures in targeted batches:
       - focused `language/literals/regexp/**` scan: recorded failures `40 -> 39`, intended failures `5 -> 4`
       - focused `language/statementList/**` scan now records `0` failures after the regexp literal realm fix
       - remaining long eval/regexp-source timeout files are not semantic cleanup targets; they run 65,536 dynamic eval compilations and are tracked as Test262 stress/performance-deferred after representative samples passed
+    - legacy literal parser diagnostics: completed for sloppy string and numeric literals on 2026-05-04
+      - TypeScript reports sloppy legacy octal/non-octal literals as syntax diagnostics, but still builds usable literal nodes with the JavaScript values
+      - Flat JS now suppresses only those diagnostics outside strict context; strict mode still rejects the same forms
+      - focused `language/literals/string/**` and `language/literals/numeric/**` scans now record `0` failures
   - Active runtime-cluster plan:
     - first runtime target: eval / function / arguments environments - completed for ordinary function-code / arguments-object roots; direct-eval parser-delegation tails remain
       - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails
@@ -1292,3 +1296,12 @@ Reduce the `language` category failures in targeted batches:
   - representative samples for single-line comments, multi-line comments, line terminators, skipped RegExp metacharacters, and simple RegExp literal eval all pass through Flat JS
   - the six full Test262 files time out because they each perform 65,536 dynamic eval compilations; this is tracked as a stress/performance-deferred area, not an active semantic cleanup target
   - the scan classifier now records those files as out-of-scope `Test262 stress timeout`
+- 2026-05-04: Cleared sloppy legacy literal parser-diagnostic tails.
+  - TypeScript emits syntax diagnostics for sloppy legacy octal numeric literals, non-octal decimal integer literals, legacy octal string escapes, and non-octal decimal string escapes, but its AST already contains the JavaScript runtime literal values
+  - Flat JS now filters those four diagnostics only when the literal is outside strict context; strict source and strict inherited compile contexts still throw `SyntaxError`
+  - fresh focused scans for `language/literals/string/**` and `language/literals/numeric/**` both record `0` failures
+  - validation:
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/syntaxes.test.ts`
+    - `npm run build:tsc`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/literals/string`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/literals/numeric`

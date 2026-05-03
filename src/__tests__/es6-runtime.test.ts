@@ -171,6 +171,18 @@ test('missing binary and compound operators evaluate through VM opcodes', () => 
     `)).toEqual([8, 196])
 })
 
+test('sloppy legacy numeric and string literals keep JavaScript values', () => {
+    expect(compileAndRun(String.raw`
+        [
+            077,
+            09,
+            '\1'.charCodeAt(0),
+            '\8',
+            '\9',
+        ]
+    `)).toEqual([63, 9, 1, '8', '9'])
+})
+
 test('spread calls preserve direct eval semantics', () => {
     expect(compileAndRun(`
         const src = ['40 + 2']
