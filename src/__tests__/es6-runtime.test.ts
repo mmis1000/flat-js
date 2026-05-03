@@ -1279,6 +1279,78 @@ test('eval declaration instantiation uses eval lexical and variable environments
     `, global)).toEqual([true, 23, 45, false, 11, true, undefined, true, 'undefined'])
 })
 
+test('global script declarations use global environment record semantics', () => {
+    const createGlobal = () => vm.runInNewContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `)
+
+    const lexicalGlobal = createGlobal()
+    compileAndRun(`
+        let __flatGlobalLet = 1
+        const __flatGlobalConst = 3
+        class __flatGlobalClass {}
+    `, lexicalGlobal)
+    expect(compileAndRun(`
+        var constAssignmentThrows = false
+        try {
+            __flatGlobalConst = 4
+        } catch (error) {
+            constAssignmentThrows = error instanceof TypeError
+        }
+
+        __flatGlobalLet = 2
+        __flatGlobalClass = 5
+        var out = [
+            __flatGlobalLet,
+            __flatGlobalConst,
+            __flatGlobalClass,
+            constAssignmentThrows,
+            this.hasOwnProperty('__flatGlobalLet'),
+            this.hasOwnProperty('__flatGlobalConst'),
+            this.hasOwnProperty('__flatGlobalClass')
+        ]
+        out
+    `, lexicalGlobal)).toEqual([2, 3, 5, true, false, false, false])
+
+    expect(compileAndRun(`
+        let Array
+        const descriptor = Object.getOwnPropertyDescriptor(this, 'Array')
+        var out = [Array, typeof this.Array, descriptor.configurable, descriptor.enumerable, descriptor.writable]
+        out
+    `, createGlobal())).toEqual([undefined, 'function', true, false, true])
+
+    const varGlobal = createGlobal()
+    compileAndRun('var __flatGlobalVar;', varGlobal)
+    expect(Object.getOwnPropertyDescriptor(varGlobal, '__flatGlobalVar')).toMatchObject({
+        value: undefined,
+        writable: true,
+        enumerable: true,
+        configurable: false,
+    })
+
+    const evalVarGlobal = createGlobal()
+    compileAndRun(`
+        eval('var __flatEvalVar; function __flatEvalFn() {}')
+    `, evalVarGlobal)
+    expect(compileAndRun(`
+        let __flatEvalVar = 1
+        const __flatEvalFn = 2
+        var out = [__flatEvalVar, __flatEvalFn]
+        out
+    `, evalVarGlobal)).toEqual([1, 2])
+
+    const collisionGlobal = createGlobal()
+    compileAndRun('let __flatCollision;', collisionGlobal)
+    expect(() => compileAndRun('var __flatCollision;', collisionGlobal)).toThrow(/already been declared/)
+
+    const nonExtensibleGlobal = createGlobal()
+    compileAndRun('Object.preventExtensions(this)', nonExtensibleGlobal)
+    expect(() => compileAndRun('var __flatMissingGlobal;', nonExtensibleGlobal)).toThrow(/Cannot declare global variable/)
+    expect(Object.prototype.hasOwnProperty.call(nonExtensibleGlobal, '__flatMissingGlobal')).toBe(false)
+})
+
 test('parameter-expression functions resolve captured outer block bindings', () => {
     expect(compileAndRun(`
         {

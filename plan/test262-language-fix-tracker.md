@@ -1186,3 +1186,14 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts src/__tests__/function-expression-self-binding.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/optional-chaining`
+- 2026-05-03: Cleared global-code declaration-instantiation runtime tails.
+  - global lexical `let` / `const` / `class` bindings now stay in the VM global environment record instead of being materialized as own `globalThis` properties during definition, TDZ clearing, initialization, or later writes
+  - global `var` declarations now preserve existing own global property descriptors and validate non-extensible globals before partial binding creation
+  - global script declaration instantiation now rejects lexical collisions/restricted globals, var/function collisions with global lexical bindings, and non-declarable global vars/functions before executing script body code
+  - configurable non-strict direct-eval global `var` / function bindings can be shadowed by later global lexical declarations, matching the Test262 eval/global-code interaction
+  - `compileAndRun` now pins an inherited `Array` descriptor onto Object-created globals so Test262-style globals expose standard built-ins as own configurable global properties without leaking the host realm constructor
+  - fresh `language/global-code/**` scan now records `0` intended failures; only `6` out-of-scope import/export/private-name syntax files remain
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/global-code`

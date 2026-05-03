@@ -423,8 +423,16 @@ export const getExecution = (
         }
 
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
+        const store = slotIndex !== undefined ? getStaticVariableStore(scope) : null
+        const isGlobalLexicalSlot = slotIndex !== undefined
+            && scope === currentFrame[Fields.globalThis]
+            && ((store![Fields.flags][slotIndex] ?? VariableFlags.None) & VariableFlags.Lexical) !== 0
+        if (isGlobalLexicalSlot) {
+            store![Fields.values][slotIndex] = value
+            return value
+        }
         if (slotIndex !== undefined && scope !== currentFrame[Fields.globalThis]) {
-            getStaticVariableStore(scope)[Fields.values][slotIndex] = value
+            store![Fields.values][slotIndex] = value
             if (hasMaterializedBindingAlias(scope, name)) {
                 scope[name] = value
             }
@@ -436,7 +444,7 @@ export const getExecution = (
             throw new TypeError(`Cannot assign to read only property '${name}'`)
         }
         if (success && slotIndex !== undefined) {
-            getStaticVariableStore(scope)[Fields.values][slotIndex] = value
+            store![Fields.values][slotIndex] = value
         }
         return value
     }
@@ -541,6 +549,7 @@ export const getExecution = (
     const defineVariableInternal = (
         scope: Scope,
         name: string,
+        type: VariableType,
         tdz: boolean,
         immutable: boolean,
         trackStaticSlot: boolean,
@@ -566,6 +575,18 @@ export const getExecution = (
             store[Fields.names].push(name)
             store[Fields.flags].push(flags)
             store[Fields.values].push(initialValue)
+        }
+
+        if (scope === currentFrame[Fields.globalThis] && hasName) {
+            if (flags & VariableFlags.Lexical) {
+                return
+            }
+            if (type === VariableType.Var && Object.prototype.hasOwnProperty.call(scope, name)) {
+                if (store !== null && slotIndex !== null) {
+                    store[Fields.values][slotIndex] = scope[name]
+                }
+                return
+            }
         }
 
         if (!hasName || !shouldMaterializeBindingAlias(scope, trackStaticSlot)) {
@@ -599,14 +620,14 @@ export const getExecution = (
         switch (type) {
             case VariableType.Const:
                 // seal it later
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical | extraFlags)
+                return defineVariableInternal(scope, name, type, true, false, trackStaticSlot, configurable, VariableFlags.Lexical | extraFlags)
             case VariableType.Let:
-                return defineVariableInternal(scope, name, true, false, trackStaticSlot, configurable, VariableFlags.Lexical | extraFlags)
+                return defineVariableInternal(scope, name, type, true, false, trackStaticSlot, configurable, VariableFlags.Lexical | extraFlags)
             case VariableType.Function:
             case VariableType.Parameter:
             case VariableType.Var:
                 //don't have tdz
-                return defineVariableInternal(scope, name, false, false, trackStaticSlot, configurable, extraFlags)
+                return defineVariableInternal(scope, name, type, false, false, trackStaticSlot, configurable, extraFlags)
         }
     }
     const getStaticVariableScope = (frame: Frame, depth: number) =>
@@ -634,7 +655,9 @@ export const getExecution = (
         const store = getStaticVariableStoreAt(scope)
         store[Fields.values][index] = value
         const name = store[Fields.names][index]
-        if (hasRuntimeBindingName(name) && (scope === frame[Fields.globalThis] || hasMaterializedBindingAlias(scope, name))) {
+        const isGlobalLexical = scope === frame[Fields.globalThis]
+            && ((store[Fields.flags][index] ?? VariableFlags.None) & VariableFlags.Lexical) !== 0
+        if (hasRuntimeBindingName(name) && !isGlobalLexical && (scope === frame[Fields.globalThis] || hasMaterializedBindingAlias(scope, name))) {
             scope[name] = value
         }
         return value
@@ -658,7 +681,9 @@ export const getExecution = (
         }
         store[Fields.values][index] = value
         const name = store[Fields.names][index]
-        if (hasRuntimeBindingName(name) && (scope === frame[Fields.globalThis] || hasMaterializedBindingAlias(scope, name))) {
+        const isGlobalLexical = scope === frame[Fields.globalThis]
+            && ((store[Fields.flags][index] ?? VariableFlags.None) & VariableFlags.Lexical) !== 0
+        if (hasRuntimeBindingName(name) && !isGlobalLexical && (scope === frame[Fields.globalThis] || hasMaterializedBindingAlias(scope, name))) {
             scope[name] = value
         }
         return value

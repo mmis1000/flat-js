@@ -24,9 +24,12 @@ import {
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
 export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): void => {
-    const writeStaticAliasIfNeeded = (scope: Scope, name: string, value: unknown) => {
+    const writeStaticAliasIfNeeded = (scope: Scope, name: string, flags: VariableFlags, value: unknown) => {
+        const isGlobalLexical = scope === ctx[OpcodeContextField.currentFrame][Fields.globalThis]
+            && (flags & VariableFlags.Lexical) !== 0
         if (
             name !== STATIC_SLOT_NAMELESS
+            && !isGlobalLexical
             && (
                 scope === ctx[OpcodeContextField.currentFrame][Fields.globalThis]
                 || Object.prototype.hasOwnProperty.call(scope, name)
@@ -203,7 +206,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const scope = ctx[OpcodeContextField.getStaticVariableScope](ctx[OpcodeContextField.currentFrame], depth)
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
             store[Fields.values][index] = value
-            writeStaticAliasIfNeeded(scope, store[Fields.names][index], value)
+            writeStaticAliasIfNeeded(scope, store[Fields.names][index], store[Fields.flags][index] ?? VariableFlags.None, value)
             ctx[OpcodeContextField.pushCurrentFrameStack](value)
         }
             break
@@ -468,7 +471,7 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             const store = ctx[OpcodeContextField.getStaticVariableStoreAt](scope)
             if (store[Fields.values][index] === TDZ_VALUE) {
                 store[Fields.values][index] = undefined
-                writeStaticAliasIfNeeded(scope, store[Fields.names][index], undefined)
+                writeStaticAliasIfNeeded(scope, store[Fields.names][index], store[Fields.flags][index] ?? VariableFlags.None, undefined)
             }
         }
             break

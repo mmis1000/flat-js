@@ -381,6 +381,14 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     validateSloppyEvalVarDeclarations(activationScope, evalVariableDeclarations)
                 }
 
+                if (
+                    isSourceFileInPlace(functionType)
+                    && isGlobalVariableEnvironment(activationScope)
+                    && activationScope !== globalThis
+                ) {
+                    validateGlobalScriptDeclarations(activationScope, variables)
+                }
+
                 for (const variable of variables) {
                     const variableType = hasParameterExpressions && variable[Fields.type] === VariableType.Parameter
                         ? VariableType.Let
@@ -424,7 +432,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 scope === ctx[OpcodeContextField.currentFrame][Fields.globalThis]
 
             const canDeclareGlobalVar = (name: string) =>
-                Reflect.has(ctx[OpcodeContextField.currentFrame][Fields.globalThis], name)
+                Object.prototype.hasOwnProperty.call(ctx[OpcodeContextField.currentFrame][Fields.globalThis], name)
                 || Object.isExtensible(ctx[OpcodeContextField.currentFrame][Fields.globalThis])
 
             const canDeclareGlobalFunction = (name: string) => {
@@ -439,6 +447,65 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 return 'value' in descriptor
                     && descriptor.writable === true
                     && descriptor.enumerable === true
+            }
+
+            const validateGlobalScriptDeclarations = (globalScope: Scope, declarations: readonly VariableRecord[]) => {
+                const lexicalNames = new Set<string>()
+                const functionNames = new Set<string>()
+                const varNames = new Set<string>()
+
+                for (let index = declarations.length - 1; index >= 0; index--) {
+                    const declaration = declarations[index]!
+                    if (declaration[Fields.type] === VariableType.Function) {
+                        functionNames.add(declaration[Fields.name])
+                    }
+                }
+
+                for (const declaration of declarations) {
+                    const name = declaration[Fields.name]
+                    switch (declaration[Fields.type]) {
+                        case VariableType.Const:
+                        case VariableType.Let:
+                            lexicalNames.add(name)
+                            break
+                        case VariableType.Var:
+                            if (!functionNames.has(name)) {
+                                varNames.add(name)
+                            }
+                            break
+                    }
+                }
+
+                for (const name of lexicalNames) {
+                    const flags = ctx[OpcodeContextField.getVariableFlag](globalScope, name)
+                    if (flags !== undefined && (flags & VariableFlags.Lexical)) {
+                        throw new SyntaxError(`Identifier '${name}' has already been declared`)
+                    }
+
+                    const descriptor = Reflect.getOwnPropertyDescriptor(globalScope, name)
+                    if (descriptor != null && descriptor.configurable === false) {
+                        throw new SyntaxError(`Identifier '${name}' has already been declared`)
+                    }
+                }
+
+                for (const name of [...functionNames, ...varNames]) {
+                    const flags = ctx[OpcodeContextField.getVariableFlag](globalScope, name)
+                    if (flags !== undefined && (flags & VariableFlags.Lexical)) {
+                        throw new SyntaxError(`Identifier '${name}' has already been declared`)
+                    }
+                }
+
+                for (const name of functionNames) {
+                    if (!canDeclareGlobalFunction(name)) {
+                        throw new TypeError(`Cannot declare global function '${name}'`)
+                    }
+                }
+
+                for (const name of varNames) {
+                    if (!canDeclareGlobalVar(name)) {
+                        throw new TypeError(`Cannot declare global variable '${name}'`)
+                    }
+                }
             }
 
             const validateSloppyEvalVarDeclarations = (varEnv: Scope, declarations: readonly VariableRecord[]) => {
