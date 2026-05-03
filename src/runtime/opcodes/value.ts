@@ -198,6 +198,8 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                 const globalThis = frame[Fields.globalThis]
                 if (name === SpecialVariable.This) {
                     ctx[OpcodeContextField.pushCurrentFrameStack](typeof globalThis)
+                } else if (ctx[OpcodeContextField.hasBinding](globalThis, name)) {
+                    ctx[OpcodeContextField.pushCurrentFrameStack](typeof ctx[OpcodeContextField.getBindingValueChecked](globalThis, name))
                 } else if (name in globalThis) {
                     ctx[OpcodeContextField.pushCurrentFrameStack](typeof globalThis[name])
                 } else {

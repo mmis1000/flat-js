@@ -1349,6 +1349,18 @@ test('global script declarations use global environment record semantics', () =>
     compileAndRun('Object.preventExtensions(this)', nonExtensibleGlobal)
     expect(() => compileAndRun('var __flatMissingGlobal;', nonExtensibleGlobal)).toThrow(/Cannot declare global variable/)
     expect(Object.prototype.hasOwnProperty.call(nonExtensibleGlobal, '__flatMissingGlobal')).toBe(false)
+
+    expect(compileAndRun(`
+        class __flatTypeofClass {}
+        let __flatTypeofLet
+        var out = [typeof __flatTypeofClass, typeof __flatTypeofLet]
+        out
+    `, createGlobal())).toEqual(['function', 'undefined'])
+
+    expect(() => compileAndRun(`
+        typeof __flatTypeofTdz
+        let __flatTypeofTdz
+    `, createGlobal())).toThrow(/Cannot access/)
 })
 
 test('parameter-expression functions resolve captured outer block bindings', () => {

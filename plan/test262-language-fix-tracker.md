@@ -1197,3 +1197,13 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/global-code`
+- 2026-05-03: Cleared the statement-class `typeof` tail after the full-scan boundary.
+  - refreshed the full `language/**` scan after the global-code batch; intended-scope failures are now `175 -> 160`, out-of-scope files are `6042 -> 6041`, and total recorded failures are `6217 -> 6201`
+  - `typeof` over identifier references now consults the VM global environment record before falling back to `globalThis` object properties, so global lexical class declarations and `let` bindings that correctly do not materialize as own properties still produce the right `typeof` result/TDZ behavior
+  - fresh scans:
+    - `language/statements/class/definition/**`: `0` failures
+    - `language/statements/class/syntax/**`: only the TypeScript parser-delegation `super` method-body file remains
+    - `language/statements/class/scope-name-lex-close.js`: pass
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/class.test.ts`
