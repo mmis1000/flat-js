@@ -155,6 +155,51 @@ test('spread calls preserve direct eval semantics', () => {
     `)).toBe(42)
 })
 
+test('calls resolve callees before evaluating arguments', () => {
+    const missingMemberGlobal = Object.create(globalThis)
+    missingMemberGlobal.globalThis = missingMemberGlobal
+    expect(() => compileAndRun(`
+        globalThis.missingArgCalled = false
+        function missingArg() {
+            globalThis.missingArgCalled = true
+        }
+
+        ;({}).missing.deep(missingArg())
+    `, missingMemberGlobal)).toThrow(TypeError)
+    expect(missingMemberGlobal.missingArgCalled).toBe(false)
+
+    expect(compileAndRun(`
+        const order = []
+        const target = {
+            get method() {
+                order.push('get')
+                return function(value) {
+                    order.push('call:' + value)
+                }
+            }
+        }
+        function arg() {
+            order.push('arg')
+            return 'value'
+        }
+        target.method(arg())
+
+        order.join(',')
+    `)).toBe('get,arg,call:value')
+
+    const missingIdentifierGlobal = Object.create(globalThis)
+    missingIdentifierGlobal.globalThis = missingIdentifierGlobal
+    expect(() => compileAndRun(`
+        globalThis.called = false
+        function arg() {
+            globalThis.called = true
+        }
+
+        missing(arg())
+    `, missingIdentifierGlobal)).toThrow(ReferenceError)
+    expect(missingIdentifierGlobal.called).toBe(false)
+})
+
 test('spread works for new, super, and super property calls', () => {
     const result = compileAndRun(`
         class Base {

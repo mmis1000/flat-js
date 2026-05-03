@@ -203,12 +203,12 @@ export function generateDirectCall(
 
         return [
             ...leftOps,
-            ...(needsResolvedCall ? [op(OpCode.ResolveScopeGetValue)] : []),
+            ...(needsResolvedCall ? [op(OpCode.ResolveScopeGetValue)] : [op(OpCode.GetKeepCtx)]),
             ...args,
             op(OpCode.Literal, 2, [argCount]),
             isEval
-                ? op(needsResolvedCall ? OpCode.CallAsEvalResolved : OpCode.CallAsEval)
-                : op(needsResolvedCall ? OpCode.CallResolved : OpCode.Call)
+                ? op(OpCode.CallAsEvalResolved)
+                : op(OpCode.CallResolved)
         ]
     }
 
@@ -268,12 +268,12 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
 
                 return [
                     ...leftOps,
-                    ...(needsResolvedCall ? [op(OpCode.ResolveScopeGetValue)] : []),
+                    ...(needsResolvedCall ? [op(OpCode.ResolveScopeGetValue)] : [op(OpCode.GetKeepCtx)]),
                     ...generateArgumentArray(node.arguments, flag, ctx),
                     op(OpCode.ExpandArgumentArray),
                     isEval
-                        ? op(needsResolvedCall ? OpCode.CallAsEvalResolved : OpCode.CallAsEval)
-                        : op(needsResolvedCall ? OpCode.CallResolved : OpCode.Call)
+                        ? op(OpCode.CallAsEvalResolved)
+                        : op(OpCode.CallResolved)
                 ]
             }
 

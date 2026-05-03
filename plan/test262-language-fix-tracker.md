@@ -435,6 +435,7 @@ Reduce the `language` category failures in targeted batches:
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
     - references, assignment, update/delete: `72` total (`72` runtime, `0` early) - completed / validation-only
       - reference update and delete semantics were implemented by `a929038`
+      - call expressions now resolve the callee before evaluating arguments, including spread calls; focused `language/expressions/call/**` now records `0` failures
       - delete of `super` property references now throws `ReferenceError` before property-key coercion; focused `language/expressions/delete/**` is down to one TypeScript parser-delegation `super` file
       - keep this group in focused regression checks when adjacent operator/control-flow work changes reference handling
     - RegExp runtime behavior: `4` intended timeout files after realm cleanup
@@ -1146,3 +1147,11 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/generator.test.ts src/__tests__/async.test.ts src/__tests__/function-expression-self-binding.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for function expressions and function statements
+- 2026-05-03: Cleared call-expression callee-resolution ordering.
+  - reference calls now run `GetValue` on the callee before argument evaluation and then use the existing resolved-call opcode path, so missing nested members and unresolvable identifiers throw before argument side effects
+  - spread reference calls use the same pre-resolved callee path before building/expanding the argument array
+  - focused `language/expressions/call/**` scan now records `0` failures
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts src/__tests__/function-expression-self-binding.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/call`
