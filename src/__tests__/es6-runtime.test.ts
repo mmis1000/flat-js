@@ -1236,6 +1236,25 @@ test('array and object literals use the provided realm prototypes', () => {
     expect(result).toEqual([true, true, true])
 })
 
+test('regexp literals use the provided realm constructor', () => {
+    const context = vm.createContext({ console, require })
+    const vmGlobal = vm.runInContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `, context)
+
+    const result = compileAndRun(`
+        [
+            /(?:)/ instanceof RegExp,
+            Object.getPrototypeOf(/a/) === RegExp.prototype,
+            /a/.constructor === RegExp,
+        ]
+    `, vmGlobal)
+
+    expect(result).toEqual([true, true, true])
+})
+
 test('object literal __proto__ data properties mutate only non-computed prototypes', () => {
     expect(compileAndRun(`
         const proto = { marker: 1 }

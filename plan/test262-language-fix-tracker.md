@@ -432,8 +432,10 @@ Reduce the `language` category failures in targeted batches:
     - references, assignment, update/delete: `72` total (`72` runtime, `0` early) - completed / validation-only
       - reference update and delete semantics were implemented by `a929038`
       - keep this group in focused regression checks when adjacent operator/control-flow work changes reference handling
-    - RegExp runtime behavior: `5` intended files
-      - document separately from parser misses and inspect runtime-only regexp failures
+    - RegExp runtime behavior: `4` intended timeout files after realm cleanup
+      - regexp literal realm construction fixed on 2026-05-03; `language/literals/regexp/S7.8.5_A4.1.js` now passes because literals use the active VM realm `RegExp`
+      - focused `language/literals/regexp/**` scan: recorded failures `40 -> 39`, intended failures `5 -> 4`
+      - remaining intended files are the long eval/regexp-source stress tests that still time out; invalid RegExp literal parser-delegation files remain out of scope
   - Active runtime-cluster plan:
     - first runtime target: eval / function / arguments environments - completed for ordinary function-code / arguments-object roots; direct-eval parser-delegation tails remain
       - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails

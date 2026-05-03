@@ -144,7 +144,11 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
         case OpCode.RegexpLiteral: {
             const flags = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
             const source = ctx[OpcodeContextField.popCurrentFrameStack]<string>()
-            ctx[OpcodeContextField.pushCurrentFrameStack](new REGEXP(source, flags))
+            const RegExpCtor = (Reflect.get(
+                ctx[OpcodeContextField.currentFrame][Fields.globalThis],
+                'RegExp'
+            ) ?? REGEXP) as typeof RegExp
+            ctx[OpcodeContextField.pushCurrentFrameStack](new RegExpCtor(source, flags))
         }
             break
         case OpCode.Set:
