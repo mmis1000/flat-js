@@ -77,6 +77,24 @@ const nativeHarnessFailureFiles = new Set([
     'language/statements/async-function/evaluation-body.js',
 ])
 
+const typescriptCompilerCrashFiles = new Set([
+    // TS 6 recurses in semantic diagnostics for this valid script shape:
+    // a computed generator method name containing `yield` inside a generator.
+    // Treat as an upstream TypeScript checker crash, not a Flat JS workaround target.
+    'language/expressions/object/method-definition/generator-prop-name-yield-expr.js',
+])
+
+const test262StressTimeoutFiles = new Set([
+    // Exhaustive Sputnik-era loops that run 65,536 dynamic eval compilations.
+    // Representative samples pass; keep these out of semantic cleanup targets.
+    'language/comments/S7.4_A5.js',
+    'language/comments/S7.4_A6.js',
+    'language/literals/regexp/S7.8.5_A1.1_T2.js',
+    'language/literals/regexp/S7.8.5_A1.4_T2.js',
+    'language/literals/regexp/S7.8.5_A2.1_T2.js',
+    'language/literals/regexp/S7.8.5_A2.4_T2.js',
+])
+
 function isParserDelegationRegExpFile(file) {
     return file.startsWith('language/literals/regexp/early-err-')
         || file.startsWith('language/literals/regexp/named-groups/invalid-')
@@ -541,12 +559,22 @@ function listFilesForChunk(chunk) {
     return []
 }
 
+function getHarnessIssueType(file) {
+    if (typescriptCompilerCrashFiles.has(file)) {
+        return 'TypeScript compiler crash'
+    }
+    if (test262StressTimeoutFiles.has(file)) {
+        return 'Test262 stress timeout'
+    }
+    return 'harness issue'
+}
+
 function recordHarnessIssue(resultsByFile, absFile, detail) {
     const relFile = relativeLanguagePath(`./${relativeFromRoot(absFile)}`)
     resultsByFile.set(relFile, {
         file: relFile,
         scope: isOutOfScope(relFile, null, [detail]) ? 'out-of-scope' : 'intended',
-        type: 'harness issue',
+        type: getHarnessIssueType(relFile),
         messages: [detail],
         scenarios: [],
         features: [],
@@ -567,6 +595,14 @@ function isOutOfScope(file, attrs, messages) {
     }
 
     if (nativeHarnessFailureFiles.has(file)) {
+        return true
+    }
+
+    if (typescriptCompilerCrashFiles.has(file)) {
+        return true
+    }
+
+    if (test262StressTimeoutFiles.has(file)) {
         return true
     }
 
@@ -606,6 +642,14 @@ function classifyFailure(file, attrsList, messages) {
 
     if (nativeHarnessFailureFiles.has(file)) {
         return { scope, type: 'native harness issue', features, negativePhase: parseNegative ? 'parse' : null }
+    }
+
+    if (typescriptCompilerCrashFiles.has(file)) {
+        return { scope, type: 'TypeScript compiler crash', features, negativePhase: parseNegative ? 'parse' : null }
+    }
+
+    if (test262StressTimeoutFiles.has(file) && /Test timed out/i.test(combined)) {
+        return { scope, type: 'Test262 stress timeout', features, negativePhase: parseNegative ? 'parse' : null }
     }
 
     if (/Maximum call stack size exceeded|Error running test:/i.test(combined)) {

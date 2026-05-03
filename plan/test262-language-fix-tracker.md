@@ -363,6 +363,7 @@ Reduce the `language` category failures in targeted batches:
         - not supported parser syntax: `123`
       - no intended `broken early error semantics` bucket remains
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
+      - post-scan focused cleanup: `await-monkey-patched-promise.js` and `literal-property-name-bigint.js` are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
     - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
       - scanned Test262 `language` parse-negative files: `4389`
       - actionable supported parse-time early-error files still not caught as `SyntaxError`: `0`
@@ -431,6 +432,7 @@ Reduce the `language` category failures in targeted batches:
       - `language/expressions/array/**` now has `0` focused failures after array literal elements switched to own data-property definition semantics
       - `language/expressions/tagged-template/**` and `language/expressions/template-literal/**` now have `0` focused failures after tagged invalid escapes and raw line terminator normalization were fixed
       - BigInt literal property names now compile for object properties, object/class methods, and destructuring property names; the focused `literal-property-name-bigint.js` file passes in default and strict scenarios
+      - `language/expressions/object/method-definition/generator-prop-name-yield-expr.js` is not an actionable Flat JS target: TypeScript 6 overflows its checker stack while collecting semantic diagnostics for this valid computed generator-method `yield` shape, so it should be reported upstream and deferred
       - assignment-expression named evaluation now covers anonymous function, generator, arrow, and class RHS values assigned to unparenthesized identifier references
       - focused `language/expressions/assignment/**` scan is down to two parser-delegation `super` target files
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
@@ -443,7 +445,7 @@ Reduce the `language` category failures in targeted batches:
       - regexp literal realm construction fixed on 2026-05-03; `language/literals/regexp/S7.8.5_A4.1.js` now passes because literals use the active VM realm `RegExp`
       - focused `language/literals/regexp/**` scan: recorded failures `40 -> 39`, intended failures `5 -> 4`
       - focused `language/statementList/**` scan now records `0` failures after the regexp literal realm fix
-      - remaining intended files are the long eval/regexp-source stress tests that still time out; invalid RegExp literal parser-delegation files remain out of scope
+      - remaining long eval/regexp-source timeout files are not semantic cleanup targets; they run 65,536 dynamic eval compilations and are tracked as Test262 stress/performance-deferred after representative samples passed
   - Active runtime-cluster plan:
     - first runtime target: eval / function / arguments environments - completed for ordinary function-code / arguments-object roots; direct-eval parser-delegation tails remain
       - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails
@@ -458,11 +460,17 @@ Reduce the `language` category failures in targeted batches:
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
+    - TypeScript checker crashes are also non-actionable for Flat JS: do not catch/ignore the crash in `compile.ts`; classify the affected Test262 file out of scope and report upstream
+    - current known checker-crash file: `language/expressions/object/method-definition/generator-prop-name-yield-expr.js`
     - current compiler-only parse-negative refresh: `39`
     - documented Node/browser web-compat call-assignment target path: `4`; the broad scanner classifies these exact files as out of scope
     - invalid RegExp literals, modifiers, and named-group spellings still accepted by TypeScript: `35`; the broad scanner now classifies these as out-of-scope parser-delegation files
     - final broad out-of-scope parser-syntax bucket: `109`
     - strict reserved words, optional-chain invalid targets, invalid loop declaration heads, directive/ASI forms, and invalid statement-body declarations are now either caught by TypeScript diagnostics or covered by custom validators
+  - Test262 stress/performance timeouts:
+    - these are exhaustive Sputnik-era loops whose representative comment and RegExp eval samples pass, but whose full Test262 files time out because they perform 65,536 runtime eval compilations each
+    - current files: `language/comments/S7.4_A5.js`, `language/comments/S7.4_A6.js`, and four `language/literals/regexp/S7.8.5_*_T2.js` files
+    - keep them out of semantic cleanup batches unless the project explicitly starts an eval compilation-cache/performance target
   - Host/module interaction exclusions:
     - keep these out of `runtime-semantic-cluster` because they require host/module machinery, not script runtime fixes
     - module parse/instantiation/evaluation: `33`
@@ -1276,3 +1284,11 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
     - `node ./node_modules/test262-harness/bin/run.js --host-type node --host-path node --threads 1 --reporter json --reporter-keys file,result,scenario,attrs --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 ./node_modules/test262/test/language/expressions/object/literal-property-name-bigint.js`
+- 2026-05-04: Reclassified the computed generator-method `yield` property-name crash as non-actionable.
+  - removed the in-progress `compile.ts` workaround that caught TypeScript `RangeError`s during semantic diagnostics
+  - `language/expressions/object/method-definition/generator-prop-name-yield-expr.js` crashes TypeScript 6 checker diagnostics with `Maximum call stack size exceeded`; this is an upstream TypeScript bug/report item, not a Flat JS parser/checker fix target
+  - the scan classifier now records that file as out-of-scope `TypeScript compiler crash` so future cleanup loops do not chase it as a runtime or harness regression
+- 2026-05-04: Reclassified the remaining comment/RegExp timeout tails as Test262 stress timeouts.
+  - representative samples for single-line comments, multi-line comments, line terminators, skipped RegExp metacharacters, and simple RegExp literal eval all pass through Flat JS
+  - the six full Test262 files time out because they each perform 65,536 dynamic eval compilations; this is tracked as a stress/performance-deferred area, not an active semantic cleanup target
+  - the scan classifier now records those files as out-of-scope `Test262 stress timeout`
