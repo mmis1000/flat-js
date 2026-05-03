@@ -1321,6 +1321,46 @@ test('ordinary function prototype objects use the provided realm Object prototyp
     expect(result).toEqual([true, true, false, true, true])
 })
 
+test('strict functions inherit poisoned caller and arguments accessors', () => {
+    expect(compileAndRun(`
+        function declared() { 'use strict' }
+        const expression = function() { 'use strict' }
+        const constructed = Function("'use strict';")
+
+        function probe(fn, key) {
+            let readThrows = false
+            let writeThrows = false
+            try {
+                fn[key]
+            } catch (error) {
+                readThrows = error instanceof TypeError
+            }
+            try {
+                fn[key] = 1
+            } catch (error) {
+                writeThrows = error instanceof TypeError
+            }
+            return [fn.hasOwnProperty(key), readThrows, writeThrows]
+        }
+
+        [
+            probe(declared, 'caller'),
+            probe(expression, 'caller'),
+            probe(constructed, 'caller'),
+            probe(declared, 'arguments'),
+            probe(expression, 'arguments'),
+            probe(constructed, 'arguments'),
+        ]
+    `)).toEqual([
+        [false, true, true],
+        [false, true, true],
+        [false, true, true],
+        [false, true, true],
+        [false, true, true],
+        [false, true, true],
+    ])
+})
+
 test('regexp literals use the provided realm constructor', () => {
     const context = vm.createContext({ console, require })
     const vmGlobal = vm.runInContext(`

@@ -208,10 +208,6 @@ const hasOwnPrototype = (functionType: FunctionTypes) => {
     }
 }
 
-const hasLegacyRestrictedOwnProperties = (functionType: FunctionTypes) =>
-    functionType === FunctionTypes.FunctionDeclaration
-    || functionType === FunctionTypes.FunctionExpression
-
 const usesOrdinaryFunctionWrapper = (functionType: FunctionTypes) =>
     functionType === FunctionTypes.FunctionDeclaration
     || functionType === FunctionTypes.FunctionExpression
@@ -1189,9 +1185,6 @@ export const getExecution = (
             }[functionName]
 
         Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
-        if (hasLegacyRestrictedOwnProperties(type)) {
-            Object.defineProperty(fn, 'caller', { value: undefined, configurable: true })
-        }
         if (isGeneratorType(type) || isAsyncGeneratorType(type)) {
             const intrinsics = getGeneratorFunctionIntrinsics(
                 globalThis,

@@ -385,6 +385,7 @@ Reduce the `language` category failures in targeted batches:
       - named function-expression self bindings are now immutable, including sloppy-silent and strict-throw assignment behavior
       - direct eval inside rest/binding-pattern parameter cleanup now keeps the active function variable environment instead of falling into synthetic scopes
       - non-strict direct eval now rejects `var` declarations that collide with lexical or non-simple parameter environments
+      - strict ordinary functions and Function-constructor functions no longer get own `caller` / `arguments` extension properties, so the active realm's poisoned `Function.prototype` accessors are observed
       - function-expression root now has `0` intended failures; only out-of-scope class-static/class-private files remain there
       - function-statement, arguments-object, and function-code roots now have `0` intended failures
       - rest-parameters root now has `0` focused failures after rest arrays were moved onto the active VM realm `Array.prototype`
@@ -1136,3 +1137,12 @@ Reduce the `language` category failures in targeted batches:
     - fresh focused scans for `language/literals/regexp`, `language/statementList`, `language/rest-parameters`, `language/expressions/delete`, `language/expressions/instanceof`, and `language/expressions/array`
     - full `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js`, resumed from state after the one-hour shell timeout
   - boundary reached: no regressions appeared in the touched focused roots; continue with the next runtime cluster from the remaining broad-scan residuals
+- 2026-05-03: Cleared strict function `caller` / `arguments` forbidden-extension tails.
+  - ordinary VM functions no longer install an own `caller` data property, so strict function declarations, expressions, and Function-constructor results inherit the active realm's poisoned `Function.prototype` accessors
+  - focused function roots now have no intended failures:
+    - `language/expressions/function/**`: `0` intended, `6` out-of-scope
+    - `language/statements/function/**`: `0` intended, `4` out-of-scope
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/generator.test.ts src/__tests__/async.test.ts src/__tests__/function-expression-self-binding.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for function expressions and function statements
