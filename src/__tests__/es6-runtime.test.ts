@@ -213,6 +213,25 @@ test('setter default parameters keep length and parameter scope semantics', () =
     `)).toEqual([42, 42, 0, 0, 'outside', 'inside'])
 })
 
+test('object literal methods remain sloppy outside strict source', () => {
+    expect(compileAndRun(`
+        var values = []
+        var obj = {
+            m(yield) {
+                values.push(yield)
+                return this === globalThis
+            },
+            n(eval) {
+                return eval
+            }
+        }
+
+        values.push(obj.m.call(null, 'yield-name'))
+        values.push(obj.n('eval-name'))
+        values
+    `)).toEqual(['yield-name', true, 'eval-name'])
+})
+
 test('spread calls preserve direct eval semantics', () => {
     expect(compileAndRun(`
         const src = ['40 + 2']

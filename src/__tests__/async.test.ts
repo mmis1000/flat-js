@@ -69,6 +69,29 @@ describe('Async/Await', () => {
         expect(result).toEqual([42, 0])
     })
 
+    test('async methods allow lexical new.target in returned async arrows', async () => {
+        const result = await compileAndRun(`
+            var obj = {
+                async method() {
+                    return async () => new.target;
+                }
+            };
+
+            class C {
+                async method() {
+                    return async () => new.target;
+                }
+            }
+
+            Promise.all([
+                obj.method().then((fn) => fn()),
+                new C().method().then((fn) => fn()),
+            ]);
+        `)
+
+        expect(result).toEqual([undefined, undefined])
+    })
+
     test('sequential awaits', async () => {
         const result = await compileAndRun(`
             async function f() {

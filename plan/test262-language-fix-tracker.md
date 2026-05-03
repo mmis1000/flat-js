@@ -363,7 +363,7 @@ Reduce the `language` category failures in targeted batches:
         - not supported parser syntax: `123`
       - no intended `broken early error semantics` bucket remains
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
-      - post-scan focused cleanup: `await-monkey-patched-promise.js`, `literal-property-name-bigint.js`, sloppy legacy string/numeric literal parser-diagnostic tails, and setter default-parameter diagnostics are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
+      - post-scan focused cleanup: `await-monkey-patched-promise.js`, `literal-property-name-bigint.js`, sloppy legacy string/numeric literal parser-diagnostic tails, setter default-parameter diagnostics, object-method strictness diagnostics, and method/accessor `new.target` diagnostics are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
     - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
       - scanned Test262 `language` parse-negative files: `4389`
       - actionable supported parse-time early-error files still not caught as `SyntaxError`: `0`
@@ -375,7 +375,7 @@ Reduce the `language` category failures in targeted batches:
     - original path-family estimates below came from the 2026-05-02T12:41:06Z broad summary; focused notes and the 2026-05-03 broad scan record the completed reductions
     - functions, parameters, eval, arguments env: at least `372` core files
       - direct eval: `165`
-        - current focused direct-eval scan after ordinary function-code, eval-arguments, and eval declaration-instantiation cleanup: `42` intended parser-delegation failures, `2` out-of-scope
+        - current focused direct-eval scan after ordinary function-code, eval-arguments, eval declaration-instantiation cleanup, and object-method strictness correction: `2` intended parser-delegation failures (`new.target` eval source and `super` eval source), `2` out-of-scope
       - function-code: `127` - cleared for intended support on 2026-05-03
       - arguments-object: `47` - cleared for intended support on 2026-05-03
       - ordinary/async function expression and statement roots: `33`
@@ -390,7 +390,7 @@ Reduce the `language` category failures in targeted batches:
       - function-statement, arguments-object, and function-code roots now have `0` intended failures
       - rest-parameters root now has `0` focused failures after rest arrays were moved onto the active VM realm `Array.prototype`
       - `language/expressions/instanceof/**` now has `0` focused failures after ordinary function prototype objects were moved onto the active VM realm `Object.prototype`
-      - remaining work is direct-eval parser-delegation cases, one indirect-eval cross-realm harness tail, and async/generator function-family runtime tails
+      - remaining work is the direct-eval `new.target` / `super` parser-delegation pair; indirect eval and async/generator function-family runtime tails are clear
     - supported class constructors/methods/accessors/super: `374` class-root files plus `63` `language/expressions/super/**` files
       - class statements: `209`
       - class expressions: `165`
@@ -433,6 +433,8 @@ Reduce the `language` category failures in targeted batches:
       - `language/expressions/tagged-template/**` and `language/expressions/template-literal/**` now have `0` focused failures after tagged invalid escapes and raw line terminator normalization were fixed
       - BigInt literal property names now compile for object properties, object/class methods, and destructuring property names; the focused `literal-property-name-bigint.js` file passes in default and strict scenarios
       - `language/expressions/object/method-definition/generator-prop-name-yield-expr.js` is not an actionable Flat JS target: TypeScript 6 overflows its checker stack while collecting semantic diagnostics for this valid computed generator-method `yield` shape, so it should be reported upstream and deferred
+      - object literal methods/accessors now use ordinary sloppy function strictness unless surrounding source is strict; focused `language/expressions/object/**` now has `0` intended failures
+      - `new.target` is now allowed in methods/accessors/constructors and arrows nested inside them; focused `language/expressions/new.target/**` now records `0` failures, and exact class async-method `new.target` files pass
       - assignment-expression named evaluation now covers anonymous function, generator, arrow, and class RHS values assigned to unparenthesized identifier references
       - focused `language/expressions/assignment/**` scan is down to two parser-delegation `super` target files
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
@@ -529,6 +531,7 @@ Reduce the `language` category failures in targeted batches:
     - references, optional chaining, `super`, `new.target`, and lexical redeclarations:
       - `TS1358`, `TS2335`, `TS2337`, `TS2364`, `TS2451`, `TS2480`, `TS2481`, `TS2492`, `TS2660`, `TS2777`, `TS2779`, `TS2813`, `TS2814`, `TS5076`, `TS17013`
       - `TS2364` is intentionally ignored for call-expression `=` / compound-assignment targets because browsers and Node evaluate the call and throw `ReferenceError` at runtime; logical assignment targets still remain early `SyntaxError`s
+      - `TS17013` is filtered when the `new.target` node is inside a non-arrow function-like body, including object/class methods, accessors, constructors, and arrows nested inside those bodies
   - Deliberately not whitelisted from the scan:
     - TypeScript/type-system opinions or no-lib fallout, such as missing names, unreachable `??` RHS, impossible comparisons, async `Promise` library complaints, and tuple/object type complaints
     - module and host-feature diagnostics for `import`/`export`, dynamic import, `import.meta`, top-level await, import attributes, and string-named module exports
@@ -1316,3 +1319,16 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/syntaxes.test.ts`
     - `npm run build:tsc`
     - exact Test262 harness run for the 13 object/class setter default/length/scope files in `language/expressions/object`, `language/expressions/class`, and `language/statements/class`
+- 2026-05-04: Cleared object-method strictness and method/accessor `new.target` diagnostics.
+  - compile-time strict-context validation now matches runtime semantics: object literal methods/accessors are sloppy unless surrounding code is strict, while class bodies still make their members strict
+  - MethodDefinition duplicate parameters remain an early `SyntaxError` through an explicit duplicate-parameter rule instead of depending on the old over-strict method context
+  - `TS17013` is now ignored only when `new.target` is inside a non-arrow function-like body, including arrows nested inside object/class methods and accessors
+  - fresh focused scans:
+    - `language/eval-code/direct/**`: `42` intended parser-delegation files -> `2` (`new.target` eval source and `super` eval source)
+    - `language/expressions/object/**`: `0` intended failures; remaining failures are out-of-scope class/private/static-block/top-level-await files plus the documented TypeScript checker crash
+    - `language/expressions/new.target/**`: `0` failures
+  - validation:
+    - `npx jest --runInBand --no-cache src/__tests__/async.test.ts src/__tests__/es6-runtime.test.ts src/__tests__/syntaxes.test.ts`
+    - `npm run build:tsc`
+    - exact Test262 harness run for the four class async-method `new.target` files in expression and statement class roots
+  - note: a broader `language/expressions/class/**` scan was attempted but timed out; exact affected class files passed, and a full language scan should catch any broader class-root movement at the next boundary

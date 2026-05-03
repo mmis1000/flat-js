@@ -39,6 +39,8 @@ const syntaxes = [
     ['ObjectLiteral Property', '({ a: 0 })'],
     ['ObjectLiteral Property Shorthand', '({ a })'],
     ['ObjectLiteral Method', '({ a () {} })'],
+    ['ObjectLiteral sloppy yield parameter', '({ m(yield) { return yield } })'],
+    ['ObjectLiteral method arrow new.target', '({ m() { return () => new.target } })'],
     ['ObjectLiteral ComputedKey', '({ [a]: {} })'],
     ['ObjectLiteral String Key', '({ "a": {} })'],
     ['ObjectLiteral Number Key', '({ 0: {} })'],

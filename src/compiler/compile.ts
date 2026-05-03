@@ -98,15 +98,6 @@ function getStrictContext(node: ts.Node, inheritedStrict: boolean, withStrict: b
     }
 
     if (ts.isFunctionLike(node) && 'body' in node && node.body != null && ts.isBlock(node.body)) {
-        if (
-            ts.isMethodDeclaration(node)
-            || ts.isGetAccessorDeclaration(node)
-            || ts.isSetAccessorDeclaration(node)
-            || ts.isConstructorDeclaration(node)
-        ) {
-            return true
-        }
-
         if (hasUseStrictDirective(node.body.statements)) {
             return true
         }
@@ -335,6 +326,29 @@ function isNonStrictLegacyLiteralDiagnostic(sourceNode: ts.SourceFile, diagnosti
         && (ts.isStringLiteral(node) || ts.isNumericLiteral(node))
 }
 
+function isAllowedNewTargetDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.Diagnostic): boolean {
+    if (diagnostic.code !== 17013 || diagnostic.start == null) {
+        return false
+    }
+
+    const node = findSmallestNodeContainingSpan(sourceNode, diagnostic.start, diagnostic.start + (diagnostic.length ?? 0))
+    if (!node || !ts.isMetaProperty(node) || node.keywordToken !== ts.SyntaxKind.NewKeyword || node.name.text !== 'target') {
+        return false
+    }
+
+    let current: ts.Node | undefined = node.parent
+    while (current != null) {
+        if (ts.isFunctionLike(current) && !ts.isArrowFunction(current)) {
+            return true
+        }
+        if (ts.isSourceFile(current)) {
+            return false
+        }
+        current = current.parent
+    }
+    return false
+}
+
 function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>, withStrict: boolean) {
     const validationSourceNode = ts.createSourceFile(
         'output.ts',
@@ -380,6 +394,7 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
         : program.getSemanticDiagnostics(validationSourceNode).filter((diagnostic) => (
             javascriptEarlyErrorSemanticDiagnosticCodes.has(diagnostic.code)
             && !isNonStrictOnlySemanticDiagnostic(sourceNode, diagnostic, withStrict)
+            && !isAllowedNewTargetDiagnostic(sourceNode, diagnostic)
             && !isWebCompatFunctionCallAssignmentDiagnostic(validationSourceNode, diagnostic)
         ))
 
@@ -1009,6 +1024,9 @@ function validateFunctionParameterSyntax(sourceNode: ts.SourceFile, withStrict: 
     const validateDuplicateParameterNames = (node: ts.FunctionLikeDeclarationBase, strictContext: boolean) => {
         const names = new Set<string>()
         const rejectDuplicates = ts.isArrowFunction(node)
+            || ts.isMethodDeclaration(node)
+            || ts.isGetAccessorDeclaration(node)
+            || ts.isSetAccessorDeclaration(node)
             || strictContext
             || !isSimpleParameterList(node)
             || isAsyncFunctionLike(node)
