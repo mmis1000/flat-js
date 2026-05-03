@@ -14,6 +14,16 @@ Do not claim the branch is working until the changed surfaces have been checked 
 ## Minimum Checklist
 
 - Inspect `git diff --stat` or the touched files first, and map them to validation scope.
+- Before every commit, run the CI-equivalent checks for the touched scope. Do not create the commit while a known CI failure is present in HEAD or in the staged changes.
+- If the user asks to commit and the current HEAD already fails CI, stop the commit loop, identify/fix that failure first, then re-run the relevant CI-equivalent command before committing more work.
+- For the GitHub build job, the CI-equivalent gate is:
+  - `npm run build`
+  - `npm run typecheck:web`
+  - `npm test`
+- For the GitHub publish job or generated-asset commits, also include:
+  - `npm run build-web`
+  - `npm run build-example`
+  - `npm run build-example:self-contained-vm`
 - Run TypeScript compile with the local binary when shell PATH is unreliable:
   - `node .\node_modules\typescript\bin\tsc --project .\src\tsconfig.json`
 - Run focused Jest suites with the local binary:
@@ -47,6 +57,7 @@ Run these when changes touched `example/loader.js`, stripped runtime bundling, j
 
 Only call the target complete when all relevant checked surfaces are green.
 
+- The most recent commit/HEAD passes the relevant CI-equivalent checks.
 - No known CI failures remain for the touched area.
 - No relevant local test failures remain.
 - No relevant browser or example regressions remain.

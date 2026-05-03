@@ -40,13 +40,15 @@ target.flag &&= true;
 target.flag ||= false;
 target.missing ??= 1;
 /kitchen-sink/gi;
-[0, ...target.list, 9];
+[, 0, ...target.list, 9];
 ({
     __proto__: null,
     shorthand: target,
     plain: 1,
     method(x) { return x + 1; },
 });
+let [firstFromList] = target.list;
+firstFromList;
 
 function directEval(code) {
     return eval(code);

@@ -2,10 +2,10 @@ import { FunctionTypes, OpCode } from "../../compiler"
 import { bindInfo, Fields, formatFunctionName, functionDescriptors } from "../shared"
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
-const isVmConstructible = (fn: any) => {
+const isClassVmConstructible = (fn: any) => {
     const bound = bindInfo.get(fn)
     if (bound) {
-        return isVmConstructible(bound[Fields.function])
+        return isClassVmConstructible(bound[Fields.function])
     }
 
     const descriptor = functionDescriptors.get(fn)
@@ -77,7 +77,7 @@ export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 if (superClass === null) {
                     prototypeParent = null
                 } else {
-                    if (!isVmConstructible(superClass)) {
+                    if (!isClassVmConstructible(superClass)) {
                         throw new TypeError('Class extends value is not a constructor or null')
                     }
                     prototypeParent = superClass.prototype

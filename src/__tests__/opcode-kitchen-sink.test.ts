@@ -45,6 +45,9 @@ test('opcode kitchen sink fixture keeps broad opcode coverage', () => {
         OpCode.NodeOffset,
         OpCode.NodeFunctionType,
         OpCode.ThrowReferenceError,
+        // Direct eval call sites now pre-read callees for spec evaluation order,
+        // so the resolved eval-call opcode is the emitted coverage target.
+        OpCode.CallAsEval,
     ])
 
     const missing = getOpcodeNames()
@@ -54,7 +57,7 @@ test('opcode kitchen sink fixture keeps broad opcode coverage', () => {
     expect(missing).toEqual([])
 
     expect(used.has(OpCode.SetEvalResult)).toBe(true)
-    expect(used.has(OpCode.CallAsEval)).toBe(true)
+    expect(used.has(OpCode.CallAsEvalResolved)).toBe(true)
     expect(used.has(OpCode.CreateClass)).toBe(true)
     expect(used.has(OpCode.YieldStar)).toBe(true)
     expect(used.has(OpCode.Await)).toBe(true)
