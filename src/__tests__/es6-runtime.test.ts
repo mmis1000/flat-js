@@ -1743,6 +1743,22 @@ test('computed object literal keys are coerced before value evaluation', () => {
     `)).toEqual(['key,value', 'id', 1])
 })
 
+test('BigInt literal property names use numeric string keys', () => {
+    expect(compileAndRun(`
+        const big = { 999999999999999999n: true }
+        const methods = { 1n() { return 'bar' } }
+        class C { 1n() { return 'baz' } }
+        let { 1n: value } = { '1': 'foo' };
+
+        [
+            big['999999999999999999'],
+            methods['1'](),
+            new C()['1'](),
+            value,
+        ]
+    `)).toEqual([true, 'bar', 'baz', 'foo'])
+})
+
 test('object property named evaluation covers anonymous functions and classes', () => {
     expect(compileAndRun(`
         const namedSym = Symbol('test262')

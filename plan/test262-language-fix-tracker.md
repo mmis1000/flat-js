@@ -352,13 +352,12 @@ Reduce the `language` category failures in targeted batches:
     - `M:\Playground\flat-js\lib\runtime\execution.js:960`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - latest completed broad `language` scan: 2026-05-03T09:47:37.634Z
-      - intended-scope failing files: `175`
-      - out-of-scope failing files: `6042`
-      - total failing files recorded: `6217`
+    - latest completed broad `language` scan: 2026-05-03T16:42:46.105Z
+      - intended-scope failing files: `132`
+      - out-of-scope failing files: `6032`
+      - total failing files recorded: `6164`
       - intended buckets:
-        - broken / needs inspection: `32`
-        - broken semantics: `18`
+        - broken / needs inspection: `7`
         - harness issue: `1`
         - not supported: `1`
         - not supported parser syntax: `123`
@@ -431,6 +430,7 @@ Reduce the `language` category failures in targeted batches:
       - object literal property semantics were implemented by `eff9eeb`
       - `language/expressions/array/**` now has `0` focused failures after array literal elements switched to own data-property definition semantics
       - `language/expressions/tagged-template/**` and `language/expressions/template-literal/**` now have `0` focused failures after tagged invalid escapes and raw line terminator normalization were fixed
+      - BigInt literal property names now compile for object properties, object/class methods, and destructuring property names; the focused `literal-property-name-bigint.js` file passes in default and strict scenarios
       - assignment-expression named evaluation now covers anonymous function, generator, arrow, and class RHS values assigned to unparenthesized identifier references
       - focused `language/expressions/assignment/**` scan is down to two parser-delegation `super` target files
       - remaining named-evaluation or class-adjacent issues should be validated with the object/class tail work
@@ -1269,3 +1269,10 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/async.test.ts src/__tests__/generator.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/await`
+- 2026-05-03: Cleared the BigInt literal property-name tail.
+  - non-computed BigInt property names now use the numeric string key for object literal data properties, object literal methods, class methods, and destructuring property names
+  - this clears the lone full-scan intended `not supported` file from `language/expressions/object/literal-property-name-bigint.js`; the remaining intended residuals are parser-delegation files, one harness tail, and timeout/inspection files
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
+    - `node ./node_modules/test262-harness/bin/run.js --host-type node --host-path node --threads 1 --reporter json --reporter-keys file,result,scenario,attrs --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 ./node_modules/test262/test/language/expressions/object/literal-property-name-bigint.js`

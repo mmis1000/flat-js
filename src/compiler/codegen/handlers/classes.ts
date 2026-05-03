@@ -6,9 +6,16 @@ import { generateEnterScope, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
 import type { Segment } from '../types'
 
-function getStaticPropertyName(name: ts.Identifier | ts.StringLiteral | ts.NumericLiteral): string {
+function getBigIntPropertyName(name: ts.BigIntLiteral): string {
+    return BigInt(name.text.slice(0, -1).replace(/_/g, '')).toString()
+}
+
+function getStaticPropertyName(name: ts.Identifier | ts.StringLiteral | ts.NumericLiteral | ts.BigIntLiteral): string {
     if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
         return name.text
+    }
+    if (ts.isBigIntLiteral(name)) {
+        return getBigIntPropertyName(name)
     }
     return String(Number(name.text))
 }
@@ -134,7 +141,7 @@ export function generateClassValue(
                 res.push(op(OpCode.ToPropertyKey))
             } else if (ts.isIdentifier(member.name)) {
                 res.push(op(OpCode.Literal, 2, [member.name.text]))
-            } else if (ts.isStringLiteral(member.name) || ts.isNumericLiteral(member.name)) {
+            } else if (ts.isStringLiteral(member.name) || ts.isNumericLiteral(member.name) || ts.isBigIntLiteral(member.name)) {
                 res.push(op(OpCode.Literal, 2, [getStaticPropertyName(member.name)]))
             } else {
                 throw new Error('unsupported class member name')

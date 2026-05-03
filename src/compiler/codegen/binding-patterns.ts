@@ -465,6 +465,10 @@ const generatePropertyNameOps = (name: ts.PropertyName, flag: number, ctx: Codeg
         return [op(OpCode.Literal, 2, [name.text])]
     }
 
+    if (ts.isBigIntLiteral(name)) {
+        return [op(OpCode.Literal, 2, [BigInt(name.text.slice(0, -1).replace(/_/g, '')).toString()])]
+    }
+
     if (ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
         return ctx.generate(name, flag)
     }

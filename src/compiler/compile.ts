@@ -1239,6 +1239,9 @@ function getStaticPropertyName(name: ts.PropertyName): string | null {
     if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
         return name.text
     }
+    if (ts.isBigIntLiteral(name)) {
+        return BigInt(name.text.slice(0, -1).replace(/_/g, '')).toString()
+    }
     if (ts.isNumericLiteral(name)) {
         return String(Number(name.text))
     }
