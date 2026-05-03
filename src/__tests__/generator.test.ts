@@ -119,6 +119,57 @@ describe('Generators', () => {
         expect(result).toEqual([1, 2, 3])
     })
 
+    test('yield* preserves delegated iterator result semantics', () => {
+        const result = compileAndRun(`
+            let nextArgs
+            let valueGets = 0
+            const firstResult = Object.defineProperty({ done: false }, 'value', {
+                get() {
+                    valueGets += 1
+                    return 1
+                }
+            })
+            const iterable = {
+                [Symbol.iterator]() {
+                    return {
+                        next() {
+                            nextArgs = arguments
+                            return firstResult
+                        }
+                    }
+                }
+            }
+            function* raw() {
+                yield* iterable
+            }
+
+            const rawIterator = raw()
+            const rawResult = rawIterator.next('ignored')
+
+            const obj = Object.create({ hit: true })
+            Boolean.prototype[Symbol.iterator] = function* () {
+                yield this.valueOf()
+            }
+            function* booleanDelegation() {
+                yield* 'hit' in obj
+            }
+            const booleanResult = booleanDelegation().next()
+            delete Boolean.prototype[Symbol.iterator];
+
+            [
+                rawResult === firstResult,
+                rawResult.done,
+                valueGets,
+                nextArgs.length,
+                nextArgs[0],
+                booleanResult.value,
+                booleanResult.done
+            ]
+        `)
+
+        expect(result).toEqual([true, false, 0, 1, undefined, true, false])
+    })
+
     test('object spread operands can suspend on yield', () => {
         const result = compileAndRun(`
             const s = Symbol('s');

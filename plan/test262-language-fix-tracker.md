@@ -412,6 +412,9 @@ Reduce the `language` category failures in targeted batches:
       - generator expressions/statements: `28` / `16`
       - fix `yield`, `yield*`, async-generator promise flow, and parameter/default/eval scope behavior
       - object/class method generator variants overlap with the object/class batches
+      - 2026-05-03 progress:
+        - `language/expressions/yield/**`: `14` focused failures -> `0`
+        - fixed sync `yield*` delegation to preserve delegated iterator result objects, capture `next` once, pass the first `undefined` argument, avoid premature `value` reads, perform throw-fallback `IteratorClose`, and look up primitive iterator methods through the active VM realm
     - control-flow and iterator-close regression set: `0` detailed failures in the cleared `if`, `try`, `while`, `do-while`, and `switch` roots
       - remaining `for` / `for-in` / `for-of` files in the broad intended set are the known parser-shape tails: `5`
     - lexical/global declarations: `43` total (`43` runtime, `0` early)

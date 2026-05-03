@@ -757,6 +757,9 @@ export const getExecution = (
             const res = runUntilYieldOrDone(exec)
 
             if (isResultYield(res)) {
+                if (res[Fields.delegate] !== undefined) {
+                    return res[Fields.value] as IteratorResult<unknown>
+                }
                 return { value: res[Fields.value], done: false }
             }
             if (isResultDone(res)) {
