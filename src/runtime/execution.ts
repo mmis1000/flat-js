@@ -408,7 +408,15 @@ export const getExecution = (
 
         const slotIndex = getScopeInternal(scope)[SCOPE_STATIC_SLOTS]?.[name]
         if (slotIndex !== undefined) {
-            return getStaticVariableStore(scope)[Fields.values][slotIndex]
+            const store = getStaticVariableStore(scope)
+            const flags = store[Fields.flags][slotIndex] ?? VariableFlags.None
+            if (
+                scope === currentFrame[Fields.globalThis]
+                && (flags & VariableFlags.Lexical) === 0
+            ) {
+                return scope[name]
+            }
+            return store[Fields.values][slotIndex]
         }
         return scope[name]
     }
@@ -639,6 +647,15 @@ export const getExecution = (
     const getStaticVariableValue = (frame: Frame, depth: number, index: number) => {
         const scope = getStaticVariableScope(frame, depth)
         const store = getStaticVariableStoreAt(scope)
+        const name = store[Fields.names][index]
+        const flags = store[Fields.flags][index] ?? VariableFlags.None
+        if (
+            hasRuntimeBindingName(name)
+            && scope === frame[Fields.globalThis]
+            && (flags & VariableFlags.Lexical) === 0
+        ) {
+            return scope[name]
+        }
         return store[Fields.values][index]
     }
 

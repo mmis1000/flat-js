@@ -132,6 +132,7 @@ export function generateBasics(node: ts.Node, flag: number, ctx: CodegenContext)
                     ops.push(op(OpCode.SetInitializedStatic))
                 } else {
                     ops.push(...ctx.generateLeft(declaration.name, flag))
+                    ops.push(op(OpCode.ResolveScope))
                     ops.push(...initializer)
                     ops.push(op(OpCode.SetInitialized))
                 }

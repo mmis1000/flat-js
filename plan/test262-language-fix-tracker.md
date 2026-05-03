@@ -1235,3 +1235,12 @@ Reduce the `language` category failures in targeted batches:
     - `npx jest --runInBand --no-cache src/__tests__/basic-programs.test.ts src/__tests__/es6-runtime.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/arguments-object`
     - focused forbidden-extension scans for `language/expressions/function/forbidden-ext/**` and `language/statements/function/forbidden-ext/**`
+- 2026-05-03: Cleared statement-variable binding-resolution tails.
+  - global non-lexical static reads now read the global object property rather than a stale static slot, so `this.x = value` is visible through a hoisted global `var x` binding
+  - dynamic variable initializers now capture the identifier binding scope before evaluating the initializer, fixing `with` cases where the initializer deletes the object property that the declaration target had already resolved to
+  - fresh `language/statements/variable/**` scan now records `0` failures
+  - nearby fresh `language/global-code/**` scan still records `0` intended failures; only the known `6` out-of-scope import/export/private-name files remain
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for statement variables and global code

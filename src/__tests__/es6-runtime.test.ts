@@ -1338,6 +1338,22 @@ test('global script declarations use global environment record semantics', () =>
         configurable: false,
     })
 
+    expect(compileAndRun(`
+        this.__flatGlobalDeclaredVar = 'baloon'
+        var out = [__flatGlobalDeclaredVar]
+        var __flatGlobalDeclaredVar
+        out.push(__flatGlobalDeclaredVar)
+        out
+    `, createGlobal())).toEqual(['baloon', 'baloon'])
+
+    expect(compileAndRun(`
+        var obj = { test262id: 1 }
+        with (obj) {
+            var test262id = delete obj.test262id
+        }
+        [obj.test262id, test262id]
+    `, createGlobal())).toEqual([true, undefined])
+
     const evalVarGlobal = createGlobal()
     compileAndRun(`
         eval('var __flatEvalVar; function __flatEvalFn() {}')
