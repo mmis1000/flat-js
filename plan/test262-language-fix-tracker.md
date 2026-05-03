@@ -1252,3 +1252,13 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/syntaxes.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/directive-prologue`
+- 2026-05-03: Refreshed the full `language/**` scan after the line-terminator, arguments-object, variable, and directive-prologue batches.
+  - intended-scope failing files are now `160 -> 132`
+  - out-of-scope files are now `6041 -> 6032`
+  - total recorded failures are now `6201 -> 6164`
+  - remaining intended runtime/inspection roots from the full scan:
+    - comments: `S7.4_A5.js`, `S7.4_A6.js` time out
+    - regexp literals: four `S7.8.5_*_T2.js` files time out
+    - async await: `await-monkey-patched-promise.js` observes a monkey-patched native promise `then`
+  - validation:
+    - fresh full `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js`, resumed once from state after the one-hour shell timeout
