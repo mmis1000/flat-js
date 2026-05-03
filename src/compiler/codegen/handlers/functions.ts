@@ -48,6 +48,20 @@ function generateFunctionDeclarationInitialization(node: ts.FunctionDeclaration)
     ]
 }
 
+function isHoistedFunctionDeclaration(node: ts.FunctionDeclaration, ctx: CodegenContext): boolean {
+    const parent = ctx.parentMap.get(node)?.node
+    if (parent == null || ts.isSourceFile(parent)) {
+        return true
+    }
+
+    if (!ts.isBlock(parent)) {
+        return false
+    }
+
+    const blockOwner = ctx.parentMap.get(parent)
+    return blockOwner?.key === 'body' && ts.isFunctionLike(blockOwner.node)
+}
+
 export function generateFunctions(node: ts.Node, _flag: number, ctx: CodegenContext): Segment | undefined {
     if (ts.isArrowFunction(node)) {
         return generateFunctionDefinition(node, '')
@@ -64,6 +78,10 @@ export function generateFunctions(node: ts.Node, _flag: number, ctx: CodegenCont
 
         if (isLexicalSwitchFunctionDeclaration(node, ctx.parentMap)) {
             return []
+        }
+
+        if (!isHoistedFunctionDeclaration(node, ctx)) {
+            return generateFunctionDeclarationInitialization(node)
         }
 
         ctx.functionDeclarations.push(node)

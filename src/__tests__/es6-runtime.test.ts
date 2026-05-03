@@ -1054,6 +1054,50 @@ test('parameter defaults observe parameter TDZ before body activation', () => {
     `)).toEqual([true, 0])
 })
 
+test('block function declarations capture active block scopes', () => {
+    expect(compileAndRun(`
+        function collect(one) {
+            var x = one + 1
+            let y = one + 2
+            const u = one + 4
+            {
+                let z = one + 3
+                const v = one + 5
+                function f() {
+                    return [one, x, y, z, u, v]
+                }
+                return f()
+            }
+        }
+
+        collect(1)
+    `)).toEqual([1, 2, 3, 4, 5, 6])
+
+    expect(compileAndRun(`
+        {
+            function getBeforeInitialization() { return x + 1 }
+            try {
+                getBeforeInitialization()
+            } catch (error) {
+                error instanceof ReferenceError
+            }
+            let x
+        }
+    `)).toBe(true)
+
+    expect(compileAndRun(`
+        {
+            function setBeforeInitialization() { x = 1 }
+            try {
+                setBeforeInitialization()
+            } catch (error) {
+                error instanceof ReferenceError
+            }
+            let x
+        }
+    `)).toBe(true)
+})
+
 test('parameter defaults cannot see body function bindings before body activation', () => {
     expect(() => compileAndRun(`
         {

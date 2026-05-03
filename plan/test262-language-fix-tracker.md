@@ -1164,3 +1164,14 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for tagged templates and template literals
+- 2026-05-03: Cleared block function closure / TDZ tails.
+  - nested function declarations outside hoisted source/function-body positions now create the function at runtime execution, so closures capture the active block scope chain instead of only the outer function activation
+  - this preserves top-level and function-body hoisting while fixing block-local closure lookups and TDZ get/set checks through function declarations
+  - fresh scans:
+    - `language/block-scope/**`: `0` failures
+    - `language/statements/const/**`: `0` failures
+    - `language/statements/let/**`: only the escaped-`let` TypeScript parser-shape file remains
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for block scope, let, and const
