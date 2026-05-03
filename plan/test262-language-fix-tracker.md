@@ -1216,3 +1216,13 @@ Reduce the `language` category failures in targeted batches:
   - validation:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
+- 2026-05-03: Cleared line-terminator runtime-negative harness recognition.
+  - runtime debug `pos` annotations on thrown object values are now non-enumerable and best-effort, so Test262-style plain `Test262Error { message: '' }` objects keep the enumerable shape that the Node/eshost error parser expects
+  - sealed/frozen thrown objects now preserve the original throw instead of being replaced by a `pos` assignment `TypeError`
+  - the Test262 preprocessor also provisions a host-backed `Test262Error` on Flat globals for bare runtime-negative files that do not define the harness constructor in source
+  - fresh `language/line-terminators/**` scan now records `0` failures
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts`
+    - `npx test262-harness --preprocessor ./scripts/test262-preprocessor.js --test262-dir ./node_modules/test262 "./node_modules/test262/test/language/line-terminators/comment-single-lf.js"`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/line-terminators`

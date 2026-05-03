@@ -2134,7 +2134,15 @@ export const getExecution = (
             const vmGlobal = getCurrentFrame()?.[Fields.globalThis] ?? initialFrame[Fields.globalThis]
             err = remapErrorToRealm(err, vmGlobal)
             if (err != null && typeof err === 'object') {
-                err.pos = commandPtr
+                try {
+                    Object.defineProperty(err, 'pos', {
+                        value: commandPtr,
+                        writable: true,
+                        configurable: true,
+                    })
+                } catch {
+                    // Thrown values may be sealed/frozen user objects. Preserve the original throw.
+                }
             }
             executeThrow(err)
         }

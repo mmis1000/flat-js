@@ -1419,6 +1419,38 @@ test('catch binding patterns destructure the thrown value', () => {
     `)).toEqual([1, 2])
 })
 
+test('runtime throw positions do not change enumerable thrown object shape', () => {
+    let thrown: any
+    try {
+        compileAndRun(`
+        function Test262Error(message) {
+            this.message = message || ''
+        }
+
+        throw new Test262Error()
+    `)
+    } catch (error) {
+        thrown = error
+    }
+
+    expect(Object.keys(thrown)).toEqual(['message'])
+    expect(Object.prototype.propertyIsEnumerable.call(thrown, 'pos')).toBe(false)
+    expect('pos' in thrown).toBe(true)
+
+    const sealed = Object.preventExtensions({ message: 'sealed' })
+    const globalThis = Object.create(global)
+    globalThis.globalThis = globalThis
+    globalThis.thrown = sealed
+
+    try {
+        compileAndRun('throw thrown', globalThis)
+    } catch (error) {
+        thrown = error
+    }
+
+    expect(thrown).toBe(sealed)
+})
+
 test('destructured catch parameter initializers and catch block closures use distinct lexical scopes', () => {
     expect(compileAndRun(`
         var probeParam, probeBlock

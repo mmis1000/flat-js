@@ -41,6 +41,25 @@ test.contents = `'use strict';
       g.require = require;
       g;
     \`, context);
+    function Test262Error(message) {
+      const error = new Error(message || '');
+      error.name = 'Test262Error';
+      Object.setPrototypeOf(error, Test262Error.prototype);
+      return error;
+    }
+    Test262Error.prototype = Object.create(Error.prototype);
+    Test262Error.prototype.constructor = Test262Error;
+    Test262Error.prototype.toString = function() {
+      return 'Test262Error: ' + this.message;
+    };
+    Test262Error.thrower = function(message) {
+      throw new Test262Error(message);
+    };
+    Object.defineProperty(vmGlobal, 'Test262Error', {
+      configurable: true,
+      writable: true,
+      value: Test262Error,
+    });
     Object.defineProperty(vmGlobal, 'eval', {
       configurable: true,
       writable: true,
