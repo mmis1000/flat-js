@@ -363,7 +363,7 @@ Reduce the `language` category failures in targeted batches:
         - not supported parser syntax: `123`
       - no intended `broken early error semantics` bucket remains
       - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
-      - post-scan focused cleanup: `await-monkey-patched-promise.js`, `literal-property-name-bigint.js`, and sloppy legacy string/numeric literal parser-diagnostic tails are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
+      - post-scan focused cleanup: `await-monkey-patched-promise.js`, `literal-property-name-bigint.js`, sloppy legacy string/numeric literal parser-diagnostic tails, and setter default-parameter diagnostics are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
     - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
       - scanned Test262 `language` parse-negative files: `4389`
       - actionable supported parse-time early-error files still not caught as `SyntaxError`: `0`
@@ -450,6 +450,9 @@ Reduce the `language` category failures in targeted batches:
       - TypeScript reports sloppy legacy octal/non-octal literals as syntax diagnostics, but still builds usable literal nodes with the JavaScript values
       - Flat JS now suppresses only those diagnostics outside strict context; strict mode still rejects the same forms
       - focused `language/literals/string/**` and `language/literals/numeric/**` scans now record `0` failures
+    - setter default-parameter diagnostics: completed for object/class setters on 2026-05-04
+      - TypeScript reports `TS1052` for setter default parameters, but ECMAScript allows them and the existing accessor AST/codegen already models the function parameter semantics
+      - Flat JS no longer treats `TS1052` as a JavaScript early error; exact Test262 setter default/length/scope files now pass in default and strict scenarios
   - Active runtime-cluster plan:
     - first runtime target: eval / function / arguments environments - completed for ordinary function-code / arguments-object roots; direct-eval parser-delegation tails remain
       - why: largest non-class root-cause cluster, direct-eval declaration-instantiation failures are already isolated, and fixes should also reduce object/class method parameter-default tails
@@ -516,7 +519,7 @@ Reduce the `language` category failures in targeted batches:
     - whitelisted TypeScript semantic early-error hits after this pass: `3847`
   - Included diagnostic code groups:
     - parameter, binding, accessor, and constructor shape:
-      - `TS1013`, `TS1014`, `TS1042`, `TS1048`, `TS1052`, `TS1054`, `TS1089`, `TS1123`, `TS1142`, `TS1186`, `TS1198`, `TS1199`, `TS1200`, `TS1312`, `TS1341`, `TS1346`, `TS1347`, `TS1368`, `TS2392`, `TS2462`, `TS2523`, `TS2524`
+      - `TS1013`, `TS1014`, `TS1042`, `TS1048`, `TS1054`, `TS1089`, `TS1123`, `TS1142`, `TS1186`, `TS1198`, `TS1199`, `TS1200`, `TS1312`, `TS1341`, `TS1346`, `TS1347`, `TS1368`, `TS2392`, `TS2462`, `TS2523`, `TS2524`
     - strict/reserved-word and control-flow early errors:
       - `TS1100`, `TS1101`, `TS1102`, `TS1104`, `TS1105`, `TS1107`, `TS1108`, `TS1113`, `TS1114`, `TS1115`, `TS1116`, `TS1163`, `TS1210`, `TS1212`, `TS1213`, `TS1359`
     - loop declaration head early errors:
@@ -531,6 +534,7 @@ Reduce the `language` category failures in targeted batches:
     - module and host-feature diagnostics for `import`/`export`, dynamic import, `import.meta`, top-level await, import attributes, and string-named module exports
     - unsupported-feature diagnostics for explicit resource management, class fields, private names, and class static blocks
     - overbroad JS-valid diagnostics:
+      - `TS1052`: setter default parameters are valid JavaScript; Flat JS keeps the existing function parameter/default semantics instead
       - `TS1117`: duplicate object literal property names are generally valid; Flat JS keeps its own duplicate data `__proto__` check
       - `TS1313`: `if (condition);` is valid JavaScript
       - `TS2410`: sloppy `with` is valid; strict `with` is already covered by `TS1101`
@@ -1305,3 +1309,10 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/literals/string`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/literals/numeric`
+- 2026-05-04: Cleared setter default-parameter diagnostics.
+  - removed `TS1052` from the JavaScript early-error diagnostic whitelist because ECMAScript allows setter default parameters
+  - object and class setters reuse the existing parameter-default and parameter/body environment split path, including `length === 0` when the single setter parameter has an initializer
+  - validation:
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/syntaxes.test.ts`
+    - `npm run build:tsc`
+    - exact Test262 harness run for the 13 object/class setter default/length/scope files in `language/expressions/object`, `language/expressions/class`, and `language/statements/class`

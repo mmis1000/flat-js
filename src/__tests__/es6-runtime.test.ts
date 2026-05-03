@@ -183,6 +183,36 @@ test('sloppy legacy numeric and string literals keep JavaScript values', () => {
     `)).toEqual([63, 9, 1, '8', '9'])
 })
 
+test('setter default parameters keep length and parameter scope semantics', () => {
+    expect(compileAndRun(`
+        var x = 'outside'
+        var assigned
+        var probeParams
+        var probeBody
+        var obj = {
+            set m(value = (probeParams = function() { return x }, 42)) {
+                var x = 'inside'
+                assigned = value
+                probeBody = function() { return x }
+            }
+        }
+
+        obj.m = undefined
+        var objectSetter = Object.getOwnPropertyDescriptor(obj, 'm').set
+
+        class C {
+            set m(value = 42) {
+                this.value = value
+            }
+        }
+        var classSetter = Object.getOwnPropertyDescriptor(C.prototype, 'm').set
+        var c = new C()
+        c.m = undefined
+
+        ;[assigned, c.value, objectSetter.length, classSetter.length, probeParams(), probeBody()]
+    `)).toEqual([42, 42, 0, 0, 'outside', 'inside'])
+})
+
 test('spread calls preserve direct eval semantics', () => {
     expect(compileAndRun(`
         const src = ['40 + 2']

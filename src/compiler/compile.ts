@@ -197,7 +197,6 @@ const javascriptEarlyErrorSemanticDiagnosticCodes = new Set([
     1014, // Rest parameter must be last in a parameter list.
     1042, // 'async' modifier cannot be used here.
     1048, // Rest parameter cannot have an initializer.
-    1052, // Set accessor parameter cannot have an initializer.
     1054, // Get accessor cannot have parameters.
     1089, // 'async' modifier cannot appear on a constructor declaration.
     1091, // Only a single variable declaration is allowed in a for-in statement.
