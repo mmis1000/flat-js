@@ -58,6 +58,7 @@ import { handleValueOpcode } from "./opcodes/value"
 const HOST_GLOBAL_THIS = globalThis
 
 type GeneratorFunctionIntrinsics = {
+    constructor: Function
     functionPrototype: object
     prototype: object
 }
@@ -82,6 +83,10 @@ const generatorIntrinsicsByFunctionPrototype = new WeakMap<object, {
     generator: GeneratorFunctionIntrinsics
     asyncGenerator: GeneratorFunctionIntrinsics
 }>()
+const dynamicGeneratorConstructorFactories = new WeakMap<
+    Function,
+    (asyncGenerator: boolean, newTarget: Function | undefined, args: unknown[]) => Function
+>()
 
 const isObjectLikeValue = (value: unknown): value is object =>
     (typeof value === 'object' && value !== null) || typeof value === 'function'
@@ -107,7 +112,20 @@ const createGeneratorFunctionIntrinsics = (
         writable: false,
         value: prototype,
     })
-    const generatorFunctionConstructor = { [constructorName]: function () {} }[constructorName]
+    let generatorFunctionConstructor: Function
+    generatorFunctionConstructor = {
+        [constructorName]: function (this: unknown, ...args: unknown[]) {
+            const factory = dynamicGeneratorConstructorFactories.get(generatorFunctionConstructor)
+            if (factory != null) {
+                return factory(asyncGenerator, new.target, args)
+            }
+
+            const NativeGeneratorFunction = Object.getPrototypeOf(function* () {}).constructor
+            const NativeAsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor
+            const nativeCtor = asyncGenerator ? NativeAsyncGeneratorFunction : NativeGeneratorFunction
+            return Reflect.construct(nativeCtor, args, new.target ?? generatorFunctionConstructor)
+        }
+    }[constructorName]
     Object.defineProperty(generatorFunctionConstructor, 'prototype', {
         configurable: false,
         enumerable: false,
@@ -120,12 +138,13 @@ const createGeneratorFunctionIntrinsics = (
         writable: true,
         value: generatorFunctionConstructor,
     })
-    return { functionPrototype: generatorFunctionPrototype, prototype }
+    return { constructor: generatorFunctionConstructor, functionPrototype: generatorFunctionPrototype, prototype }
 }
 
 const getGeneratorFunctionIntrinsics = (
     globalThis: any,
-    asyncGenerator: boolean
+    asyncGenerator: boolean,
+    dynamicFactory?: (asyncGenerator: boolean, newTarget: Function | undefined, args: unknown[]) => Function
 ): GeneratorFunctionIntrinsics => {
     const functionPrototype = isObjectLikeValue(globalThis?.Function?.prototype)
         ? globalThis.Function.prototype
@@ -140,6 +159,10 @@ const getGeneratorFunctionIntrinsics = (
             asyncGenerator: createGeneratorFunctionIntrinsics(functionPrototype, objectPrototype, 'AsyncGeneratorFunction', true),
         }
         generatorIntrinsicsByFunctionPrototype.set(functionPrototype, cached)
+    }
+    if (dynamicFactory != null) {
+        dynamicGeneratorConstructorFactories.set(cached.generator.constructor, dynamicFactory)
+        dynamicGeneratorConstructorFactories.set(cached.asyncGenerator.constructor, dynamicFactory)
     }
     return asyncGenerator ? cached.asyncGenerator : cached.generator
 }
@@ -1094,7 +1117,16 @@ export const getExecution = (
         const scopeClone = scopes.filter((scope) => getVariableFlag(scope, SpecialVariable.SyntheticScope) === undefined)
 
         const pr = currentProgram
-        const functionName = formatFunctionName(name, type)
+            const functionName = formatFunctionName(name, type)
+            const dynamicGeneratorFactory = (
+                asyncGenerator: boolean,
+                newTarget: Function | undefined,
+                args: unknown[]
+            ) => emulateFunctionConstructor(
+                args,
+                asyncGenerator ? 'asyncGenerator' : 'generator',
+                newTarget
+            )
 
         const des: FunctionDescriptor = {
             [Fields.name]: functionName,
@@ -1161,7 +1193,11 @@ export const getExecution = (
             Object.defineProperty(fn, 'caller', { value: undefined, configurable: true })
         }
         if (isGeneratorType(type) || isAsyncGeneratorType(type)) {
-            const intrinsics = getGeneratorFunctionIntrinsics(globalThis, isAsyncGeneratorType(type))
+            const intrinsics = getGeneratorFunctionIntrinsics(
+                globalThis,
+                isAsyncGeneratorType(type),
+                dynamicGeneratorFactory
+            )
             if (hasOwnPrototype(type)) {
                 Object.defineProperty(fn, 'prototype', {
                     configurable: false,
@@ -1383,19 +1419,28 @@ export const getExecution = (
         return result
     }
 
-    const emulateFunctionConstructor = (parameterValues: any[]) => {
+    const emulateFunctionConstructor = (
+        parameterValues: any[],
+        kind: 'function' | 'generator' | 'asyncGenerator' = 'function',
+        newTarget?: Function
+    ) => {
         const parameterStrings = parameterValues.map((v) => String(v))
         if (parameterStrings.length === 0) {
             parameterStrings.push('')
         }
         const body = parameterStrings[parameterStrings.length - 1]
         const paramNames = parameterStrings.slice(0, -1)
+        const functionPrefix = kind === 'asyncGenerator'
+            ? 'async function*'
+            : kind === 'generator'
+                ? 'function*'
+                : 'function'
         const src =
             paramNames.length === 0
-                ? `(function(){${body}})`
-                : `(function(${paramNames.join(',')}){${body}})`
+                ? `(${functionPrefix}(){${body}})`
+                : `(${functionPrefix}(${paramNames.join(',')}){${body}})`
         const [programData] = compileFunction(src, { evalMode: true })
-        return run(
+        const fn = run(
             programData,
             0,
             getCurrentFrame()[Fields.globalThis],
@@ -1406,6 +1451,17 @@ export const getExecution = (
             functionRedirects,
             getDebugFunction
         )
+
+        Object.defineProperty(fn, 'name', { value: 'anonymous', configurable: true })
+
+        if (kind !== 'function' && newTarget != null) {
+            const newTargetPrototype = (newTarget as { prototype?: unknown }).prototype
+            if (isObjectLikeValue(newTargetPrototype)) {
+                Object.setPrototypeOf(fn, newTargetPrototype)
+            }
+        }
+
+        return fn
     }
 
     let returnsExternal = false

@@ -412,6 +412,47 @@ test('class constructors require new and derived constructors reject primitive r
     expect(result).toEqual([true, true, true, true, false])
 })
 
+test('derived classes resolve heritage bindings through the class scope', () => {
+    const result = compileAndRun(`
+        function make(Constructor) {
+            class Typed extends Constructor {}
+            const arr = new Typed(2)
+            return [
+                arr.length,
+                arr instanceof Typed,
+                Object.getPrototypeOf(Typed.prototype) === Constructor.prototype
+            ]
+        }
+        make(Float64Array)
+    `)
+
+    expect(result).toEqual([2, true, true])
+})
+
+test('GeneratorFunction subclasses create callable generator functions', () => {
+    const result = compileAndRun(`
+        var GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor
+        class GFn extends GeneratorFunction {}
+
+        var gfn = new GFn('a', 'yield a; yield a * 2;')
+        var iter = gfn(21)
+        var prototypeDescriptor = Object.getOwnPropertyDescriptor(gfn, 'prototype')
+
+        ;[
+            iter.next().value,
+            iter.next().value,
+            gfn.length,
+            gfn.name,
+            prototypeDescriptor.writable,
+            prototypeDescriptor.enumerable,
+            prototypeDescriptor.configurable,
+            gfn instanceof GFn
+        ]
+    `)
+
+    expect(result).toEqual([21, 42, 1, 'anonymous', true, false, false, true])
+})
+
 test('anonymous class expressions infer names from variable initializers', () => {
     const result = compileAndRun(`
         var C = class {};

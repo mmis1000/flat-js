@@ -254,6 +254,12 @@ export function getFunctionBodyScopeNode(node: ts.FunctionLikeDeclarationBase | 
     return hasParameterExpressions(node) ? node.body : null
 }
 
+function hasClassHeritage(node: ts.ClassDeclaration | ts.ClassExpression) {
+    return node.heritageClauses?.some(
+        (clause) => clause.token === ts.SyntaxKind.ExtendsKeyword
+    ) ?? false
+}
+
 export function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, functions: Functions, scopes: Scopes) {
     function visit(current: ts.Node) {
         if (isScopeRoot(current)) {
@@ -292,7 +298,7 @@ export function searchFunctionAndScope(node: ts.Node, parentMap: ParentMap, func
 
         if (
             (ts.isClassDeclaration(current) || ts.isClassExpression(current))
-            && current.name != null
+            && (current.name != null || hasClassHeritage(current))
         ) {
             scopes.set(current, new Map())
         }
@@ -379,6 +385,16 @@ export function resolveScopes(node: ts.Node, parentMap: ParentMap, functions: Fu
             }
             scope.set(current.name.text, {
                 type: VariableType.Const
+            })
+        }
+
+        if ((ts.isClassDeclaration(current) || ts.isClassExpression(current)) && hasClassHeritage(current)) {
+            const scope = scopes.get(current)
+            if (scope === undefined) {
+                throw new Error('unresolvable class super binding')
+            }
+            scope.set(SpecialVariable.Super, {
+                type: VariableType.Var
             })
         }
 

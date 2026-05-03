@@ -146,7 +146,11 @@ export interface RuntimeOpcodeContext {
     }
     [OpcodeContextField.bindInternal](fn: any, self: any, args: any[]): any
     [OpcodeContextField.emulateEval](value: unknown, includesLocalScope: boolean): any
-    [OpcodeContextField.emulateFunctionConstructor](parameterValues: any[]): any
+    [OpcodeContextField.emulateFunctionConstructor](
+        parameterValues: any[],
+        kind?: 'function' | 'generator' | 'asyncGenerator',
+        newTarget?: Function
+    ): any
 
     [OpcodeContextField.findScope](ctx: Frame, name: string): Scope | null
     [OpcodeContextField.getValue](ctx: any, name: PropertyKey): any

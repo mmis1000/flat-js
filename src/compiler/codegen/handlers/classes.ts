@@ -1,6 +1,6 @@
 import * as ts from 'typescript'
 
-import { FunctionTypes, OpCode, SpecialVariable, VariableType } from '../../shared'
+import { FunctionTypes, OpCode, SpecialVariable } from '../../shared'
 import { generateFunctionDefinitionWithStackName, getExpectedArgumentCount } from './functions'
 import { generateEnterScope, markInternals, op } from '../helpers'
 import type { CodegenContext } from '../context'
@@ -31,6 +31,7 @@ export function generateClassValue(
     const classBindingAccess = classBindingName != null && node.name != null
         ? ctx.tryResolveStaticAccess(node.name, classBindingName)
         : null
+    const hasClassScope = classBindingName != null || hasSuper
 
     const ctorMember = node.members.find(
         (member: ts.ClassElement) => ts.isConstructorDeclaration(member)
@@ -38,18 +39,11 @@ export function generateClassValue(
 
     const res: Segment = []
 
-    if (hasSuper) {
-        res.push(
-            op(OpCode.Literal, 2, [SpecialVariable.Super]),
-            op(OpCode.Literal, 2, [VariableType.Var]),
-            op(OpCode.Literal, 2, [1]),
-            op(OpCode.EnterScope)
-        )
+    if (hasClassScope) {
+        res.push(...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName))
     }
 
     if (classBindingName != null) {
-        res.push(...generateEnterScope(node, ctx.scopes, ctx.getVariableRuntimeName))
-
         if (classBindingAccess != null) {
             res.push(
                 ...markInternals([
@@ -164,11 +158,7 @@ export function generateClassValue(
         }
     }
 
-    if (classBindingName != null) {
-        res.push(op(OpCode.LeaveScope))
-    }
-
-    if (hasSuper) {
+    if (hasClassScope) {
         res.push(op(OpCode.LeaveScope))
     }
 

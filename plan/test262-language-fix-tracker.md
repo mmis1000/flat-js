@@ -398,7 +398,7 @@ Reduce the `language` category failures in targeted batches:
         - `language/statements/class/super/**`: `0` focused failures
         - `language/statements/class/definition/**`: `9` focused failures -> `0`
         - `language/expressions/object/method-definition/**`: runtime method-shape failures cleared; remaining focused intended files are parser-delegation / harness tails
-        - `language/statements/class/subclass/**`: `24` intended focused failures -> `10`; remaining actionable runtime tails are built-in `GeneratorFunction` / `TypedArray` subclassing, plus parser-delegation arrow-`super` files
+        - `language/statements/class/subclass/**`: `24` intended focused failures -> `4`; remaining intended files are parser-delegation arrow-`super` syntax tails
         - `language/statements/class/name-binding/**`: `4` focused failures -> `0`
         - six expression/statement `scope-name-lex-*` class-name binding files now pass through direct Test262 harness validation
       - fixed class/method runtime areas include:
@@ -410,6 +410,8 @@ Reduce the `language` category failures in targeted batches:
         - derived constructors rejecting primitive returns outside the constructor body's own `try`/`catch`
         - superclass constructibility checks before `prototype` lookup, including VM-bound generator functions and Proxy-wrapped VM generators
         - generator and async-generator function wrappers are now natively non-constructible while preserving their own generator `prototype` property
+        - class heritage scopes now keep `[super]` in the class runtime scope so statically resolved outer heritage names, captured class names, and `super` metadata agree
+        - GeneratorFunction subclasses now construct callable VM generator functions with the expected `length`, `name`, and `prototype` shape
     - generators and async generators: `280` generator-root files
       - async-generator expressions/statements: `156` / `80`
       - generator expressions/statements: `28` / `16`
