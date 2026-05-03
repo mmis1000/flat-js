@@ -64,6 +64,12 @@ test('nullish coalescing short-circuits only null and undefined', () => {
 })
 
 test('optional property and element access short-circuit nullish bases', () => {
+    const createOptionalGlobal = () => vm.runInNewContext(`
+        const g = Object.create(globalThis)
+        g.globalThis = g
+        g
+    `)
+
     expect(compileAndRun(`
         null?.prop
     `)).toBeUndefined()
@@ -77,6 +83,23 @@ test('optional property and element access short-circuit nullish bases', () => {
 
         [undefined?.[key()], keyCalls]
     `)).toEqual([undefined, 0])
+
+    expect(compileAndRun(`
+        const a = undefined
+        let x = 1
+        a?.b.c(++x).d
+        undefined?.[++x]
+        x
+    `)).toBe(1)
+
+    expect(compileAndRun(`
+        const a = 'global'
+        function fn() {
+            const a = 'local'
+            return eval?.('a')
+        }
+        fn()
+    `, createOptionalGlobal())).toBe('global')
 
     expect(compileAndRun(`
         let keyCalls = 0

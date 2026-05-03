@@ -73,6 +73,7 @@ const webCompatHostBehaviorFiles = new Set([
 ])
 
 const nativeHarnessFailureFiles = new Set([
+    'language/expressions/optional-chaining/member-expression-async-identifier.js',
     'language/statements/async-function/evaluation-body.js',
 ])
 

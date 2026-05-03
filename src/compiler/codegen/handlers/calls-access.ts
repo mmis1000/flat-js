@@ -3,9 +3,9 @@ import * as ts from 'typescript'
 import { OpCode, SpecialVariable } from '../../shared'
 import { generateClassValue } from './classes'
 import { generateFunctionDefinitionWithStackName } from './functions'
-import { headOf, op } from '../helpers'
+import { op } from '../helpers'
 import type { CodegenContext } from '../context'
-import type { Segment } from '../types'
+import type { Op, Segment } from '../types'
 
 type ArrayLikeElement = ts.Expression | ts.SpreadElement | ts.OmittedExpression
 
@@ -50,43 +50,6 @@ function unwrapParenthesizedExpression(node: ts.Expression): ts.Expression {
         node = node.expression
     }
     return node
-}
-
-function generateOptionalAccess(
-    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
-    flag: number,
-    ctx: CodegenContext
-): Segment | undefined {
-    if (node.questionDotToken == null) {
-        return undefined
-    }
-
-    const shortCircuit = [
-        op(OpCode.Nop, 0),
-        op(OpCode.Pop),
-        op(OpCode.UndefinedLiteral),
-    ]
-    const exit = [op(OpCode.Nop, 0)]
-    const nameOps = ts.isPropertyAccessExpression(node)
-        ? [op(OpCode.Literal, 2, [node.name.text])]
-        : node.argumentExpression == null
-            ? [op(OpCode.UndefinedLiteral)]
-            : ctx.generate(node.argumentExpression, flag)
-
-    return [
-        ...ctx.generate(node.expression, flag),
-        op(OpCode.NodeOffset, 2, [headOf(shortCircuit)]),
-        op(OpCode.DuplicateSecond),
-        op(OpCode.NullLiteral),
-        op(OpCode.BEqualsEquals),
-        op(OpCode.JumpIf),
-        ...nameOps,
-        op(OpCode.Get),
-        op(OpCode.NodeOffset, 2, [headOf(exit)]),
-        op(OpCode.Jump),
-        ...shortCircuit,
-        ...exit,
-    ]
 }
 
 function needsResolveScope(node: ts.Node, ctx: CodegenContext): boolean {
@@ -150,6 +113,147 @@ function generateArgumentArray(args: readonly ts.Expression[], flag: number, ctx
     const res: Segment = [op(OpCode.ArrayLiteral)]
     appendArrayElements(res, args, flag, ctx)
     return res
+}
+
+type OptionalChainState = {
+    exit: Op<OpCode>[]
+    shortCircuits: Op<OpCode>[][]
+}
+
+function appendOptionalNullishJump(ops: Segment, state: OptionalChainState, cleanupCount: number) {
+    const shortCircuit = [
+        op(OpCode.Nop, 0),
+        ...new Array(cleanupCount).fill(0).map(() => op(OpCode.Pop)),
+        op(OpCode.UndefinedLiteral),
+        op(OpCode.NodeOffset, 2, [state.exit[0]]),
+        op(OpCode.Jump),
+    ]
+    state.shortCircuits.push(shortCircuit)
+
+    ops.push(
+        op(OpCode.NodeOffset, 2, [shortCircuit[0]]),
+        op(OpCode.DuplicateSecond),
+        op(OpCode.NullLiteral),
+        op(OpCode.BEqualsEquals),
+        op(OpCode.JumpIf),
+    )
+}
+
+function generateOptionalChainValue(node: ts.Expression, flag: number, ctx: CodegenContext, state: OptionalChainState): Segment {
+    const rawNode = ctx.extractQuote(node)
+
+    if (ts.isPropertyAccessExpression(rawNode) || ts.isElementAccessExpression(rawNode)) {
+        return [
+            ...generateOptionalChainLeft(rawNode, flag, ctx, state),
+            op(OpCode.Get),
+        ]
+    }
+
+    if (ts.isCallExpression(rawNode)) {
+        return generateOptionalChainCall(rawNode, flag, ctx, state)
+    }
+
+    return ctx.generate(rawNode, flag)
+}
+
+function generateOptionalBaseValue(node: ts.Expression, flag: number, ctx: CodegenContext, state: OptionalChainState): Segment {
+    const rawNode = ctx.extractQuote(node)
+    return ts.isOptionalChain(rawNode)
+        ? generateOptionalChainValue(rawNode, flag, ctx, state)
+        : ctx.generate(rawNode, flag)
+}
+
+function generateOptionalChainLeft(
+    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    flag: number,
+    ctx: CodegenContext,
+    state: OptionalChainState
+): Segment {
+    if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
+        return ctx.generateLeft(node, flag)
+    }
+
+    const ops = generateOptionalBaseValue(node.expression, flag, ctx, state)
+    if (node.questionDotToken != null) {
+        appendOptionalNullishJump(ops, state, 1)
+    }
+
+    if (ts.isPropertyAccessExpression(node)) {
+        ops.push(op(OpCode.Literal, 2, [node.name.text]))
+    } else if (node.argumentExpression == null) {
+        ops.push(op(OpCode.UndefinedLiteral))
+    } else {
+        ops.push(...ctx.generate(node.argumentExpression, flag))
+    }
+
+    return ops
+}
+
+function generateOptionalCallArguments(node: ts.CallExpression, flag: number, ctx: CodegenContext): Segment {
+    if (node.arguments.some((arg) => ts.isSpreadElement(arg))) {
+        return [
+            ...generateArgumentArray(node.arguments, flag, ctx),
+            op(OpCode.ExpandArgumentArray),
+        ]
+    }
+
+    return [
+        ...node.arguments.map((arg) => ctx.generate(arg, flag)).flat(),
+        op(OpCode.Literal, 2, [node.arguments.length]),
+    ]
+}
+
+function generateOptionalChainCall(node: ts.CallExpression, flag: number, ctx: CodegenContext, state: OptionalChainState): Segment {
+    const self = ctx.extractQuote(node.expression)
+
+    if (ts.isPropertyAccessExpression(self) || ts.isElementAccessExpression(self)) {
+        const ops: Segment = [
+            ...generateOptionalChainLeft(self, flag, ctx, state),
+            op(OpCode.GetKeepCtx),
+        ]
+        if (node.questionDotToken != null) {
+            appendOptionalNullishJump(ops, state, 3)
+        }
+        ops.push(
+            ...generateOptionalCallArguments(node, flag, ctx),
+            op(OpCode.CallResolved),
+        )
+        return ops
+    }
+
+    if (!ts.isExpression(self)) {
+        throw new Error('not supported optional call target')
+    }
+
+    const ops = generateOptionalBaseValue(self, flag, ctx, state)
+    if (node.questionDotToken != null) {
+        appendOptionalNullishJump(ops, state, 1)
+    }
+    ops.push(
+        ...generateOptionalCallArguments(node, flag, ctx),
+        op(OpCode.CallValue),
+    )
+    return ops
+}
+
+function generateOptionalChain(node: ts.Expression, flag: number, ctx: CodegenContext): Segment | undefined {
+    const rawNode = ctx.extractQuote(node)
+    if (!ts.isOptionalChain(rawNode)) {
+        return undefined
+    }
+
+    const state: OptionalChainState = {
+        exit: [op(OpCode.Nop, 0)],
+        shortCircuits: [],
+    }
+
+    return [
+        ...generateOptionalChainValue(rawNode, flag, ctx, state),
+        op(OpCode.NodeOffset, 2, [state.exit[0]]),
+        op(OpCode.Jump),
+        ...state.shortCircuits.flat(),
+        ...state.exit,
+    ]
 }
 
 export function generateDirectCall(
@@ -222,6 +326,13 @@ export function generateDirectCall(
 }
 
 export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: CodegenContext): Segment | undefined {
+    if (ts.isExpression(node)) {
+        const optionalChain = generateOptionalChain(node, flag, ctx)
+        if (optionalChain != null) {
+            return optionalChain
+        }
+    }
+
     if (ts.isCallExpression(node)) {
         const self = ctx.extractQuote(node.expression)
         const hasSpread = node.arguments.some((arg) => ts.isSpreadElement(arg))
@@ -408,7 +519,7 @@ export function generateCallsAndAccess(node: ts.Node, flag: number, ctx: Codegen
     }
 
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-        return generateOptionalAccess(node, flag, ctx) ?? [
+        return [
             ...ctx.generateLeft(node, flag),
             op(OpCode.Get)
         ]

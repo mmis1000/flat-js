@@ -1175,3 +1175,14 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for block scope, let, and const
+- 2026-05-03: Cleared optional-chain runtime tails.
+  - optional-chain codegen now emits one chain-aware jump path, so a nullish base skips the rest of the contiguous chain, including later keys, calls, arguments, and awaits
+  - optional `eval?.(...)` now calls through the value-call path, preserving indirect eval semantics instead of accidentally observing local scope
+  - `super.method?.()` reuses the existing super-reference left-hand path before the optional call check
+  - fresh `language/expressions/optional-chaining/**` scan now has no runtime-semantic intended failures:
+    - remaining intended file is the TypeScript parser-delegation `super` member-expression case
+    - `member-expression-async-identifier.js` is classified as a native Node unhandled-rejection harness issue; the same source shape also triggers native Node's unhandled-rejection policy
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts src/__tests__/function-expression-self-binding.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/expressions/optional-chaining`
