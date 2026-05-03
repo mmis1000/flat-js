@@ -75,7 +75,8 @@ function hasUseStrictDirective(statements: readonly ts.Statement[]): boolean {
             return false
         }
 
-        if (statement.expression.text === 'use strict') {
+        const raw = statement.expression.getText()
+        if (raw === "'use strict'" || raw === '"use strict"') {
             return true
         }
     }

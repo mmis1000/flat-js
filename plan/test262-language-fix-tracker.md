@@ -1244,3 +1244,11 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/basic-programs.test.ts`
     - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with focused roots for statement variables and global code
+- 2026-05-03: Cleared directive-prologue raw-string strictness tails.
+  - strict directive detection now matches only raw `'use strict'` / `"use strict"` string-literal tokens
+  - string literals that cook to `use strict` through an escape sequence or line continuation no longer accidentally make a function strict
+  - fresh `language/directive-prologue/**` scan now records `0` failures
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/syntaxes.test.ts`
+    - `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` with `TEST262_SCAN_ROOT=node_modules/test262/test/language/directive-prologue`

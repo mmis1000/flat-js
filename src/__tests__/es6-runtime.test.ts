@@ -223,6 +223,33 @@ test('calls resolve callees before evaluating arguments', () => {
     expect(missingIdentifierGlobal.called).toBe(false)
 })
 
+test('strict directives require raw use strict string literals', () => {
+    expect(compileAndRun(`
+        function strictFn() {
+            'use strict'
+            return this === undefined
+        }
+        strictFn.call(undefined)
+    `)).toBe(true)
+
+    expect(compileAndRun(String.raw`
+        function escapedSpace() {
+            'use\u0020strict'
+            return this !== undefined
+        }
+        escapedSpace.call(undefined)
+    `)).toBe(true)
+
+    expect(compileAndRun(String.raw`
+        function lineContinuation() {
+            'use str\
+ict'
+            return this !== undefined
+        }
+        lineContinuation.call(undefined)
+    `)).toBe(true)
+})
+
 test('spread works for new, super, and super property calls', () => {
     const result = compileAndRun(`
         class Base {
