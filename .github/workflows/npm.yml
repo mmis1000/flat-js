@@ -84,6 +84,7 @@ jobs:
     - run: npm run build-web
     - run: npm run build-example
     - run: npm run build-example:self-contained-vm
+    - run: npm run build-example:serialization-playground
     - run: cp -R example dist-web/example
     - run: git config user.email "${GITHUB_ACTOR}@ci"
     - run: git config user.name "${GITHUB_ACTOR}"
