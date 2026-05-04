@@ -111,6 +111,18 @@ export const enum FrameType {
     Try
 }
 
+export const enum DynamicFunctionKind {
+    Function,
+    Generator,
+    AsyncGenerator,
+}
+
+export const enum GeneratorResumeKind {
+    Next,
+    Throw,
+    Return,
+}
+
 export type Scope = Record<string, any>
 
 export const enum Fields {
@@ -173,6 +185,10 @@ export const enum Fields {
     values,
     savedEvalResult,
     homeObject,
+    delegateAsyncFromSync,
+    delegateAwaitDone,
+    delegateNextMethod,
+    asyncYieldResumeAwaitReturn,
 }
 
 interface BaseFrame {
@@ -535,14 +551,17 @@ const environments = new WeakSet() as unknown as RefinedEnvSet
 const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
 
 type PendingAction = {
-    [Fields.type]: 'throw' | 'return',
+    [Fields.type]: GeneratorResumeKind.Throw | GeneratorResumeKind.Return,
     [Fields.value]: any,
 }
 
 type GeneratorDelegateState = {
     [Fields.delegateIterator]: any,
     [Fields.delegatePhase]: number,
-    [Fields.delegateMode]?: 'next' | 'throw' | 'return',
+    [Fields.delegateMode]?: GeneratorResumeKind,
+    [Fields.delegateAsyncFromSync]?: boolean,
+    [Fields.delegateAwaitDone]?: boolean,
+    [Fields.delegateNextMethod]?: Function,
 }
 
 type GeneratorState = {
@@ -554,6 +573,7 @@ type GeneratorState = {
     [Fields.baseFrame]: Frame | null,
     [Fields.gen]: any,
     [Fields.execution]: Execution
+    [Fields.asyncYieldResumeAwaitReturn]?: boolean,
 }
 const generatorStates = new WeakMap<any, GeneratorState>()
 

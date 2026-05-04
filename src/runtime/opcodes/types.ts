@@ -1,6 +1,7 @@
 import type { FunctionTypes, VariableType } from "../../compiler"
 import type {
     Execution,
+    DynamicFunctionKind,
     Frame,
     IdentifierReference,
     Result,
@@ -148,7 +149,7 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.emulateEval](value: unknown, includesLocalScope: boolean): any
     [OpcodeContextField.emulateFunctionConstructor](
         parameterValues: any[],
-        kind?: 'function' | 'generator' | 'asyncGenerator',
+        kind?: DynamicFunctionKind,
         newTarget?: Function
     ): any
 

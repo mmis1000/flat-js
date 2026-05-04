@@ -3,6 +3,7 @@ import { STATIC_SLOT_NAMELESS } from "../compiler/shared"
 import {
     bindInfo,
     BIND,
+    DynamicFunctionKind,
     environments,
     Execution,
     Fields,
@@ -12,6 +13,7 @@ import {
     functionDescriptors,
     FunctionDescriptor,
     formatFunctionName,
+    GeneratorResumeKind,
     generatorStates,
     GeneratorState,
     getEmptyObject,
@@ -73,7 +75,7 @@ type AsyncGeneratorRequestContinuation = {
 type AsyncGeneratorRequestResult = IteratorResult<unknown> | AsyncGeneratorRequestContinuation
 
 type AsyncGeneratorQueuedRequest = {
-    method: 'next' | 'throw' | 'return'
+    method: GeneratorResumeKind
     value?: unknown
     resolve: (result: IteratorResult<unknown>) => void
     reject: (reason?: unknown) => void
@@ -784,29 +786,29 @@ export const getExecution = (
         }
 
         const runHost = (
-            method: 'next' | 'throw' | 'return',
+            method: GeneratorResumeKind,
             val?: unknown
         ): IteratorResult<unknown> => {
             const exec = state[Fields.execution]
             const stk = exec[Fields.stack]
 
             if (!state[Fields.started]) {
-                if (method === 'throw') {
+                if (method === GeneratorResumeKind.Throw) {
                     state[Fields.completed] = true
                     state[Fields.stack] = []
                     throw val
                 }
-                if (method === 'return') {
+                if (method === GeneratorResumeKind.Return) {
                     state[Fields.completed] = true
                     state[Fields.stack] = []
                     return { value: val, done: true }
                 }
             }
 
-            if (method === 'throw') {
-                state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: val }
-            } else if (method === 'return') {
-                state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: val }
+            if (method === GeneratorResumeKind.Throw) {
+                state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Throw, [Fields.value]: val }
+            } else if (method === GeneratorResumeKind.Return) {
+                state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Return, [Fields.value]: val }
             } else {
                 state[Fields.pendingAction] = null
             }
@@ -818,7 +820,7 @@ export const getExecution = (
             const wasStarted = state[Fields.started]
             state[Fields.started] = true
 
-            if (wasStarted && method === 'next') {
+            if (wasStarted && method === GeneratorResumeKind.Next) {
                 exec[Fields.pushValue](val)
             }
 
@@ -845,15 +847,15 @@ export const getExecution = (
         const gen: any = {
             next(_value?: unknown): IteratorResult<unknown> {
                 if (state[Fields.completed]) return { value: undefined, done: true }
-                return runHost('next', _value)
+                return runHost(GeneratorResumeKind.Next, _value)
             },
             throw(error?: unknown): IteratorResult<unknown> {
                 if (state[Fields.completed]) throw error
-                return runHost('throw', error)
+                return runHost(GeneratorResumeKind.Throw, error)
             },
             return(value?: unknown): IteratorResult<unknown> {
                 if (state[Fields.completed]) return { value, done: true }
-                return runHost('return', value)
+                return runHost(GeneratorResumeKind.Return, value)
             },
             [Symbol.iterator]() { return gen }
         }
@@ -959,39 +961,39 @@ export const getExecution = (
         })
 
         const runRequest = (
-            method: 'next' | 'throw' | 'return',
+            method: GeneratorResumeKind,
             value?: unknown
         ): AsyncGeneratorRequestResult => {
             const exec = state[Fields.execution]
             const stk = exec[Fields.stack]
 
             if (state[Fields.completed]) {
-                if (method === 'throw') {
+                if (method === GeneratorResumeKind.Throw) {
                     throw value
                 }
-                if (method === 'return') {
+                if (method === GeneratorResumeKind.Return) {
                     return { value, done: true }
                 }
                 return { value: undefined, done: true }
             }
 
             if (!state[Fields.started]) {
-                if (method === 'throw') {
+                if (method === GeneratorResumeKind.Throw) {
                     state[Fields.completed] = true
                     state[Fields.stack] = []
                     throw value
                 }
-                if (method === 'return') {
+                if (method === GeneratorResumeKind.Return) {
                     state[Fields.completed] = true
                     state[Fields.stack] = []
                     return { value, done: true }
                 }
             }
 
-            if (method === 'throw') {
-                state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: value }
-            } else if (method === 'return') {
-                state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: value }
+            if (method === GeneratorResumeKind.Throw) {
+                state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Throw, [Fields.value]: value }
+            } else if (method === GeneratorResumeKind.Return) {
+                state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Return, [Fields.value]: value }
             } else {
                 state[Fields.pendingAction] = null
             }
@@ -1003,7 +1005,7 @@ export const getExecution = (
             const wasStarted = state[Fields.started]
             state[Fields.started] = true
 
-            if (wasStarted && method === 'next') {
+            if (wasStarted && method === GeneratorResumeKind.Next) {
                 exec[Fields.pushValue](value)
             }
 
@@ -1090,7 +1092,7 @@ export const getExecution = (
             }
         }
 
-        const enqueueRequest = (method: 'next' | 'throw' | 'return', value?: unknown): Promise<IteratorResult<unknown>> => {
+        const enqueueRequest = (method: GeneratorResumeKind, value?: unknown): Promise<IteratorResult<unknown>> => {
             return new PromiseCtor((
                 resolve: (result: IteratorResult<unknown>) => void,
                 reject: (reason?: unknown) => void
@@ -1102,13 +1104,13 @@ export const getExecution = (
 
         const gen: any = {
             next(value?: unknown): Promise<IteratorResult<unknown>> {
-                return enqueueRequest('next', value)
+                return enqueueRequest(GeneratorResumeKind.Next, value)
             },
             throw(error?: unknown): Promise<IteratorResult<unknown>> {
-                return enqueueRequest('throw', error)
+                return enqueueRequest(GeneratorResumeKind.Throw, error)
             },
             return(value?: unknown): Promise<IteratorResult<unknown>> {
-                return enqueueRequest('return', value)
+                return enqueueRequest(GeneratorResumeKind.Return, value)
             },
             [Symbol.asyncIterator]() { return gen }
         }
@@ -1194,7 +1196,7 @@ export const getExecution = (
                 args: unknown[]
             ) => emulateFunctionConstructor(
                 args,
-                asyncGenerator ? 'asyncGenerator' : 'generator',
+                asyncGenerator ? DynamicFunctionKind.AsyncGenerator : DynamicFunctionKind.Generator,
                 newTarget
             )
 
@@ -1512,7 +1514,7 @@ export const getExecution = (
 
     const emulateFunctionConstructor = (
         parameterValues: any[],
-        kind: 'function' | 'generator' | 'asyncGenerator' = 'function',
+        kind: DynamicFunctionKind = DynamicFunctionKind.Function,
         newTarget?: Function
     ) => {
         const parameterStrings = parameterValues.map((v) => String(v))
@@ -1521,9 +1523,9 @@ export const getExecution = (
         }
         const body = parameterStrings[parameterStrings.length - 1]
         const paramNames = parameterStrings.slice(0, -1)
-        const functionPrefix = kind === 'asyncGenerator'
+        const functionPrefix = kind === DynamicFunctionKind.AsyncGenerator
             ? 'async function*'
-            : kind === 'generator'
+            : kind === DynamicFunctionKind.Generator
                 ? 'function*'
                 : 'function'
         const src =
@@ -1545,7 +1547,7 @@ export const getExecution = (
 
         Object.defineProperty(fn, 'name', { value: 'anonymous', configurable: true })
 
-        if (kind !== 'function' && newTarget != null) {
+        if (kind !== DynamicFunctionKind.Function && newTarget != null) {
             const newTargetPrototype = (newTarget as { prototype?: unknown }).prototype
             if (isObjectLikeValue(newTargetPrototype)) {
                 Object.setPrototypeOf(fn, newTargetPrototype)

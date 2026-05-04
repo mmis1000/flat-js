@@ -7,6 +7,7 @@ import {
     Frame,
     FrameType,
     FunctionFrame,
+    GeneratorResumeKind,
     GeneratorState,
     HOST_FUNCTION,
     IDENTIFIER_REFERENCE_FRAME,
@@ -886,9 +887,9 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         }
 
                         if (fnTarget === state[Fields.gen].throw) {
-                            state[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: value }
+                            state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Throw, [Fields.value]: value }
                         } else if (fnTarget === state[Fields.gen].return) {
-                            state[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: value }
+                            state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Return, [Fields.value]: value }
                         } else {
                             state[Fields.pendingAction] = null
                         }

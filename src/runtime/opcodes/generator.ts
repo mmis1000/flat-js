@@ -3,17 +3,13 @@ import {
     Fields,
     FrameType,
     GeneratorDelegateState,
+    GeneratorResumeKind,
     GeneratorState,
     assertIteratorResult,
     generatorStates,
     iteratorComplete,
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
-
-const DELEGATE_ASYNC_FROM_SYNC = Symbol('delegate.asyncFromSync')
-const DELEGATE_AWAIT_DONE = Symbol('delegate.awaitDone')
-const DELEGATE_NEXT_METHOD = Symbol('delegate.nextMethod')
-const ASYNC_YIELD_RESUME_AWAIT_RETURN = Symbol('asyncYieldResume.awaitReturn')
 
 export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): OpcodeHandlerResult => {
     const isAsyncGeneratorObject = (value: any): boolean =>
@@ -65,15 +61,15 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
         }
         case OpCode.YieldResume: {
             const state = ctx[OpcodeContextField.currentFrame][Fields.generator] as GeneratorState | undefined
-            if (state && (state as any)[ASYNC_YIELD_RESUME_AWAIT_RETURN]) {
-                ;(state as any)[ASYNC_YIELD_RESUME_AWAIT_RETURN] = false
+            if (state && state[Fields.asyncYieldResumeAwaitReturn]) {
+                state[Fields.asyncYieldResumeAwaitReturn] = false
                 return completeReturn(ctx[OpcodeContextField.popCurrentFrameStack]())
             }
 
             if (state && state[Fields.pendingAction]) {
                 const action = state[Fields.pendingAction]
                 state[Fields.pendingAction] = null
-                if (action[Fields.type] === 'throw') {
+                if (action[Fields.type] === GeneratorResumeKind.Throw) {
                     if (ctx[OpcodeContextField.currentFrame][Fields.type] === FrameType.Try) {
                         ctx[OpcodeContextField.pushCurrentFrameStack](action[Fields.value])
                         ctx[OpcodeContextField.initiateThrow]()
@@ -83,7 +79,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 }
 
                 if (isAsyncGeneratorState(state)) {
-                    ;(state as any)[ASYNC_YIELD_RESUME_AWAIT_RETURN] = true
+                    state[Fields.asyncYieldResumeAwaitReturn] = true
                     ctx[OpcodeContextField.ptr] = ctx[OpcodeContextField.commandPtr]
                     return {
                         [Fields.done]: false,
@@ -219,11 +215,11 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
             }
 
             const completeAsyncDelegateValue = (value: any): OpcodeHandlerResult => {
-                const done = !!(delegate as any)[DELEGATE_AWAIT_DONE]
+                const done = !!delegate?.[Fields.delegateAwaitDone]
                 const lastMode = delegate?.[Fields.delegateMode]
                 if (done) {
                     frame[Fields.delegate] = null
-                    if (lastMode === 'return') {
+                    if (lastMode === GeneratorResumeKind.Return) {
                         return completeReturn(value)
                     }
                     ctx[OpcodeContextField.pushCurrentFrameStack](value)
@@ -242,14 +238,14 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 const value = result.value
                 const lastMode = delegate?.[Fields.delegateMode]
 
-                if ((delegate as any)[DELEGATE_ASYNC_FROM_SYNC]) {
-                    ;(delegate as any)[DELEGATE_AWAIT_DONE] = done
+                if (delegate?.[Fields.delegateAsyncFromSync]) {
+                    delegate[Fields.delegateAwaitDone] = done
                     return awaitDelegated(value, 4)
                 }
 
                 if (done) {
                     frame[Fields.delegate] = null
-                    if (lastMode === 'return') {
+                    if (lastMode === GeneratorResumeKind.Return) {
                         return completeReturn(value)
                     }
                     ctx[OpcodeContextField.pushCurrentFrameStack](value)
@@ -284,20 +280,20 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
 
                 let iter: any
                 let sentVal: any
-                let mode: 'next' | 'throw' | 'return' = 'next'
+                let mode = GeneratorResumeKind.Next
 
                 if (delegate && delegate[Fields.delegatePhase] === 5) {
                     iter = delegate[Fields.delegateIterator]
                     sentVal = ctx[OpcodeContextField.popCurrentFrameStack]()
-                    mode = 'return'
+                    mode = GeneratorResumeKind.Return
                 } else if (!delegate) {
                     const iterable = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
                     const iteratorRecord = getAsyncIterator(iterable)
                     iter = iteratorRecord.iterator
                     delegate = { [Fields.delegateIterator]: iter, [Fields.delegatePhase]: 0 }
-                    ;(delegate as any)[DELEGATE_NEXT_METHOD] = iteratorRecord.next
+                    delegate[Fields.delegateNextMethod] = iteratorRecord.next
                     if (iteratorRecord.asyncFromSync) {
-                        ;(delegate as any)[DELEGATE_ASYNC_FROM_SYNC] = true
+                        delegate[Fields.delegateAsyncFromSync] = true
                     }
                     frame[Fields.delegate] = delegate
                     sentVal = undefined
@@ -308,16 +304,16 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                         mode = outerState[Fields.pendingAction]![Fields.type]
                         sentVal = outerState[Fields.pendingAction]![Fields.value]
                         outerState[Fields.pendingAction] = null
-                        if (mode === 'return') {
+                        if (mode === GeneratorResumeKind.Return) {
                             delegate[Fields.delegateMode] = mode
                             return awaitDelegated(sentVal, 5)
                         }
                     }
                 }
 
-                const methodFn = mode === 'next' ? (delegate as any)[DELEGATE_NEXT_METHOD] : mode === 'throw' ? iter.throw : iter.return
+                const methodFn = mode === GeneratorResumeKind.Next ? delegate?.[Fields.delegateNextMethod] : mode === GeneratorResumeKind.Throw ? iter.throw : iter.return
                 if (methodFn == null) {
-                    if (mode === 'throw') {
+                    if (mode === GeneratorResumeKind.Throw) {
                         const returnMethod = iter.return
                         if (returnMethod == null) {
                             frame[Fields.delegate] = null
@@ -328,7 +324,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                         }
                         return awaitDelegated(returnMethod.call(iter), 6)
                     }
-                    if (mode === 'return') {
+                    if (mode === GeneratorResumeKind.Return) {
                         return awaitDelegated(sentVal, 7)
                     }
                     frame[Fields.delegate] = null
@@ -339,7 +335,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 }
 
                 delegate[Fields.delegateMode] = mode
-                if ((delegate as any)[DELEGATE_ASYNC_FROM_SYNC]) {
+                if (delegate[Fields.delegateAsyncFromSync]) {
                     return processAsyncDelegateResult(
                         methodFn.call(iter, sentVal)
                     )
@@ -355,7 +351,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 if (subResult && subResult.done) {
                     const lastMode = delegate[Fields.delegateMode]
                     frame[Fields.delegate] = null
-                    if (lastMode === 'return') {
+                    if (lastMode === GeneratorResumeKind.Return) {
                         return completeReturn(subResult.value)
                     }
                     ctx[OpcodeContextField.pushCurrentFrameStack](subResult.value)
@@ -367,14 +363,14 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
 
             let iter: any
             let sentVal: any
-            let mode: 'next' | 'throw' | 'return' = 'next'
+            let mode = GeneratorResumeKind.Next
 
             if (!delegate) {
                 const iterable = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
                 const iteratorRecord = getSyncIteratorRecord(iterable)
                 iter = iteratorRecord.iterator
                 delegate = { [Fields.delegateIterator]: iter, [Fields.delegatePhase]: 0 }
-                ;(delegate as any)[DELEGATE_NEXT_METHOD] = iteratorRecord.next
+                delegate[Fields.delegateNextMethod] = iteratorRecord.next
                 frame[Fields.delegate] = delegate
                 sentVal = undefined
             } else {
@@ -387,31 +383,42 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 }
             }
 
-            const getMethod = (name: 'throw' | 'return') => {
-                const method = iter[name]
+            const getThrowMethod = () => {
+                const method = iter.throw
                 if (method == null) {
                     return undefined
                 }
                 if (typeof method !== 'function') {
-                    throw new TypeError(`iterator ${name} method must be callable`)
+                    throw new TypeError('iterator throw method must be callable')
                 }
                 return method
             }
 
-            const methodFn = mode === 'next'
-                ? (delegate as any)[DELEGATE_NEXT_METHOD]
-                : mode === 'throw'
-                    ? getMethod('throw')
-                    : getMethod('return')
+            const getReturnMethod = () => {
+                const method = iter.return
+                if (method == null) {
+                    return undefined
+                }
+                if (typeof method !== 'function') {
+                    throw new TypeError('iterator return method must be callable')
+                }
+                return method
+            }
+
+            const methodFn = mode === GeneratorResumeKind.Next
+                ? delegate?.[Fields.delegateNextMethod]
+                : mode === GeneratorResumeKind.Throw
+                    ? getThrowMethod()
+                    : getReturnMethod()
             const subState = methodFn ? generatorStates.get(methodFn) : undefined
 
             if (subState) {
                 if (subState[Fields.completed]) {
                     frame[Fields.delegate] = null
-                    if (mode === 'throw') {
+                    if (mode === GeneratorResumeKind.Throw) {
                         throw sentVal
                     }
-                    if (mode === 'return') {
+                    if (mode === GeneratorResumeKind.Return) {
                         ctx[OpcodeContextField.executeReturn](sentVal)
                         return BREAK_COMMAND
                     }
@@ -420,13 +427,13 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 }
 
                 if (!subState[Fields.started]) {
-                    if (mode === 'throw') {
+                    if (mode === GeneratorResumeKind.Throw) {
                         subState[Fields.completed] = true
                         subState[Fields.stack] = []
                         frame[Fields.delegate] = null
                         throw sentVal
                     }
-                    if (mode === 'return') {
+                    if (mode === GeneratorResumeKind.Return) {
                         subState[Fields.completed] = true
                         subState[Fields.stack] = []
                         frame[Fields.delegate] = null
@@ -435,10 +442,10 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                     }
                 }
 
-                if (mode === 'throw') {
-                    subState[Fields.pendingAction] = { [Fields.type]: 'throw', [Fields.value]: sentVal }
-                } else if (mode === 'return') {
-                    subState[Fields.pendingAction] = { [Fields.type]: 'return', [Fields.value]: sentVal }
+                if (mode === GeneratorResumeKind.Throw) {
+                    subState[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Throw, [Fields.value]: sentVal }
+                } else if (mode === GeneratorResumeKind.Return) {
+                    subState[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Return, [Fields.value]: sentVal }
                 } else {
                     subState[Fields.pendingAction] = null
                 }
@@ -462,9 +469,9 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
             }
 
             let result: { done?: unknown, value?: unknown }
-            if (mode === 'throw') {
+            if (mode === GeneratorResumeKind.Throw) {
                 if (!methodFn) {
-                    const returnMethod = getMethod('return')
+                    const returnMethod = getReturnMethod()
                     if (returnMethod) {
                         assertIteratorResult(returnMethod.call(iter))
                     }
@@ -472,7 +479,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                     throw new TypeError('iterator throw method missing')
                 }
                 result = assertIteratorResult(methodFn.call(iter, sentVal))
-            } else if (mode === 'return') {
+            } else if (mode === GeneratorResumeKind.Return) {
                 if (!methodFn) {
                     frame[Fields.delegate] = null
                     ctx[OpcodeContextField.executeReturn](sentVal)
