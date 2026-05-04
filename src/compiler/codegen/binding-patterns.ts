@@ -54,10 +54,25 @@ const staticDepthShiftOpcodes = new Set<OpCode>([
     OpCode.PrefixMinusMinusStaticUnchecked,
 ])
 
-const cloneSegment = (ops: Segment): Segment => ops.map((item) => ({
-    ...item,
-    preData: [...item.preData],
-})) as Op<OpCode>[]
+const cloneSegment = (ops: Segment): Segment => {
+    const clones = ops.map((item) => ({
+        ...item,
+        preData: [...item.preData],
+    })) as Op<OpCode>[]
+    const cloneByOriginal = new Map<Op<OpCode>, Op<OpCode>>()
+
+    for (let index = 0; index < ops.length; index++) {
+        cloneByOriginal.set(ops[index]!, clones[index]!)
+    }
+
+    for (const clone of clones) {
+        clone.preData = clone.preData.map((item) =>
+            cloneByOriginal.get(item as Op<OpCode>) ?? item
+        )
+    }
+
+    return clones
+}
 
 const shiftStaticDepths = (ops: Segment, delta: number): Segment => {
     const shifted = cloneSegment(ops)

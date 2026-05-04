@@ -6,6 +6,8 @@
   "scripts": {
     "build": "node ./scripts/build-runtime-inline.js",
     "build:tsc": "tsc --project ./src/tsconfig.json",
+    "build:compiler-bundle": "npm run build && webpack --config webpack.config-compiler-bundle.js",
+    "check:selfhost-compiler": "npm run build:compiler-bundle && node ./scripts/check-selfhost-compiler.js",
     "watch": "node ./scripts/build-runtime-inline.js --watch",
     "serve-coverage": "python -m http.server 5000 --directory ./coverage/lcov-report",
     "test": "jest --runInBand",

@@ -147,6 +147,27 @@ outer()
     expect(out).toEqual([3])
 })
 
+test('static compound assignment fallback keeps closure slots', () => {
+    const code = `
+function outer() {
+    var parsingContext = 0
+    function parseList(kind) {
+        parsingContext |= 1 << kind
+        return parsingContext
+    }
+    return parseList
+}
+print(outer()(2))
+`
+    const strings = collectStringLiterals(code)
+    const [program] = compile(code)
+    const out: any[] = []
+
+    expect(strings).not.toContain('parsingContext')
+    run(program, 0, globalThis, [{ print: (...args: any[]) => out.push(...args) }])
+    expect(out).toEqual([4])
+})
+
 test('var redeclarations keep simple parameter static storage', () => {
     const out: any[] = []
     const [program] = compile(`

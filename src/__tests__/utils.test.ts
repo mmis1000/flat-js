@@ -1,6 +1,8 @@
 import { gzipSync, gunzipSync } from 'zlib'
 import * as vm from 'vm'
 import { compile, collectUsedOpcodes } from '../compiler'
+import { finalizeLiteralPool } from '../compiler/encoding'
+import { LiteralPoolKind, OpCode, TEXT_DADA_MASK, literalPoolWordMask } from '../compiler/shared'
 import { compileAndRun } from '../index'
 
 test('collectUsedOpcodes: codeLength excludes literal pool tail when present', () => {
@@ -13,6 +15,39 @@ test('gzip roundtrip matches raw VM program bytes', () => {
     const [programData] = compile('1+1')
     const raw = Buffer.from(new Uint32Array(programData).buffer)
     expect(gunzipSync(gzipSync(raw)).equals(raw)).toBe(true)
+})
+
+test('finalizeLiteralPool appends large literal pools without spreading arguments', () => {
+    const value = 'x'.repeat(150000)
+    const programData = [OpCode.Literal, TEXT_DADA_MASK]
+
+    finalizeLiteralPool(programData, [value])
+
+    expect(programData[1]).toBe(TEXT_DADA_MASK | 2)
+    expect(programData.length).toBe(2 + 2 + value.length)
+    expect((programData[2] ^ literalPoolWordMask(2)) | 0).toBe(LiteralPoolKind.String)
+    expect((programData[3] ^ literalPoolWordMask(3)) | 0).toBe(value.length)
+})
+
+test('finalizeLiteralPool only scans literal opcodes, not literal operands', () => {
+    const strayPoolOperand = TEXT_DADA_MASK | 1
+    const programData = [OpCode.Literal, OpCode.Literal, strayPoolOperand]
+
+    finalizeLiteralPool(programData, ['x'])
+
+    expect(programData[1]).toBe(OpCode.Literal)
+    expect(programData[2]).toBe(strayPoolOperand)
+})
+
+test('finalizeLiteralPool rejects malformed literal pool placeholders', () => {
+    expect(() => finalizeLiteralPool(
+        [OpCode.Literal, TEXT_DADA_MASK | 1],
+        ['x'],
+    )).toThrow('malformed literal pool slot 1')
+})
+
+test('compile: shifted binding-pattern cleanup keeps valid jump offsets', () => {
+    expect(() => compile('var [x] = [1]; x', { evalMode: true })).not.toThrow()
 })
 
 test('compileAndRun: ', () => {

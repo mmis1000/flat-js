@@ -375,6 +375,16 @@ export function generateOperators(node: ts.Node, flag: number, ctx: CodegenConte
                                 op(staticOpcode)
                             ]
                         }
+                        if (compoundAssignmentBinaryOpcode !== undefined) {
+                            return [
+                                ...ctx.generateStaticAccessOps(staticAccess),
+                                op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.GetStaticUnchecked : OpCode.GetStatic),
+                                ...ctx.generate(node.right, flag),
+                                op(compoundAssignmentBinaryOpcode),
+                                ...ctx.generateStaticAccessOps(staticAccess),
+                                op(ctx.isStaticAccessUnchecked(staticAccess) ? OpCode.SetStaticUnchecked : OpCode.SetStatic)
+                            ]
+                        }
                     }
                 }
 

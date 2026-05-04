@@ -116,6 +116,7 @@ dist
 .pnp.*
 
 .temp_cache
+.temp_selfhost_plan/
 .playwright-mcp/
 scratch/
 

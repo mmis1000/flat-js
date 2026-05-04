@@ -64,20 +64,32 @@ export function finalizeLiteralPool(programData: number[], literalValues: any[])
         }
         cursor += encoded.length
     }
-    for (let index = 0; index < codeLen - 1; index++) {
-        if (programData[index] === OpCode.Literal) {
-            const op = programData[index + 1]
-            if (isSmallNumber(op)) {
-                continue
-            }
-            if ((op & TEXT_DADA_MASK) === 0) {
-                continue
-            }
-            const slot = op ^ TEXT_DADA_MASK
-            programData[index + 1] = TEXT_DADA_MASK | slotPositions[slot]
+    let index = 0
+    while (index < codeLen) {
+        if (programData[index] !== OpCode.Literal) {
+            index += 1
+            continue
         }
+
+        if (index + 1 >= codeLen) {
+            throw new Error('malformed literal opcode without operand')
+        }
+
+        const op = programData[index + 1]
+        if (!isSmallNumber(op) && (op & TEXT_DADA_MASK) !== 0) {
+            const slot = op ^ TEXT_DADA_MASK
+            const position = slotPositions[slot]
+            if (!Number.isInteger(slot) || slot < 0 || slot >= literalValues.length || position === undefined) {
+                throw new Error(`malformed literal pool slot ${slot}`)
+            }
+            programData[index + 1] = TEXT_DADA_MASK | position
+        }
+        index += 2
     }
-    programData.push(...poolWords)
+
+    for (const word of poolWords) {
+        programData.push(word)
+    }
 }
 
 export function generateData(
@@ -101,17 +113,20 @@ export function generateData(
             const ptr: any = op.preData[0]
             const mode = op.preData[1]
             programData.push(OpCode.Literal)
+            let offset: number
             if (ptr.kind !== undefined) {
                 const nodePtr: ts.Node = ptr
-                programData.push(
-                    mode === 'bodyStart'
-                        ? fnRootToBodyStart.get(nodePtr)!.offset
-                        : headOf(fnRootToSegment.get(nodePtr)!).offset
-                )
+                offset = mode === 'bodyStart'
+                    ? fnRootToBodyStart.get(nodePtr)!.offset
+                    : headOf(fnRootToSegment.get(nodePtr)!).offset
             } else {
                 const opPtr: Op = ptr
-                programData.push(opPtr.offset)
+                offset = opPtr.offset
             }
+            if (!Number.isInteger(offset) || offset < 0) {
+                throw new Error(`unresolved node offset ${offset}`)
+            }
+            programData.push(offset)
             continue
         }
 
