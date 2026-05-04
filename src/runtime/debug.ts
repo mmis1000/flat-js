@@ -64,12 +64,14 @@ export const getScopeDebugEntries = (scope: Scope, debugNames: readonly string[]
 export const materializeScopeStaticBindings = (scope: Scope) => {
     const store = getScopeInternal(scope)[SCOPE_STATIC_STORE]
     if (store == null) {
-        return
+        return () => {}
     }
 
+    const previousDescriptors: Array<[string, PropertyDescriptor | undefined]> = []
     for (let index = 0; index < store[Fields.names].length; index++) {
         const name = store[Fields.names][index]!
         if (name !== STATIC_SLOT_NAMELESS) {
+            previousDescriptors.push([name, Reflect.getOwnPropertyDescriptor(scope, name)])
             Reflect.defineProperty(scope, name, {
                 configurable: true,
                 enumerable: true,
@@ -84,6 +86,16 @@ export const materializeScopeStaticBindings = (scope: Scope) => {
                     store[Fields.values][index] = value
                 },
             })
+        }
+    }
+    return () => {
+        for (let index = previousDescriptors.length - 1; index >= 0; index--) {
+            const [name, descriptor] = previousDescriptors[index]
+            if (descriptor) {
+                Reflect.defineProperty(scope, name, descriptor)
+            } else {
+                Reflect.deleteProperty(scope, name)
+            }
         }
     }
 }
