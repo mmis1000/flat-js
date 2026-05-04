@@ -53,11 +53,20 @@ const isObjectEnvironmentScope = (scope: Scope) =>
 const isObjectLike = (value: unknown): value is object =>
     (typeof value === 'object' && value !== null) || typeof value === 'function'
 
-const getActiveFunctionFrame = (ctx: RuntimeOpcodeContext): FunctionFrame | undefined => {
+const getActiveSuperConstructorFrame = (ctx: RuntimeOpcodeContext): FunctionFrame | undefined => {
     for (let i = ctx[OpcodeContextField.stack].length - 1; i >= 0; i--) {
         const frame = ctx[OpcodeContextField.stack][i]
-        if (frame[Fields.type] === FrameType.Function) {
-            return frame as FunctionFrame
+        if (frame[Fields.type] !== FrameType.Function) {
+            continue
+        }
+
+        const functionFrame = frame as FunctionFrame
+        const descriptor = functionDescriptors.get(functionFrame[Fields.function] as any)
+        if (
+            descriptor?.[Fields.type] === FunctionTypes.Constructor
+            || descriptor?.[Fields.type] === FunctionTypes.DerivedConstructor
+        ) {
+            return functionFrame
         }
     }
     return undefined
@@ -971,7 +980,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
 
             let fn = ctx[OpcodeContextField.popCurrentFrameStack]<(...args: any[]) => any>()
             const newTarget = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
-            const activeFunction = getActiveFunctionFrame(ctx)?.[Fields.function]
+            const activeFunction = getActiveSuperConstructorFrame(ctx)?.[Fields.function]
             if (activeFunction != null && (typeof activeFunction === 'object' || typeof activeFunction === 'function')) {
                 fn = Reflect.getPrototypeOf(activeFunction) as (...args: any[]) => any
             }

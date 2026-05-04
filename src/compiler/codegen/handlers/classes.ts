@@ -20,6 +20,24 @@ function getStaticPropertyName(name: ts.Identifier | ts.StringLiteral | ts.Numer
     return String(Number(name.text))
 }
 
+function isStaticClassElement(member: ts.ClassElement): boolean {
+    return ts.canHaveModifiers(member)
+        && ts.getModifiers(member)?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword) === true
+}
+
+function isRuntimeConstructor(member: ts.ClassElement): member is ts.ConstructorDeclaration {
+    return ts.isConstructorDeclaration(member) && !isStaticClassElement(member)
+}
+
+function isEmittedMethodLikeMember(
+    member: ts.ClassElement
+): member is ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration | ts.ConstructorDeclaration {
+    return ts.isMethodDeclaration(member)
+        || ts.isGetAccessorDeclaration(member)
+        || ts.isSetAccessorDeclaration(member)
+        || (ts.isConstructorDeclaration(member) && isStaticClassElement(member))
+}
+
 export function generateClassValue(
     node: ts.ClassDeclaration | ts.ClassExpression,
     flag: number,
@@ -40,9 +58,7 @@ export function generateClassValue(
         : null
     const hasClassScope = classBindingName != null || hasSuper
 
-    const ctorMember = node.members.find(
-        (member: ts.ClassElement) => ts.isConstructorDeclaration(member)
-    ) as ts.ConstructorDeclaration | undefined
+    const ctorMember = node.members.find(isRuntimeConstructor)
 
     const res: Segment = []
 
@@ -121,13 +137,11 @@ export function generateClassValue(
     }
 
     for (const member of node.members) {
-        if (ts.isConstructorDeclaration(member)) continue
+        if (isRuntimeConstructor(member)) continue
 
-        const isStatic = ts.canHaveModifiers(member) ? (
-            member.modifiers?.some((modifier: ts.Modifier | ts.ModifierLike) => modifier.kind === ts.SyntaxKind.StaticKeyword) ?? false
-        ) : false
+        const isStatic = isStaticClassElement(member)
 
-        if (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+        if (isEmittedMethodLikeMember(member)) {
             res.push(op(OpCode.Duplicate))
             if (!isStatic) {
                 res.push(
@@ -136,7 +150,9 @@ export function generateClassValue(
                 )
             }
 
-            if (ts.isComputedPropertyName(member.name)) {
+            if (ts.isConstructorDeclaration(member)) {
+                res.push(op(OpCode.Literal, 2, ['constructor']))
+            } else if (ts.isComputedPropertyName(member.name)) {
                 res.push(...ctx.generate(member.name.expression, flag))
                 res.push(op(OpCode.ToPropertyKey))
             } else if (ts.isIdentifier(member.name)) {

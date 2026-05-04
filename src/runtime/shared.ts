@@ -262,7 +262,7 @@ type IdentifierReference = {
     [IDENTIFIER_REFERENCE_SCOPE]: Scope | null
 }
 type SuperReference = {
-    [SUPER_REFERENCE_BASE]: object
+    [SUPER_REFERENCE_BASE]: unknown
     [SUPER_REFERENCE_THIS]: unknown
 }
 

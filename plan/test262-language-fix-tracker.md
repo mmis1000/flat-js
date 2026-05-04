@@ -347,23 +347,20 @@ Reduce the `language` category failures in targeted batches:
     - supported parse-time early-error cluster is complete
     - remaining `SyntaxError` expectations are runtime eval/declaration-instantiation behavior, parser-delegation gaps, unsupported features, or host/module exclusions
 
-- [ ] `runtime-semantic-cluster`
+- [x] `runtime-semantic-cluster`
   - Primary signatures:
     - `M:\Playground\flat-js\lib\runtime\execution.js:960`
     - `Expected test to throw error of type SyntaxError, but did not throw error`
   - Current scan split:
-    - latest completed broad `language` scan: 2026-05-03T16:42:46.105Z
-      - intended-scope failing files: `132`
-      - out-of-scope failing files: `6032`
-      - total failing files recorded: `6164`
+    - latest completed broad `language` scan: 2026-05-04T04:47:50.050Z
+      - intended-scope failing files: `15`
+      - out-of-scope failing files: `6038`
+      - total failing files recorded: `6053`
       - intended buckets:
-        - broken / needs inspection: `7`
-        - harness issue: `1`
-        - not supported: `1`
-        - not supported parser syntax: `123`
+        - not supported parser syntax: `15`
       - no intended `broken early error semantics` bucket remains
-      - regression check: the broad summary has no detailed failures under `language/statements/if/**`, `language/statements/try/**`, `language/statements/while/**`, `language/statements/do-while/**`, or `language/statements/switch/**`
-      - post-scan focused cleanup: `await-monkey-patched-promise.js`, `literal-property-name-bigint.js`, sloppy legacy string/numeric literal parser-diagnostic tails, setter default-parameter diagnostics, object-method strictness diagnostics, and method/accessor `new.target` diagnostics are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
+      - regression check: the broad summary has no intended runtime-semantic or supported early-error failures; the remaining intended files are parser-delegation gaps listed below
+      - post-scan focused cleanup: `await-monkey-patched-promise.js`, `literal-property-name-bigint.js`, sloppy legacy string/numeric literal parser-diagnostic tails, setter default-parameter diagnostics, object-method strictness diagnostics, method/accessor `new.target` diagnostics, static `constructor` class elements, direct-eval `new.target` / `super`, and supported `super` runtime tails are fixed; `generator-prop-name-yield-expr.js` is reclassified as a non-actionable TypeScript checker crash; the six comment/RegExp timeout files are classified as Test262 stress/performance timeouts after representative semantic samples passed
     - after the 2026-05-02 compiler-only parse-negative refresh plus final focused early-error accounting:
       - scanned Test262 `language` parse-negative files: `4389`
       - actionable supported parse-time early-error files still not caught as `SyntaxError`: `0`
@@ -469,6 +466,12 @@ Reduce the `language` category failures in targeted batches:
   - Non-actionable TypeScript parser misses:
     - these are Test262 `negative.phase: parse` cases where TypeScript accepted source that ECMAScript grammar or regexp parsing should reject
     - do not treat these as runtime-semantic fixes; document them as parser-delegation gaps
+    - current valid-script TypeScript parser-delegation gaps from the full scan: `15`
+      - script `await` binding identifier: `language/expressions/await/await-BindingIdentifier-in-global.js`
+      - Unicode 16/17 identifier data not accepted by the bundled TypeScript parser: `8` files in `language/identifiers/{start,part}-unicode-{16.0.0,17.0.0}{,-escaped}.js`
+      - sloppy `let` identifier loop-head parser shapes: `language/statements/for/head-lhs-let.js`, `language/statements/for-in/head-lhs-let.js`, `language/statements/for-in/identifier-let-allowed-as-lefthandside-expression-not-strict.js`
+      - escaped contextual keyword parser shapes: `language/statements/for-of/head-lhs-async-escaped.js`, `language/statements/let/syntax/escaped-let.js`
+      - `for-of` assignment-pattern initializer containing `in`: `language/statements/for-of/dstr/array-elem-init-in.js`
     - TypeScript checker crashes are also non-actionable for Flat JS: do not catch/ignore the crash in `compile.ts`; classify the affected Test262 file out of scope and report upstream
     - current known checker-crash file: `language/expressions/object/method-definition/generator-prop-name-yield-expr.js`
     - current compiler-only parse-negative refresh: `39`
@@ -1332,3 +1335,26 @@ Reduce the `language` category failures in targeted batches:
     - `npm run build:tsc`
     - exact Test262 harness run for the four class async-method `new.target` files in expression and statement class roots
   - note: a broader `language/expressions/class/**` scan was attempted but timed out; exact affected class files passed, and a full language scan should catch any broader class-root movement at the next boundary
+- 2026-05-04: Cleared static `constructor` class elements and contextual `super` / `new.target` tails.
+  - static class elements named `constructor` now compile as ordinary static methods/accessors, including async and generator forms, while real non-static constructors keep constructor semantics
+  - direct eval now inherits `new.target` / `super` parser context from the calling VM frame, and arrows nested inside valid `super` contexts are no longer rejected by TypeScript diagnostic filtering
+  - `super` property references now defer null-base object coercion until get/set while `delete super.x` throws `ReferenceError` before base coercion
+  - `super()` now uses the active constructor frame only when one is live, so escaped arrows fall back to their captured lexical super binding instead of accidentally using the arrow function's native prototype
+  - focused scans now record no intended failures for `language/eval-code/direct/**`, `language/expressions/super/**`, `language/expressions/assignment/**`, `language/expressions/delete/**`, `language/statements/class/syntax/**`, and `language/statements/class/subclass/**`
+  - validation:
+    - `npm run build:tsc`
+    - `npx jest --runInBand --no-cache src/__tests__/es6-runtime.test.ts src/__tests__/async.test.ts`
+    - exact Test262 harness run for the static-constructor expression/statement class-element files
+    - exact Test262 harness run for the direct-eval `new.target` / `super`, arrow `super`, null-super-base assignment/delete, optional-chain `super`, and subclass iterator-close `super()` files
+    - fresh focused `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js` roots listed above
+- 2026-05-04: Refreshed the full `language/**` scan and closed the actionable runtime/early-error cleanup.
+  - full scan totals are now `6053` failing files: `15` intended-scope parser-delegation files and `6038` out-of-scope files
+  - there are no known actionable runtime-semantic or supported early-error failures left in the broad summary
+  - the remaining intended-scope files are valid-script parser gaps in TypeScript rather than Flat JS runtime/compiler semantics:
+    - `await` as a global script binding identifier
+    - Unicode 16/17 identifier start/part data
+    - sloppy `let` identifier loop-head forms
+    - escaped contextual keywords in statement/loop heads
+    - a `for-of` destructuring assignment initializer containing `in`
+  - validation:
+    - fresh full `TEST262_SCAN_FRESH=1 node plan\\test262-language-scan.js`, resumed from state after the shell timeout

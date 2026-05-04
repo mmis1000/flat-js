@@ -173,7 +173,7 @@ test('missing binary and compound operators evaluate through VM opcodes', () => 
 
 test('sloppy legacy numeric and string literals keep JavaScript values', () => {
     expect(compileAndRun(String.raw`
-        [
+        ;[
             077,
             09,
             '\1'.charCodeAt(0),
@@ -213,6 +213,70 @@ test('setter default parameters keep length and parameter scope semantics', () =
     `)).toEqual([42, 42, 0, 0, 'outside', 'inside'])
 })
 
+test('static constructor class elements are ordinary static members', async () => {
+    expect(await compileAndRun(`
+        (async function () {
+            class Method {
+                constructor() {
+                    this.instance = true
+                }
+
+                static constructor(a, b) {
+                    return this.name + a + b
+                }
+            }
+
+            class AsyncMethod {
+                static async constructor(value) {
+                    return value + 1
+                }
+            }
+
+            class GeneratorMethod {
+                static *constructor(value) {
+                    yield value
+                    return value + 1
+                }
+            }
+
+            class AccessorMethod {
+                static get constructor() {
+                    return this.saved
+                }
+
+                static set constructor(value = 'default') {
+                    this.saved = value
+                }
+            }
+
+            var methodDescriptor = Object.getOwnPropertyDescriptor(Method, 'constructor')
+            var constructError = false
+            try {
+                new Method.constructor()
+            } catch (error) {
+                constructError = error.constructor === TypeError
+            }
+
+            var iterator = GeneratorMethod.constructor(2)
+            AccessorMethod.constructor = 'saved'
+
+            return [
+                new Method().instance,
+                Method.constructor('a', 'b'),
+                methodDescriptor.value.length,
+                methodDescriptor.value.name,
+                methodDescriptor.value.hasOwnProperty('prototype'),
+                constructError,
+                await AsyncMethod.constructor(4),
+                GeneratorMethod.constructor.name,
+                iterator.next().value,
+                iterator.next().value,
+                AccessorMethod.constructor,
+            ]
+        })()
+    `)).toEqual([true, 'Methodab', 2, 'constructor', false, true, 5, 'constructor', 2, 3, 'saved'])
+})
+
 test('object literal methods remain sloppy outside strict source', () => {
     expect(compileAndRun(`
         var values = []
@@ -237,6 +301,186 @@ test('spread calls preserve direct eval semantics', () => {
         const src = ['40 + 2']
         eval(...src)
     `)).toBe(42)
+})
+
+test('direct eval inherits lexical new.target and super context', () => {
+    expect(compileAndRun(`
+        var seenNewTarget
+        function CaptureNewTarget() {
+            seenNewTarget = eval('new.target')
+        }
+
+        CaptureNewTarget()
+        var plainCall = seenNewTarget
+        new CaptureNewTarget()
+
+        var proto = { value: 262 }
+        var obj = {
+            method() {
+                return eval('super.value')
+            }
+        }
+        Object.setPrototypeOf(obj, proto)
+
+        class Base {
+            constructor() {
+                this.count = 1
+            }
+
+            value() {
+                return 'base'
+            }
+        }
+
+        class Derived extends Base {
+            constructor() {
+                (() => super())()
+                this.after = 2
+            }
+
+            method() {
+                return (() => super.value())()
+            }
+        }
+
+        var derived = new Derived()
+
+        ;[
+            plainCall,
+            seenNewTarget === CaptureNewTarget,
+            obj.method(),
+            derived.count,
+            derived.after,
+            derived.method(),
+        ]
+    `)).toEqual([undefined, true, 262, 1, 2, 'base'])
+
+    expect(() => compileAndRun(`
+        (() => eval('new.target'))()
+    `)).toThrow(SyntaxError)
+
+    expect(() => compileAndRun(`
+        function invalid() {
+            return eval('super.value')
+        }
+        invalid()
+    `)).toThrow(SyntaxError)
+
+    expect(() => compileAndRun(`
+        class InvalidBase {
+            constructor() {
+                super()
+            }
+        }
+    `)).toThrow(SyntaxError)
+
+    expect(() => compileAndRun(`
+        class Base {}
+        class InvalidNested extends Base {
+            method() {
+                function nested() {
+                    return super.value
+                }
+                return nested()
+            }
+        }
+    `)).toThrow(SyntaxError)
+})
+
+test('super calls and references keep spec evaluation order', () => {
+    expect(compileAndRun(`
+        var superCallCount = 0
+        class A {
+            constructor() {
+                superCallCount++
+            }
+        }
+
+        class B extends A {
+            constructor() {
+                super()
+                this.af = _ => super()
+            }
+        }
+
+        var b = new B()
+        var repeatedSuperError = false
+        try {
+            b.af()
+        } catch (error) {
+            repeatedSuperError = error.constructor === ReferenceError
+        }
+
+        var count = 0
+        class NullBase {
+            static assignName() {
+                super.x = count += 1
+            }
+
+            static assignComputed() {
+                super[0] = count += 2
+            }
+
+            static remove() {
+                delete super.x
+            }
+        }
+
+        Object.setPrototypeOf(NullBase, null)
+
+        var nameAssignError = false
+        var computedAssignError = false
+        var deleteError = false
+        try {
+            NullBase.assignName()
+        } catch (error) {
+            nameAssignError = error.constructor === TypeError
+        }
+        try {
+            NullBase.assignComputed()
+        } catch (error) {
+            computedAssignError = error.constructor === TypeError
+        }
+        try {
+            NullBase.remove()
+        } catch (error) {
+            deleteError = error.constructor === ReferenceError
+        }
+
+        var iter = {
+            [Symbol.iterator]() {
+                return this
+            },
+            next() {
+                return { done: false }
+            },
+            return() {
+                this.f()
+                return { done: true }
+            },
+        }
+
+        class C extends class {} {
+            constructor() {
+                iter.f = () => super()
+                for (var k of iter) {
+                    return
+                }
+            }
+        }
+
+        var closedSuper = new C()
+
+        ;[
+            repeatedSuperError,
+            superCallCount,
+            nameAssignError,
+            computedAssignError,
+            deleteError,
+            count,
+            typeof closedSuper,
+        ]
+    `)).toEqual([true, 2, true, true, true, 3, 'object'])
 })
 
 test('calls resolve callees before evaluating arguments', () => {

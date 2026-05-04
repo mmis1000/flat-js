@@ -16,6 +16,10 @@ export type CompileOptions = {
     runtimeEval?: boolean
     /** force strict-mode source semantics for direct eval / synthetic entry points */
     withStrict?: boolean
+    /** direct eval inherited a lexical NewTarget binding from its caller */
+    allowDirectEvalNewTarget?: boolean
+    /** direct eval inherited a lexical super binding from its caller */
+    allowDirectEvalSuperProperty?: boolean
 }
 
 export type DebugInfo = {
@@ -280,7 +284,7 @@ function findSmallestNodeContainingSpan(root: ts.SourceFile, start: number, end:
         const nodeStart = node.getStart(root, false)
         const nodeEnd = node.getEnd()
         if (nodeStart <= start && end <= nodeEnd) {
-            if (found == null || nodeEnd - nodeStart < found.getEnd() - found.getStart(root, false)) {
+            if (found == null || nodeEnd - nodeStart <= found.getEnd() - found.getStart(root, false)) {
                 found = node
             }
             node.forEachChild(visit)
@@ -326,7 +330,7 @@ function isNonStrictLegacyLiteralDiagnostic(sourceNode: ts.SourceFile, diagnosti
         && (ts.isStringLiteral(node) || ts.isNumericLiteral(node))
 }
 
-function isAllowedNewTargetDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.Diagnostic): boolean {
+function isAllowedNewTargetDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.Diagnostic, allowDirectEvalNewTarget: boolean): boolean {
     if (diagnostic.code !== 17013 || diagnostic.start == null) {
         return false
     }
@@ -334,6 +338,10 @@ function isAllowedNewTargetDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.
     const node = findSmallestNodeContainingSpan(sourceNode, diagnostic.start, diagnostic.start + (diagnostic.length ?? 0))
     if (!node || !ts.isMetaProperty(node) || node.keywordToken !== ts.SyntaxKind.NewKeyword || node.name.text !== 'target') {
         return false
+    }
+
+    if (allowDirectEvalNewTarget) {
+        return true
     }
 
     let current: ts.Node | undefined = node.parent
@@ -349,7 +357,117 @@ function isAllowedNewTargetDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.
     return false
 }
 
-function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [number, number]>, withStrict: boolean) {
+function isDerivedClassConstructor(node: ts.ConstructorDeclaration): boolean {
+    return node.parent.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword) === true
+}
+
+function getLexicalSuperTarget(node: ts.Node): ts.Node | null {
+    let current: ts.Node | undefined = node.parent
+    while (current != null) {
+        if (ts.isFunctionLike(current) && !ts.isArrowFunction(current)) {
+            return current
+        }
+        if (ts.isClassLike(current) || ts.isSourceFile(current)) {
+            return null
+        }
+        current = current.parent
+    }
+    return null
+}
+
+function isSuperPropertyReference(node: ts.Node): boolean {
+    const parent = node.parent
+    return (
+        ts.isPropertyAccessExpression(parent)
+        || ts.isElementAccessExpression(parent)
+    ) && parent.expression === node
+}
+
+function isSuperCallReference(node: ts.Node): boolean {
+    const parent = node.parent
+    return ts.isCallExpression(parent) && parent.expression === node
+}
+
+function isAllowedSuperDiagnostic(
+    sourceNode: ts.SourceFile,
+    diagnostic: ts.Diagnostic,
+    allowDirectEvalSuperProperty: boolean
+): boolean {
+    if (![2335, 2337, 2660].includes(diagnostic.code) || diagnostic.start == null) {
+        return false
+    }
+
+    const node = findSmallestNodeContainingSpan(sourceNode, diagnostic.start, diagnostic.start + (diagnostic.length ?? 0))
+    if (node == null || node.kind !== ts.SyntaxKind.SuperKeyword) {
+        return false
+    }
+
+    if (allowDirectEvalSuperProperty && isSuperPropertyReference(node)) {
+        return true
+    }
+
+    const lexicalTarget = getLexicalSuperTarget(node)
+    if (
+        lexicalTarget == null
+        || (
+            !ts.isMethodDeclaration(lexicalTarget)
+            && !ts.isConstructorDeclaration(lexicalTarget)
+            && !ts.isGetAccessorDeclaration(lexicalTarget)
+            && !ts.isSetAccessorDeclaration(lexicalTarget)
+        )
+    ) {
+        return false
+    }
+
+    if (isSuperPropertyReference(node)) {
+        return true
+    }
+
+    return isSuperCallReference(node)
+        && ts.isConstructorDeclaration(lexicalTarget)
+        && isDerivedClassConstructor(lexicalTarget)
+}
+
+function hasStaticModifier(node: ts.Node): boolean {
+    return ts.canHaveModifiers(node)
+        && ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword) === true
+}
+
+function getStaticConstructorDiagnosticMember(node: ts.Node): ts.Node | null {
+    let current: ts.Node | undefined = node
+    while (current != null) {
+        if (ts.isConstructorDeclaration(current)) {
+            return hasStaticModifier(current) ? current : null
+        }
+        if (ts.isGetAccessorDeclaration(current) || ts.isSetAccessorDeclaration(current) || ts.isMethodDeclaration(current)) {
+            return hasStaticModifier(current) && getStaticPropertyName(current.name) === 'constructor'
+                ? current
+                : null
+        }
+        if (ts.isClassLike(current) || ts.isSourceFile(current)) {
+            return null
+        }
+        current = current.parent
+    }
+    return null
+}
+
+function isAllowedStaticConstructorDiagnostic(sourceNode: ts.SourceFile, diagnostic: ts.Diagnostic): boolean {
+    if (![1089, 1341, 1368, 2392].includes(diagnostic.code) || diagnostic.start == null) {
+        return false
+    }
+
+    const node = findSmallestNodeContainingSpan(sourceNode, diagnostic.start, diagnostic.start + (diagnostic.length ?? 0))
+    return node != null && getStaticConstructorDiagnosticMember(node) != null
+}
+
+function validateSyntax(
+    sourceNode: ts.SourceFile,
+    locationMap: Map<number, [number, number]>,
+    withStrict: boolean,
+    allowDirectEvalNewTarget: boolean,
+    allowDirectEvalSuperProperty: boolean
+) {
     const validationSourceNode = ts.createSourceFile(
         'output.ts',
         sourceNode.text,
@@ -394,7 +512,9 @@ function validateSyntax(sourceNode: ts.SourceFile, locationMap: Map<number, [num
         : program.getSemanticDiagnostics(validationSourceNode).filter((diagnostic) => (
             javascriptEarlyErrorSemanticDiagnosticCodes.has(diagnostic.code)
             && !isNonStrictOnlySemanticDiagnostic(sourceNode, diagnostic, withStrict)
-            && !isAllowedNewTargetDiagnostic(sourceNode, diagnostic)
+            && !isAllowedNewTargetDiagnostic(sourceNode, diagnostic, allowDirectEvalNewTarget)
+            && !isAllowedSuperDiagnostic(sourceNode, diagnostic, allowDirectEvalSuperProperty)
+            && !isAllowedStaticConstructorDiagnostic(sourceNode, diagnostic)
             && !isWebCompatFunctionCallAssignmentDiagnostic(validationSourceNode, diagnostic)
         ))
 
@@ -1582,7 +1702,15 @@ function toSourceRange(locationMap: Map<number, [number, number]>, start: number
     return [startPos[0], startPos[1], endPos[0], endPos[1]]
 }
 
-export function compile(src: string, { debug = false, range = false, evalMode = false, runtimeEval = false, withStrict = false }: CompileOptions = {}): [number[], DebugInfo] {
+export function compile(src: string, {
+    debug = false,
+    range = false,
+    evalMode = false,
+    runtimeEval = false,
+    withStrict = false,
+    allowDirectEvalNewTarget = false,
+    allowDirectEvalSuperProperty = false,
+}: CompileOptions = {}): [number[], DebugInfo] {
     const parentMap: ParentMap = new Map()
     const scopes: Scopes = new Map()
     const functions: Functions = new Set()
@@ -1596,7 +1724,7 @@ export function compile(src: string, { debug = false, range = false, evalMode = 
     const sourceNode = ts.createSourceFile('output.ts', normalizedSrc, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
     const locationMap = createLocationMap(normalizedSrc)
 
-    validateSyntax(sourceNode, locationMap, withStrict)
+    validateSyntax(sourceNode, locationMap, withStrict, allowDirectEvalNewTarget, allowDirectEvalSuperProperty)
     validateCoalesceSyntax(sourceNode)
     validateObjectLiteralSyntax(sourceNode)
     validateClassFieldArgumentsSyntax(sourceNode)

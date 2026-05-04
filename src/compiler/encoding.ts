@@ -5,6 +5,15 @@ import type { VariableRoot } from './analysis'
 import { headOf } from './codegen/helpers'
 import type { Op, Segment } from './codegen'
 
+function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
+    return ts.canHaveModifiers(node)
+        && ts.getModifiers(node)?.some((modifier) => modifier.kind === kind) === true
+}
+
+function isStaticConstructorMethod(func: VariableRoot): boolean {
+    return ts.isConstructorDeclaration(func) && hasModifier(func, ts.SyntaxKind.StaticKeyword)
+}
+
 export function genOffset(nodes: Segment) {
     let offset = 0
     for (const seg of nodes) {
@@ -137,25 +146,37 @@ export function generateData(
                     case ts.SyntaxKind.FunctionExpression: resolvedType = FunctionTypes.AsyncFunctionExpression; break
                     case ts.SyntaxKind.ArrowFunction: resolvedType = FunctionTypes.AsyncArrowFunction; break
                     case ts.SyntaxKind.MethodDeclaration: resolvedType = FunctionTypes.AsyncMethod; break
+                    case ts.SyntaxKind.Constructor:
+                        if (isStaticConstructorMethod(func)) {
+                            resolvedType = FunctionTypes.AsyncMethod
+                            break
+                        }
+                        throw new Error('unexpected async constructor kind')
                     default: throw new Error('unexpected async kind')
                 }
             } else {
-                const typeMap: Record<number, FunctionTypes> = {
-                    [ts.SyntaxKind.SourceFile]: FunctionTypes.SourceFile,
-                    [ts.SyntaxKind.FunctionDeclaration]: FunctionTypes.FunctionDeclaration,
-                    [ts.SyntaxKind.FunctionExpression]: FunctionTypes.FunctionExpression,
-                    [ts.SyntaxKind.ArrowFunction]: FunctionTypes.ArrowFunction,
-                    [ts.SyntaxKind.GetAccessor]: FunctionTypes.GetAccessor,
-                    [ts.SyntaxKind.SetAccessor]: FunctionTypes.SetAccessor,
-                    [ts.SyntaxKind.Constructor]: FunctionTypes.Constructor,
-                    [ts.SyntaxKind.MethodDeclaration]: FunctionTypes.MethodDeclaration,
-                }
-                resolvedType = typeMap[func.kind]
-
-                if (func.kind === ts.SyntaxKind.Constructor) {
-                    const classNode = (func as ts.ConstructorDeclaration).parent as ts.ClassLikeDeclaration
-                    if (classNode.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)) {
-                        resolvedType = FunctionTypes.DerivedConstructor
+                if (ts.isConstructorDeclaration(func)) {
+                    resolvedType = FunctionTypes.MethodDeclaration
+                    if (!isStaticConstructorMethod(func)) {
+                        const classNode = func.parent as ts.ClassLikeDeclaration
+                        resolvedType = FunctionTypes.Constructor
+                        if (classNode.heritageClauses?.some((clause) => clause.token === ts.SyntaxKind.ExtendsKeyword)) {
+                            resolvedType = FunctionTypes.DerivedConstructor
+                        }
+                    }
+                } else {
+                    const typeMap: Record<number, FunctionTypes> = {
+                        [ts.SyntaxKind.SourceFile]: FunctionTypes.SourceFile,
+                        [ts.SyntaxKind.FunctionDeclaration]: FunctionTypes.FunctionDeclaration,
+                        [ts.SyntaxKind.FunctionExpression]: FunctionTypes.FunctionExpression,
+                        [ts.SyntaxKind.ArrowFunction]: FunctionTypes.ArrowFunction,
+                        [ts.SyntaxKind.GetAccessor]: FunctionTypes.GetAccessor,
+                        [ts.SyntaxKind.SetAccessor]: FunctionTypes.SetAccessor,
+                        [ts.SyntaxKind.MethodDeclaration]: FunctionTypes.MethodDeclaration,
+                    }
+                    resolvedType = typeMap[func.kind]
+                    if (resolvedType == null) {
+                        throw new Error('unexpected function kind')
                     }
                 }
             }

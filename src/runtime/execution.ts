@@ -519,6 +519,13 @@ export const getExecution = (
         return typeof objectCtor === 'function' ? objectCtor(value) : Object(value)
     }
 
+    const toSuperReferenceBaseObject = (value: unknown) => {
+        if (value == null) {
+            throw new TypeError('Cannot convert undefined or null to object')
+        }
+        return toObjectInCurrentRealm(value)
+    }
+
     const initializeBindingValue = (scope: Scope, name: string, value: any) => {
         return writeBindingValue(scope, name, value)
     }
@@ -1348,7 +1355,7 @@ export const getExecution = (
             }
             if (isSuperReference(ctx)) {
                 const propertyKey = toPropertyKey(name)
-                return Reflect.get(toObjectInCurrentRealm(ctx[SUPER_REFERENCE_BASE]), propertyKey, ctx[SUPER_REFERENCE_THIS])
+                return Reflect.get(toSuperReferenceBaseObject(ctx[SUPER_REFERENCE_BASE]), propertyKey, ctx[SUPER_REFERENCE_THIS])
             }
             if (ctx == null) {
                 throw new TypeError('Cannot convert undefined or null to object')
@@ -1393,7 +1400,7 @@ export const getExecution = (
                 try {
                     const propertyKey = toPropertyKey(name)
                     const success = Reflect.set(
-                        toObjectInCurrentRealm(ctx[SUPER_REFERENCE_BASE]),
+                        toSuperReferenceBaseObject(ctx[SUPER_REFERENCE_BASE]),
                         propertyKey,
                         value,
                         ctx[SUPER_REFERENCE_THIS]
@@ -1465,10 +1472,24 @@ export const getExecution = (
             return value
         }
 
+        const hasLocalBinding = (name: string) => {
+            if (!includesLocalScope) {
+                return false
+            }
+            try {
+                getValue(currentFrame, name)
+                return true
+            } catch {
+                return false
+            }
+        }
+
         const [programData] = compileFunction(value, {
             evalMode: true,
             runtimeEval: true,
             withStrict: includesLocalScope && !!currentFrame[Fields.strict],
+            allowDirectEvalNewTarget: hasLocalBinding(SpecialVariable.NewTarget),
+            allowDirectEvalSuperProperty: hasLocalBinding(SpecialVariable.SuperHomeObject),
         })
 
         const result = run(

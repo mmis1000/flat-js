@@ -94,10 +94,6 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             )
             const base = Reflect.getPrototypeOf(homeObject)
 
-            if (base == null) {
-                throw new TypeError('Cannot convert undefined or null to object')
-            }
-
             ctx[OpcodeContextField.pushCurrentFrameStack]({
                 [SUPER_REFERENCE_BASE]: base,
                 [SUPER_REFERENCE_THIS]: actualThis,
