@@ -116,6 +116,8 @@ dist
 .pnp.*
 
 .temp_cache
+.playwright-mcp/
+scratch/
 
 src/runtime-inline.ts
 lib/
@@ -124,3 +126,7 @@ example/*.json
 example/*.bin
 example/*.bin.gz
 example/*.js
+
+# Local Test262 scan snapshots.
+plan/test262-*-current.json
+plan/test262-dstr-*.json
