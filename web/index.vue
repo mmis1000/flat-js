@@ -47,6 +47,10 @@
             <div class="pane-title code-pane-title">
                 <div class="code-title-group">
                     <span>Code</span>
+                    <nav class="app-links" aria-label="Project links">
+                        <a href="https://github.com/mmis1000/flat-js" target="_blank" rel="noopener noreferrer">GitHub</a>
+                        <a href="./example/">Examples</a>
+                    </nav>
                     <button
                         v-if="state !== 'idle'"
                         type="button"
@@ -1320,6 +1324,22 @@ pre {
     align-items: center;
     gap: 0.75em;
     min-width: 0;
+}
+.app-links {
+    display: flex;
+    align-items: center;
+    gap: 0.65em;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+.app-links a {
+    color: #9cf;
+    text-decoration: none;
+}
+.app-links a:hover,
+.app-links a:focus-visible {
+    color: #d6f2ff;
+    text-decoration: underline;
 }
 .code-toolbar {
     display: flex;

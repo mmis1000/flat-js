@@ -5,8 +5,32 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flat JS VM-in-VM demo</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f7f9fb;
+            color: #17212b;
+        }
+        nav {
+            max-width: 720px;
+            margin: 24px auto 0;
+            padding: 0 24px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        a {
+            color: #075e9f;
+        }
+    </style>
 </head>
 <body>
+    <nav aria-label="Project links">
+        <a href="../">Web debugger</a>
+        <a href="./">Examples</a>
+        <a href="https://github.com/mmis1000/flat-js" rel="noopener noreferrer">GitHub repository</a>
+    </nav>
     <script src="./self-contained-vm-demo.js"></script>
 </body>
 </html>
