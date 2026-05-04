@@ -1,6 +1,8 @@
 # VM State Serialization Plan
 
-Status: investigation notes and proposed implementation direction.
+Status: investigation notes and proposed implementation direction. VM state serialization is still unimplemented.
+
+Current assumption check (2026-05-04): the overall direction below still matches the runtime shape, but a future implementation must be built from inside `src/runtime` or through narrow internal hooks. The public `Execution` object exposes `ptr`, `stack`, `scopes`, and `step`, but it does not expose all closure-local execution state, registered callbacks, or runtime side-table/cache relationships needed for a complete restore.
 
 Goal: support pausing a Flat JS execution, serializing its observable state to a string-friendly snapshot, restoring it in another runtime instance, and continuing execution from the same VM point.
 
@@ -30,7 +32,10 @@ Core execution state:
 - frame `Fields.valueStack`: operand stack.
 - frame `Fields.programSection`: active bytecode buffer.
 - frame `Fields.globalThis`: VM global object.
+- frame `Fields.variableEnvironment`: active function variable environment for eval/parameter semantics.
+- closure-local execution state such as pending injected throws, current/eval result bookkeeping, `compileFunction`, `getDebugFunction`, and `functionRedirects`.
 - generator state, function descriptors, and bound-function metadata held in runtime side tables.
+- scope-internal symbol fields such as static slots/stores, debug scope pointers, with-object wrappers, and eval/arguments rejection markers.
 
 Relevant files:
 
@@ -77,6 +82,11 @@ Known side tables:
 - `bindInfo`: metadata for VM-created bound wrappers.
 - `generatorStates`: metadata for VM generator methods.
 - `environments`: membership marker for VM frames and environment records.
+
+Related runtime caches/factories:
+
+- `literalPoolCache` is derived from program buffers and can be rebuilt rather than serialized as authoritative state.
+- generator-function intrinsic caches and dynamic generator constructor factories are realm/factory registration state; restore should either rebuild them from restored globals or re-register the needed dynamic factories when VM-created generator constructors are restored.
 
 Snapshot algorithm:
 
@@ -396,4 +406,3 @@ Recommended default:
 - How much host overlay mutation should be allowed on non-configurable host properties?
 - Should checkpointable mode be exposed in the web UI or only as a library API first?
 - How should pending async functions and promises be represented, if at all?
-

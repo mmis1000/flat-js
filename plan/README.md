@@ -1,8 +1,8 @@
-# Codewar robot game — design plan
+# Codewar robot game — design notes
 
 This document captures the agreed design for a canvas-based **code war** style game: user code controls a round robot (field, obstacles, bot, target).
 
-**Status (repo today):** A canvas arena, simulation (`web/game/sim.ts`), and builtins wired from `web/index.vue` are implemented; pacing, scan cost, and debugger step semantics still follow the product choices below unless changed in code. See the root `README.md` for commands, API surface, and host polyfills.
+**Status (repo today, checked 2026-05-04):** A canvas arena, simulation (`web/game/sim.ts`), and builtins wired from `web/index.vue` are implemented for the primary player bot. Current code differs from the first design sketch in one important way: `move`, `rotate`, and `shoot` enqueue world actions and let VM execution continue; `scan()` and `lastMoveDistance()` are the VM read barriers that pause VM progress until queued actions and read timing finish. See the root `README.md` for commands, API surface, and host polyfills.
 
 ---
 
@@ -10,15 +10,15 @@ This document captures the agreed design for a canvas-based **code war** style g
 
 - **Canvas** for the arena: place and draw the field, static objects, bot, and target.
 - **Round robot** (vacuum-bot aesthetic) with:
-  - **Rotate** at a configurable angular speed.
-  - **Move forward** at a configurable linear speed.
-  - **Scan** a **90°** forward arc with a **caller-chosen ray count**; report visible hits **per sector** from **near to far**, each with an **item type** (wall, obstacle, target, disc, etc.). Fewer rays = less accurate but cheaper; more rays = finer sectors but more work (see §4).
+  - **Rotate** at a fixed, tunable angular speed.
+  - **Move forward** at a fixed, tunable linear speed.
+  - **Scan** a **90°** forward arc with a **caller-chosen ray count**; report visible hits **per ray** from **near to far**, each with an **item type** (wall, obstacle, target, disc, etc.). Fewer rays = less accurate but cheaper; more rays = finer sampling but more work (see §4).
   - **Shoot** a disc toward / at the target.
 - **Flat-JS integration**: expose game APIs through the same `compile` / `getExecution` / builtins path used today (`print`, `clear`), alongside the Monaco editor and debugger.
 
 ---
 
-## 2. Time model: highlights, world, and blocking calls
+## 2. Time model: highlights, world, and VM barriers
 
 Two mechanisms work **together** (not either-or).
 
@@ -26,20 +26,25 @@ Two mechanisms work **together** (not either-or).
 
 - **Source highlight** (`debugInfo.sourceMap` at `execution[Fields.ptr]`, same rules as today, including `debugInfo.internals` if the UI skips updates for internal instructions) is the anchor for **which source range is “active”** and for **keeping the editor visually in sync** with execution.
 
-### 2.2 World simulation on highlight change
+### 2.2 Autoplay world ticks and visible highlights
 
-- **Valid highlight changes** may advance the **world** (simulation step) as well as the perceived code position. This repo has **not** specified that “pure computation” must freeze the world; do **not** assume the world only moves during blocking calls unless you add that as an explicit product rule later.
+- Autoplay uses `TICKS_PER_SECOND` from `web/game/core/types.ts` as the world simulation rate and wall-clock pacing source.
+- Each world tick calls `runner.stepOneTick()`, then the UI runs raw VM steps until one of: program done, VM barrier active, visible highlight change, or guard limit.
+- A single world tick may include many raw VM steps, but autoplay is effectively capped at one visible source highlight change per world tick.
+- Paused **Step** / **Step in** normally advance VM code to the next visible source change without ticking the world, unless they must drain an active VM barrier.
 
-### 2.3 World-interaction builtins (move, rotate, shoot, …)
+### 2.3 World-action builtins and VM read barriers
 
-- When user code hits a **world interaction** builtin, execution **blocks** until that **world action** completes.
-- Such actions cost **more than one world tick** depending on **parameters** (e.g. rotate **90°** takes longer than **45°**; move distance / shoot parameters similarly).
-- While blocked, the host runs the world forward by the required number of **world ticks** until the action is done, then returns from the builtin so the VM can continue.
-- During a long action, the **highlight can remain** on the same source range while the canvas updates each world tick—**one source span may correspond to several world frames**.
+- `move(distance)`, `rotate(deg)`, and `shoot()` enqueue FIFO world actions. The VM keeps running after the builtin returns.
+- Queued actions still cost world ticks. Move/rotate duration is derived from distance/angle and per-tick units; shoot respects projectile creation and cooldown timing.
+- `scan(rays)` waits for queued actor actions to drain, runs scan timing, then returns the per-ray hit lists.
+- `lastMoveDistance()` waits for queued actor actions to drain, then returns the distance covered by the last completed move segment.
+- While a read barrier is active, the canvas can continue updating as world ticks advance, but VM execution is blocked until the barrier reaches `ready`.
 
 ### 2.4 Single-step debugging
 
-- Define explicitly whether **Step** advances **one VM step**, **one highlight-visible step**, **one world tick during a blocking action**, or a combination—so the debugger stays predictable.
+- **Step** and **Step in** drain any active `scan()` / `lastMoveDistance()` barrier before resuming normal debugger stepping.
+- After barrier drain, stepping runs raw VM steps until the next visible source range, respecting the existing Step vs Step-in stack behavior.
 
 ---
 
@@ -49,20 +54,20 @@ Exact formulas are tunable; the rule is **monotonic in “how big” the action 
 
 | Action   | Parameters   | Example cost idea                                        |
 |----------|--------------|----------------------------------------------------------|
-| Rotate   | angle (deg)  | e.g. `ceil(abs(deg) / k)` world ticks                    |
-| Move     | distance/speed | e.g. distance in steps or table by speed tier       |
-| Shoot    | power / charge / etc. | e.g. cooldown ticks, or projectile travel in ticks |
-| Scan     | `rayCount` (and fixed 90° arc) | e.g. world ticks or internal cost **scale with** `rayCount`: low count = faster to complete, high count = more accurate, slower to process |
+| Rotate   | angle (deg)  | Queued action; world ticks scale with absolute angle and `BOT_ROTATE_RAD_PER_TICK`. |
+| Move     | distance     | Queued action; world ticks scale with distance and `BOT_MOVE_PER_TICK`, stopping early on collision. |
+| Shoot    | none         | Queued action; creates a projectile when cooldown permits and then waits through cooldown/post-fire timing. |
+| Scan     | `rays` (fixed 90° arc) | VM read barrier; timing scales with normalized ray count via `SCAN_TICKS_PER_RAY`. |
 
 ---
 
 ## 4. Scan semantics
 
-- **90°** forward arc (e.g. −45° … +45° relative to facing).
-- **`rayCount` is a scan parameter** chosen by the caller. Rays are spread evenly across that arc, so each sector has angular width **90° / rayCount**.
-- **Accuracy vs cost**: fewer rays ⇒ coarser sectors, less CPU and (if modeled) **faster** scan completion; more rays ⇒ finer angular resolution, **slower** to process for the same scene. The builtin API should expose this explicitly (e.g. `scan({ rays: 36 })` vs `scan({ rays: 180 })`).
-- A **default** (e.g. 90) can be fixed in the implementation; **min/max** bounds should be documented to avoid pathological values.
-- Per sector (or per ray): ordered list of hits **from near to far**, each with **distance** and **type**.
+- **90°** forward arc (`-45°` to `+45°` relative to facing).
+- `scan(rays)` takes a caller-chosen ray count. Omitted/falsy values default to `36`; non-falsy values are floored and clamped to `1..90`.
+- Rays are spread evenly across the arc. With `N > 1`, adjacent ray centers are `90 / (N - 1)` degrees apart; with `N === 1`, the ray points straight ahead.
+- **Accuracy vs cost**: fewer rays => coarser angular sampling and shorter scan timing; more rays => finer sampling and longer timing.
+- Per ray: ordered list of hits **from near to far**, each with **distance** and **type**.
 
 ---
 
@@ -74,23 +79,23 @@ Exact formulas are tunable; the rule is **monotonic in “how big” the action 
 
 ---
 
-## 6. Open decisions (not fixed in conversation)
+## 6. Open decisions / future work
 
-- Which builtins count as **world interaction** vs instant; whether **scan** blocks and exactly how its cost scales with **`rayCount`** (world ticks vs VM-time only).
-- **Scan** `rayCount` **min/max/default** and behavior when out of range.
-- **Concurrency**: queue vs reject overlapping move/rotate/shoot while an action is in progress.
+- **Multi-controller scheduling**: the world model has actor IDs, but the web API currently drives the primary actor only. Future multi-bot control should keep one shared runner and one controller VM per scripted actor.
+- **Per-actor barriers**: `vmBarrier` and `scanState` are world-level singletons tagged with an actor ID. Move these to per-actor state before allowing multiple controller VMs to block independently.
+- **Tuning surface**: decide whether scan, movement, rotation, projectile, and cooldown constants are game-level config or fixed implementation constants.
 - Whether **animation smoothing** between world ticks is allowed when highlight is unchanged (visual-only).
 
 ---
 
-## 7. Implementation order (suggested)
+## 7. Implementation status
 
-1. Canvas + static scene (bounds, obstacles, target, round bot + heading).
-2. Game state object + rendering loop (can reuse host refresh from run/sim).
-3. Physics, collisions, disc projectile.
-4. Raycast scan (90° arc, configurable `rayCount`) and stable JSON result shape for user code; document accuracy vs cost tradeoff.
-5. Builtin wiring and **blocking** multi-tick actions with parameterized duration.
-6. Tuning, win/loss, UX (speed controls, less delay than 200 ms when “fast run” is desired—without changing logical rules unless specified).
+1. Canvas + static scene (bounds, obstacles, target, round bot + heading): implemented.
+2. Game state object + rendering loop: implemented via `createSimulationSession` and the Vue loop.
+3. Physics, collisions, disc projectile, win/loss: implemented for the current target-shooting game.
+4. Raycast scan with stable JSON result shape and ray-count cost tradeoff: implemented.
+5. Builtin wiring with queued actions plus VM read barriers: implemented.
+6. Remaining tuning / expansion: multi-controller scheduling, per-actor barrier state, and any future UI exposure for simulation constants.
 
 ---
 
@@ -99,6 +104,6 @@ Exact formulas are tunable; the rule is **monotonic in “how big” the action 
 - `web/index.vue` — layout, run loop, builtins, debugger, host redirects.
 - `web/game/sim.ts` — world simulation and tick model.
 - `web/components/game-canvas.vue` — canvas rendering.
-- `web/vm-host-redirects.ts` — browser-only array / `Math.random` redirects for the web VM.
+- `web/vm-host-redirects.ts` — browser-only function redirects for deterministic `Math.random` and callback-array polyfills.
 
-Further tuning (scan bounds, step vs tick, concurrency) can still follow §6 as needed.
+Further expansion can follow §6 as needed.

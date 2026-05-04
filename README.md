@@ -20,12 +20,12 @@ JavaScript bytecode compiler and interpreter: it compiles JS source to a flat op
 | Path | Role |
 |------|------|
 | `src/` | Compiler, opcode runtime, CLI entrypoint, and Jest tests (`npm run build` writes `lib/`). |
-| `web/` | Vue 2 app: Monaco editor, debugger UI, optional **robot arena** (`web/game/sim.ts`, `web/components/game-canvas.vue`). |
+| `web/` | Vue 3 app: Monaco editor, debugger UI, optional **robot arena** (`web/game/sim.ts`, `web/components/game-canvas.vue`). |
 | `plan/` | Design notes, Test262 scan summaries, and VM state-serialization planning. |
 | `scripts/` | Build/test helpers, including runtime inline assembly and Test262 preprocessing. |
 | `example/` | Generated browser loader and bytecode examples from `npm run build-example`. |
 
-Public API (`src/index.ts`): `compile`, `run`, `getExecution`, and `compileAndRun`. Runtime helpers in `src/runtime.ts` also export `Fields`, `FrameType`, debug-scope helpers, and runtime types. `run` accepts an optional trailing `getDebugFunction` so nested evaluation (e.g. REPL or polyfills) uses the same custom `debugger` / pause hook as the main execution.
+Public API (`src/index.ts`): `compile`, `run`, `getExecution`, and `compileAndRun`. Runtime helpers in `src/runtime.ts` also export `Fields`, `FrameType`, debug-scope helpers, and runtime types. `run` / `getExecution` accept optional debug callback, compile, and function-redirect hooks so nested evaluation (e.g. REPL or polyfills) uses the same custom `debugger` / pause path as the main execution.
 
 ---
 
@@ -119,7 +119,7 @@ npm run serve-web    # static server for dist-web/
 
 The web shell loads user code with `compile` / `getExecution`, drives `execution[Fields.step]` for run / pause / step, and maps `execution[Fields.ptr]` through `debugInfo.sourceMap` for Monaco highlights.
 
-**Game mode** (when enabled in the UI): builtins talk to a 2D sim (`web/game/sim.ts`): `clear`, `print`, `rotate`, `move`, `lastMoveDistance`, `shoot`, `scan`, `won`, etc. World time advances on a fixed tick cadence; long actions can span multiple ticks. See snippets and comments in `web/game/code-snippets.ts` for the user-facing game API.
+**Game mode** (when enabled in the UI): builtins talk to a 2D sim (`web/game/sim.ts`): `clear`, `print`, `rotate`, `move`, `lastMoveDistance`, `shoot`, `scan`, `won`, etc. World time advances on a fixed tick cadence; `move`, `rotate`, and `shoot` enqueue sim actions while the VM keeps running, and `scan` / `lastMoveDistance` pause VM progress until queued actions and read timing finish. See snippets and comments in `web/game/code-snippets.ts` for the user-facing game API.
 
 **Host behavior (browser only)**
 
@@ -151,7 +151,7 @@ npm run test262:smoke     # one small Test262 smoke case
 npm run test262           # broad Test262 harness run
 ```
 
-`npm run test262` is a broad conformance run and is expected to fail while language coverage is in progress. For targeted language work, prefer focused scans with `plan/test262-language-scan.js` and keep `plan/test262-language-fix-tracker.md` plus the status notes above in sync when the expected status changes.
+`npm run test262` is a broad conformance run and is expected to fail while out-of-scope/deferred language and harness areas remain. For targeted language work, prefer focused scans with `plan/test262-language-scan.js` and keep `plan/test262-language-fix-tracker.md` plus the status notes above in sync when the expected status changes.
 
 ---
 

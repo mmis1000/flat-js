@@ -2,11 +2,13 @@
 
 Generated: 2026-05-01
 
+Status (checked 2026-05-04): historical tracker for the completed name-elision batches below. Test262 totals in the activity log are May 1 snapshots; use `plan/test262-language-summary.md` and the root `README.md` for current broad-scan status.
+
 ## Goal
 
 Reduce runtime binding-name materialization for statically resolved slots without weakening eval, `with`, debug scope materialization, REPL attachment, or loop binding semantics.
 
-## Current Batch
+## Completed Batches
 
 - [x] `static-aware-loop-identifier-binding`
   - Why this batch: simple `for-in` / `for-of` identifier targets were the remaining name-preserving path that used dynamic `SetInitialized` even when the compiler had static slot information.
@@ -47,10 +49,10 @@ Reduce runtime binding-name materialization for statically resolved slots withou
   - Completed: 2026-05-01.
   - Result: static slot metadata is used for simple copied loop bindings, with name-based `SetMultiple` retained as the fallback for dynamic scopes.
 - [ ] Revisit the `generateLeft` split.
-  - Current reason deferred: existing callers depend on `generateLeft` producing a dynamic reference tuple.
+  - Current reason deferred: existing callers still depend on `generateLeft` producing a dynamic reference tuple.
   - Target outcome: keep dynamic references explicit and route simple identifier writes through clearer helpers.
 - [ ] Consider migrating stable identifier write emitters.
-  - Current reason deferred: assignment, compound assignment, update, and destructuring paths already have static variants.
+  - Current reason deferred: assignment, compound assignment, update, and destructuring paths still have static variants.
   - Target outcome: reduce duplicated static/dynamic write decisions only where it improves maintainability without changing behavior.
 
 ## Activity Log

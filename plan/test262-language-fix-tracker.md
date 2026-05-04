@@ -2,6 +2,8 @@
 
 Generated: 2026-04-28
 
+Status (checked 2026-05-04): actionable runtime-semantic and supported early-error cleanup is closed for the latest broad scan. The remaining intended-scope failures are parser-delegation gaps recorded in `plan/test262-language-summary.md`; the batch sections below are historical completed work, not active TODOs.
+
 ## Goal
 
 Reduce the `language` category failures in targeted batches:
@@ -11,7 +13,7 @@ Reduce the `language` category failures in targeted batches:
 3. Re-run the focused slice for that group and update this file.
 4. After the current target batch is done, re-run the full `language` scan and compare totals.
 
-## Current Batch
+## Completed Initial Batch
 
 - [x] `label-statements`
   - Why this batch: small, self-contained compiler gap with direct intended-support impact.
@@ -54,7 +56,7 @@ Reduce the `language` category failures in targeted batches:
       - statement-completion handling for `with` bodies in eval mode
       - `do...while` `continue` targeting, which the `with` slice exposed through completion tests
 
-## Next Batches
+## Completed Follow-up Batches
 
 - [x] `parameter-and-binding-patterns`
   - Primary signatures:
