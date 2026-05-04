@@ -47,6 +47,7 @@ import {
     SUPER_REFERENCE_THIS,
     SuperReference,
     VariableFlags,
+    markVmOwned,
     toPropertyKey,
 } from "./shared"
 import { handleBasicOpcode } from "./opcodes/basic"
@@ -233,12 +234,17 @@ export const getExecution = (
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
     variableEnvironmentScope: Scope | null = null
 ) => {
+    markVmOwned(program as unknown as object)
+    for (const scope of scopes) {
+        markVmOwned(scope)
+    }
+
     let currentProgram = program
 
-    const initialFrame: Frame = {
+    const initialFrame: Frame = markVmOwned({
         [Fields.type]: FrameType.Function,
         [Fields.scopes]: scopes,
-        [Fields.valueStack]: [
+        [Fields.valueStack]: markVmOwned([
             // @ts-expect-error
             invokeData[Fields.type] === InvokeType.Apply ? invokeData[Fields.self] : invokeData[Fields.newTarget],
             invokeData[Fields.function],
@@ -246,7 +252,7 @@ export const getExecution = (
             invokeData[Fields.type],
             ...args,
             args.length
-        ],
+        ]),
         [Fields.invokeType]: invokeData[Fields.type],
         [Fields.function]: invokeData[Fields.function],
         [Fields.name]: invokeData[Fields.name],
@@ -255,11 +261,11 @@ export const getExecution = (
         [Fields.globalThis]: globalThis,
         [Fields.strict]: false,
         [Fields.variableEnvironment]: variableEnvironmentScope,
-    }
+    } as Frame)
 
     environments.add(initialFrame)
 
-    const stack: Stack = [initialFrame]
+    const stack: Stack = markVmOwned([initialFrame])
     let ptr: number = entryPoint
 
     const read = () => currentProgram[ptr++]
@@ -310,7 +316,7 @@ export const getExecution = (
         isObjectLike(value)
         && SUPER_REFERENCE_BASE in value
         && SUPER_REFERENCE_THIS in value
-    const createIdentifierReference = (frame: Frame, scope: Scope | null): IdentifierReference => ({
+    const createIdentifierReference = (frame: Frame, scope: Scope | null): IdentifierReference => markVmOwned({
         [IDENTIFIER_REFERENCE_FRAME]: frame,
         [IDENTIFIER_REFERENCE_SCOPE]: scope,
     } as IdentifierReference)
@@ -336,7 +342,7 @@ export const getExecution = (
         const internal = getScopeInternal(scope)
         let map = internal[SCOPE_FLAGS]
         if (!map) {
-            map = Object.create(null) as Record<string, number>
+            map = markVmOwned(Object.create(null) as Record<string, number>)
             internal[SCOPE_FLAGS] = map
         }
         return map
@@ -346,7 +352,7 @@ export const getExecution = (
         const internal = getScopeInternal(scope)
         let map = internal[SCOPE_STATIC_SLOTS]
         if (!map) {
-            map = Object.create(null) as Record<string, number>
+            map = markVmOwned(Object.create(null) as Record<string, number>)
             internal[SCOPE_STATIC_SLOTS] = map
         }
         return map
@@ -356,7 +362,11 @@ export const getExecution = (
         const internal = getScopeInternal(scope)
         let store = internal[SCOPE_STATIC_STORE]
         if (!store) {
-            store = { [Fields.names]: [], [Fields.flags]: [], [Fields.values]: [] }
+            store = markVmOwned({
+                [Fields.names]: markVmOwned([] as string[]),
+                [Fields.flags]: markVmOwned([] as number[]),
+                [Fields.values]: markVmOwned([] as any[]),
+            })
             internal[SCOPE_STATIC_STORE] = store
         }
         return store
@@ -717,7 +727,7 @@ export const getExecution = (
 
     const createArgumentObject = (globalThis: any) => {
         const objectPrototype = globalThis?.Object?.prototype ?? Object.prototype
-        const obj = Object.create(objectPrototype)
+        const obj = markVmOwned(Object.create(objectPrototype))
         const iterator = globalThis?.Array?.prototype?.[Symbol.iterator] ?? Array.prototype[Symbol.iterator]
         Object.defineProperty(obj, Symbol.iterator, {
             configurable: true,
@@ -768,9 +778,9 @@ export const getExecution = (
             }
         }
 
-        const baseFrames: Stack = scratchExecution[Fields.stack].slice()
+        const baseFrames: Stack = markVmOwned(scratchExecution[Fields.stack].slice())
 
-        const state: GeneratorState = {
+        const state: GeneratorState = markVmOwned({
             [Fields.stack]: baseFrames,
             [Fields.ptr]: bodyOffset,
             [Fields.completed]: false,
@@ -779,7 +789,7 @@ export const getExecution = (
             [Fields.baseFrame]: baseFrames[0],
             [Fields.gen]: null,
             [Fields.execution]: scratchExecution
-        }
+        })
 
         for (const f of baseFrames) {
             f[Fields.generator] = state
@@ -844,7 +854,7 @@ export const getExecution = (
             return { value: undefined, done: true }
         }
 
-        const gen: any = {
+        const gen: any = markVmOwned({
             next(_value?: unknown): IteratorResult<unknown> {
                 if (state[Fields.completed]) return { value: undefined, done: true }
                 return runHost(GeneratorResumeKind.Next, _value)
@@ -858,7 +868,7 @@ export const getExecution = (
                 return runHost(GeneratorResumeKind.Return, value)
             },
             [Symbol.iterator]() { return gen }
-        }
+        })
         Object.setPrototypeOf(gen, getGeneratorInstancePrototype(gt, invokeData[Fields.function], false))
 
         state[Fields.gen] = gen
@@ -894,9 +904,9 @@ export const getExecution = (
             }
         }
 
-        const baseFrames: Stack = scratchExecution[Fields.stack].slice()
+        const baseFrames: Stack = markVmOwned(scratchExecution[Fields.stack].slice())
 
-        const state: GeneratorState = {
+        const state: GeneratorState = markVmOwned({
             [Fields.stack]: baseFrames,
             [Fields.ptr]: bodyOffset,
             [Fields.completed]: false,
@@ -905,7 +915,7 @@ export const getExecution = (
             [Fields.baseFrame]: baseFrames[0],
             [Fields.gen]: null,
             [Fields.execution]: scratchExecution
-        }
+        })
 
         for (const f of baseFrames) {
             f[Fields.generator] = state
@@ -1102,7 +1112,7 @@ export const getExecution = (
             }) as Promise<IteratorResult<unknown>>
         }
 
-        const gen: any = {
+        const gen: any = markVmOwned({
             next(value?: unknown): Promise<IteratorResult<unknown>> {
                 return enqueueRequest(GeneratorResumeKind.Next, value)
             },
@@ -1113,7 +1123,7 @@ export const getExecution = (
                 return enqueueRequest(GeneratorResumeKind.Return, value)
             },
             [Symbol.asyncIterator]() { return gen }
-        }
+        })
         Object.setPrototypeOf(gen, getGeneratorInstancePrototype(gt, invokeData[Fields.function], true))
 
         state[Fields.gen] = gen
@@ -1261,6 +1271,7 @@ export const getExecution = (
             }[functionName]
 
         Object.defineProperty(fn, 'name', { value: functionName, configurable: true })
+        markVmOwned(fn)
         if (isGeneratorType(type) || isAsyncGeneratorType(type)) {
             const intrinsics = getGeneratorFunctionIntrinsics(
                 globalThis,
@@ -1272,7 +1283,7 @@ export const getExecution = (
                     configurable: false,
                     enumerable: false,
                     writable: true,
-                    value: Object.create(intrinsics.prototype),
+                    value: markVmOwned(Object.create(intrinsics.prototype)),
                 })
             }
             Object.setPrototypeOf(fn, intrinsics.functionPrototype)
@@ -1289,7 +1300,10 @@ export const getExecution = (
                 && (typeof ownPrototype === 'object' || typeof ownPrototype === 'function')
                 && Object.getPrototypeOf(ownPrototype) !== objectPrototype
             ) {
+                markVmOwned(ownPrototype)
                 Object.setPrototypeOf(ownPrototype, objectPrototype)
+            } else if (ownPrototype && (typeof ownPrototype === 'object' || typeof ownPrototype === 'function')) {
+                markVmOwned(ownPrototype)
             }
         }
 
@@ -1303,10 +1317,11 @@ export const getExecution = (
             return undefined
         }
 
-        const target = function (...additionalArgs: any[]) {
+        const target = markVmOwned(function (...additionalArgs: any[]) {
             return Reflect.apply(fn, self, [...args, ...additionalArgs])
-        }
+        })
         const bindFn = Reflect.apply(BIND, target, [undefined])
+        markVmOwned(bindFn)
 
         bindInfo.set(bindFn, {
             [Fields.function]: fn,
@@ -1563,7 +1578,7 @@ export const getExecution = (
     let currentFrameStack: any[] = initialFrame[Fields.valueStack]
 
     const addCatchScope = (frame: TryFrame, name: string, value: any) => {
-        const newScope: Scope = {}
+        const newScope: Scope = getEmptyObject()
         defineVariable(newScope, name, VariableType.Var)
         initializeBindingValue(newScope, name, value)
         frame[Fields.scopes].push(newScope)
@@ -2234,6 +2249,12 @@ export const getExecution = (
         set [Fields.ptr] (v: number) {
             commandPtr = v
             ptr = v
+        },
+        get [Fields.evalResult] () {
+            return evalResult
+        },
+        set [Fields.evalResult] (v: unknown) {
+            evalResult = v
         },
         get [Fields.stack] () {
             return stack

@@ -3,7 +3,7 @@ import * as ts from 'typescript'
 import { collectEvalTaintedFunctions, extractVariable, isNonAnnexBFunctionDeclaration, linkScopes, markParent, resolveScopes, searchFunctionAndScope, type Functions, type ParentMap, type ScopeChild, type Scopes } from './analysis'
 import { generateSegment, type Op, type Segment } from './codegen'
 import { finalizeLiteralPool, genOffset, generateData } from './encoding'
-import { OpCode, type ProgramScopeDebugMap } from './shared'
+import { OpCode, setProgramSource, type ProgramScopeDebugMap } from './shared'
 
 export type CompileOptions = {
     /** prints debug info to stdout */
@@ -1824,6 +1824,7 @@ export function compile(src: string, {
     const codeLength = programData.length
 
     finalizeLiteralPool(programData, literalValues)
+    setProgramSource(programData, src)
 
     return [programData, { sourceMap, internals, scopeDebugMap, codeLength }]
 }

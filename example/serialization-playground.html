@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flat JS serialization playground</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: #17212b;
+            background: #f7f9fb;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+        }
+        main {
+            width: min(1120px, calc(100vw - 32px));
+            margin: 28px auto;
+        }
+        nav {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        a {
+            color: #075e9f;
+        }
+        h1 {
+            margin: 0 0 16px;
+            font-size: 1.65rem;
+        }
+        .toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        button {
+            border: 1px solid #9eb3c8;
+            background: #fff;
+            color: #17212b;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font: inherit;
+            cursor: pointer;
+        }
+        button:disabled {
+            color: #728197;
+            background: #edf2f7;
+            cursor: default;
+        }
+        .status {
+            min-height: 36px;
+            padding: 8px 10px;
+            border: 1px solid #c7d3df;
+            border-radius: 6px;
+            background: #fff;
+            color: #334155;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+            gap: 16px;
+        }
+        .panel {
+            min-width: 0;
+        }
+        label {
+            display: block;
+            margin: 0 0 6px;
+            font-weight: 650;
+        }
+        textarea,
+        pre {
+            width: 100%;
+            border: 1px solid #c7d3df;
+            border-radius: 6px;
+            background: #fff;
+            color: #17212b;
+            font: 14px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+        }
+        textarea {
+            min-height: 320px;
+            resize: vertical;
+            padding: 12px;
+        }
+        pre {
+            min-height: 132px;
+            margin: 0 0 12px;
+            padding: 12px;
+            overflow: auto;
+            white-space: pre-wrap;
+        }
+        #snapshot {
+            min-height: 220px;
+        }
+        @media (max-width: 820px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <nav aria-label="Project links">
+            <a href="./">Examples</a>
+            <a href="../">Web debugger</a>
+        </nav>
+        <h1>Serialization Playground</h1>
+        <div class="toolbar">
+            <button id="start">Start</button>
+            <button id="continue" disabled>Continue</button>
+            <button id="save" disabled>Save</button>
+            <button id="load">Load</button>
+            <button id="reset">Reset</button>
+        </div>
+        <p id="status" class="status">Idle</p>
+        <div class="grid">
+            <section class="panel">
+                <label for="source">Source</label>
+                <textarea id="source" spellcheck="false"></textarea>
+            </section>
+            <section class="panel">
+                <label for="log">Log</label>
+                <pre id="log"></pre>
+                <label for="snapshot">Snapshot</label>
+                <textarea id="snapshot" spellcheck="false"></textarea>
+            </section>
+        </div>
+    </main>
+    <script src="./serialization-playground.js"></script>
+</body>
+</html>

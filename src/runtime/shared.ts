@@ -293,7 +293,12 @@ type ScopeWithInternals = Scope & {
 
 const is_not_defined = ' is not defined'
 const is_a_constant = ' is a constant'
-const getEmptyObject = Object.create.bind(Object, null, {})
+const vmOwnedObjects = new WeakSet<object>()
+const markVmOwned = <T extends object>(value: T): T => {
+    vmOwnedObjects.add(value)
+    return value
+}
+const getEmptyObject = () => markVmOwned(Object.create(null) as Record<PropertyKey, any>)
 const TDZ_VALUE = Symbol()
 
 export type ResultStep = {
@@ -491,6 +496,7 @@ export type ScopeDebugEntry = [string, unknown, boolean]
 
 type Execution = {
     [Fields.ptr]: number
+    [Fields.evalResult]: unknown
     readonly [Fields.stack]: Stack
     readonly [Fields.scopes]: Scope[]
     [Fields.step]: (debug?: boolean) => Result
@@ -628,6 +634,7 @@ export {
     iteratorRecordNext,
     literalPoolCache,
     literalPoolWordMask,
+    markVmOwned,
     REGEXP,
     SCOPE_DEBUG_PTR,
     SCOPE_FLAGS,
@@ -643,6 +650,7 @@ export {
     SUPER_REFERENCE_THIS,
     toNumeric,
     toPropertyKey,
+    vmOwnedObjects,
 }
 
 export type {

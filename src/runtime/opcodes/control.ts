@@ -7,6 +7,7 @@ import {
     TryFrame,
     environments,
     functionDescriptors,
+    markVmOwned,
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
 
@@ -103,11 +104,11 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
             const catchAddr = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
             const exitAddr = ctx[OpcodeContextField.popCurrentFrameStack]<number>()
 
-            const frame: TryFrame = {
+            const frame: TryFrame = markVmOwned({
                 [Fields.type]: FrameType.Try,
                 [Fields.savedScopes]: ctx[OpcodeContextField.currentFrame][Fields.scopes],
                 [Fields.scopes]: ctx[OpcodeContextField.currentFrame][Fields.scopes].slice(0),
-                [Fields.valueStack]: [],
+                [Fields.valueStack]: markVmOwned([] as any[]),
                 [Fields.state]: TryCatchFinallyState.Try,
                 [Fields.resolveType]: ResolveType.normal,
                 [Fields.value]: undefined,
@@ -123,7 +124,7 @@ export const handleControlOpcode = (command: OpCode, ctx: RuntimeOpcodeContext):
                 [Fields.strict]: ctx[OpcodeContextField.currentFrame][Fields.strict],
                 [Fields.variableEnvironment]: ctx[OpcodeContextField.currentFrame][Fields.variableEnvironment],
                 [Fields.generator]: ctx[OpcodeContextField.currentFrame][Fields.generator],
-            }
+            } as TryFrame)
 
             environments.add(frame)
             ctx[OpcodeContextField.stack].push(frame)

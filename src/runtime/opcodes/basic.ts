@@ -19,6 +19,7 @@ import {
     isSmallNumber,
     is_a_constant,
     is_not_defined,
+    markVmOwned,
     toPropertyKey,
 } from "../shared"
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
@@ -94,10 +95,10 @@ export const handleBasicOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
             )
             const base = Reflect.getPrototypeOf(homeObject)
 
-            ctx[OpcodeContextField.pushCurrentFrameStack]({
+            ctx[OpcodeContextField.pushCurrentFrameStack](markVmOwned({
                 [SUPER_REFERENCE_BASE]: base,
                 [SUPER_REFERENCE_THIS]: actualThis,
-            })
+            }))
             ctx[OpcodeContextField.pushCurrentFrameStack](name)
         }
             break

@@ -25,7 +25,8 @@ import {
     getEmptyObject,
     isAsyncGeneratorType,
     isAsyncType,
-    isGeneratorType
+    isGeneratorType,
+    markVmOwned
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
 
@@ -80,7 +81,7 @@ const createConstructThis = (newTarget: ConstructTarget, globalThis: any) => {
     const prototype = isObjectLike(newTargetPrototype)
         ? newTargetPrototype
         : getDefaultPrototypeFromConstructor(newTarget, globalThis)
-    return Object.create(prototype)
+    return markVmOwned(Object.create(prototype))
 }
 
 const getDefaultPrototypeFromConstructor = (newTarget: ConstructTarget, globalThis: any) => {
@@ -182,7 +183,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
             }
 
             const createRealmArray = (values: any[]) => {
-                const arr = [...values]
+                const arr = markVmOwned([...values])
                 const vmArray = Reflect.get(ctx[OpcodeContextField.currentFrame][Fields.globalThis], 'Array')
                 const prototype = vmArray?.prototype
                 if (prototype && Object.getPrototypeOf(arr) !== prototype) {
@@ -283,7 +284,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                     return obj
                 }
 
-                return new Proxy(obj, {
+                return markVmOwned(new Proxy(obj, {
                     get(target, property, receiver) {
                         const mappedName = getMappedParameter(property)
                         if (mappedName !== undefined) {
@@ -348,7 +349,7 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                         }
                         return success
                     },
-                })
+                }))
             }
 
             const initializeVariableBindings = (
@@ -945,25 +946,25 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 )
                 ctx[OpcodeContextField.pushCurrentFrameStack](iterator)
             } else {
-                const newFrame: Frame = {
+                const newFrame: Frame = markVmOwned({
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],
                     [Fields.return]: ctx[OpcodeContextField.ptr],
-                    [Fields.valueStack]: [
+                    [Fields.valueStack]: markVmOwned([
                         self,
                         fnTarget,
                         descriptor[Fields.name],
                         InvokeType.Apply,
                         ...parameters,
                         parameters.length,
-                    ],
+                    ]),
                     [Fields.invokeType]: InvokeType.Apply,
                     [Fields.function]: fnTarget,
                     [Fields.name]: descriptor[Fields.name],
                     [Fields.programSection]: descriptor[Fields.programSection],
                     [Fields.globalThis]: descriptor[Fields.globalThis],
                     [Fields.generator]: ctx[OpcodeContextField.currentFrame][Fields.generator],
-                }
+                } as Frame)
 
                 environments.add(newFrame)
                 ctx[OpcodeContextField.stack].push(newFrame)
@@ -994,25 +995,25 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 if (!isVmConstructible(fn)) {
                     throw new TypeError('target is not a constructor')
                 }
-                const newFrame: Frame = {
+                const newFrame: Frame = markVmOwned({
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],
                     [Fields.return]: ctx[OpcodeContextField.ptr],
-                    [Fields.valueStack]: [
+                    [Fields.valueStack]: markVmOwned([
                         newTarget,
                         fn,
                         descriptor[Fields.name],
                         InvokeType.Construct,
                         ...parameters,
                         parameters.length,
-                    ],
+                    ]),
                     [Fields.invokeType]: InvokeType.Construct,
                     [Fields.function]: fn,
                     [Fields.name]: descriptor[Fields.name],
                     [Fields.programSection]: descriptor[Fields.programSection],
                     [Fields.globalThis]: descriptor[Fields.globalThis],
                     [Fields.generator]: ctx[OpcodeContextField.currentFrame][Fields.generator],
-                }
+                } as Frame)
 
                 environments.add(newFrame)
                 ctx[OpcodeContextField.stack].push(newFrame)
@@ -1052,25 +1053,25 @@ export const handleFunctionOpcode = (command: OpCode, ctx: RuntimeOpcodeContext)
                 if (!isVmConstructible(fn)) {
                     throw new TypeError('target is not a constructor')
                 }
-                const newFrame: Frame = {
+                const newFrame: Frame = markVmOwned({
                     [Fields.type]: FrameType.Function,
                     [Fields.scopes]: [...descriptor[Fields.scopes]],
                     [Fields.return]: ctx[OpcodeContextField.ptr],
-                    [Fields.valueStack]: [
+                    [Fields.valueStack]: markVmOwned([
                         fn,
                         fn,
                         descriptor[Fields.name],
                         InvokeType.Construct,
                         ...parameters,
                         parameters.length,
-                    ],
+                    ]),
                     [Fields.invokeType]: InvokeType.Construct,
                     [Fields.function]: fn,
                     [Fields.name]: descriptor[Fields.name],
                     [Fields.programSection]: descriptor[Fields.programSection],
                     [Fields.globalThis]: descriptor[Fields.globalThis],
                     [Fields.generator]: ctx[OpcodeContextField.currentFrame][Fields.generator],
-                }
+                } as Frame)
 
                 environments.add(newFrame)
                 ctx[OpcodeContextField.stack].push(newFrame)

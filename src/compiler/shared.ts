@@ -20,6 +20,16 @@ export const literalPoolWordMask = (i: number): number => {
     return (x ^ (x >>> 15) ^ (x << 15)) | 0
 }
 
+const programSources = new WeakMap<number[], string>()
+
+export const setProgramSource = (program: number[], source: string): number[] => {
+    programSources.set(program, source)
+    return program
+}
+
+export const getProgramSource = (program: number[]): string | undefined =>
+    programSources.get(program)
+
 export const enum SpecialVariable {
     This = '[this]',
     SwitchValue = '[switch]',

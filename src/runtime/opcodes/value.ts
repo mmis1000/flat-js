@@ -13,6 +13,7 @@ import {
     iteratorComplete,
     iteratorNext,
     environments,
+    markVmOwned,
     toNumeric,
     toPropertyKey,
 } from "../shared"
@@ -37,7 +38,7 @@ const toReferencePropertyKey = (target: unknown, name: unknown) => {
 }
 
 const createRealmArray = (ctx: RuntimeOpcodeContext, values: any[] = []) => {
-    const arr = [...values]
+    const arr = markVmOwned([...values])
     const vmArray = Reflect.get(ctx[OpcodeContextField.currentFrame][Fields.globalThis], 'Array')
     const prototype = vmArray?.prototype
     if (prototype && Object.getPrototypeOf(arr) !== prototype) {
@@ -49,7 +50,7 @@ const createRealmArray = (ctx: RuntimeOpcodeContext, values: any[] = []) => {
 const createRealmObject = (ctx: RuntimeOpcodeContext) => {
     const vmObject = Reflect.get(ctx[OpcodeContextField.currentFrame][Fields.globalThis], 'Object')
     const prototype = vmObject?.prototype
-    return prototype ? Object.create(prototype) : {}
+    return markVmOwned(prototype ? Object.create(prototype) : {})
 }
 
 export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): OpcodeHandlerResult => {
@@ -95,7 +96,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
 
             let siteCache = realmCache.get(realm)
             if (!siteCache) {
-                siteCache = []
+                siteCache = markVmOwned([] as any[])
                 realmCache.set(realm, siteCache)
             }
 

@@ -127,6 +127,7 @@ example/*.json
 example/*.bin
 example/*.bin.gz
 example/*.js
+example/*.js.map
 
 # Local Test262 scan snapshots.
 plan/test262-*-current.json
