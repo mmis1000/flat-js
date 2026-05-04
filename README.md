@@ -68,8 +68,18 @@ Public API (`src/index.ts`): `compile`, `run`, `getExecution`, and `compileAndRu
 npm install
 npm run build:tsc    # type-check/compile src TypeScript
 npm run build        # assemble bundled runtime + compile TypeScript to lib/
+npm run build:compiler-bundle
+npm run check:selfhost-compiler
 npm run watch        # compile TypeScript in watch mode
 ```
+
+---
+
+## Self-host compiler bundle
+
+`npm run build:compiler-bundle` first runs the normal TypeScript build so `const enum` values are inlined by `tsc`, then webpack bundles `lib/compiler.js` and the full `typescript` package into `lib/compiler-with-typescript.cjs`. The bundle target is Node CJS: TypeScript is included in the output file, while Node built-ins such as `fs`, `path`, and `os` still come from the host.
+
+`npm run check:selfhost-compiler` builds that bundle, requires it natively, compiles the bundled compiler with Flat JS, runs the compiled bundle inside the VM, and calls the VM-exported `compile('1+1', { evalMode: true })`.
 
 ---
 
