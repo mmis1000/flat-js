@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flat JS VM Serialization"
+  short_description: "Advance VM snapshot support in phases"
+  default_prompt: "Use $flat-js-vm-serialization to advance the next VM state serialization phase."

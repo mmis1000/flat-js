@@ -6,6 +6,32 @@ Current assumption check (2026-05-05): the overall direction below still matches
 
 Goal: support pausing a Flat JS execution, serializing its observable state to a string-friendly snapshot, restoring it in another runtime instance, and continuing execution from the same VM point.
 
+## Working Workflow
+
+Project skill: use `$flat-js-vm-serialization` before starting implementation work in this area.
+
+Advance serialization one phase at a time:
+
+1. Pick one phase or sub-phase from section 12 and write its acceptance criteria before runtime edits.
+2. Add focused positive and negative serialization tests first.
+3. Implement the smallest runtime record/restore shape that satisfies those tests.
+4. Keep unknown or unmodeled state rejected with `UnsupportedSerializationError`.
+5. Preserve optional-extension boundaries: no default runtime export, inline runtime export, generated loader inclusion, or normal-mode host membrane unless the phase explicitly requires it.
+6. Update this plan with the new status, remaining unsupported cases, and validation commands.
+
+Recommended next sequence:
+
+1. Phase 1A: harden V1 edge cases and rejection coverage.
+2. Phase 2A: specify host descriptor overlay semantics before implementation.
+3. Phase 2B: implement registered host descriptor overlays.
+4. Phase 3A: replace `for...in` checkpoint state with a VM-managed record.
+5. Phase 3B: redirect selected built-in iterator factories to VM-owned iterator records.
+6. Phase 4A: add `Map` and `Set` records.
+7. Phase 4B: add `WeakMap` and `WeakSet` reachable-key probing.
+8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases.
+9. Phase 6: add strict checkpointable ingress checks.
+10. Phase 7: revisit async/promise state only after a deterministic scheduler/host-promise boundary design exists.
+
 ## 0. Follow-Up Path From Current V1
 
 Current V1 support:
@@ -48,6 +74,7 @@ Follow-up stages:
 6. **Async/promise state**
    - Keep pending native `Promise` and async execution state unsupported for now.
    - Later, model async only when the scheduler/host promise boundary has a deterministic checkpoint representation.
+   - Start that future phase with negative tests and a scheduler design; do not attempt to capture native promise internals directly.
 
 7. **Tooling and CI**
    - Add a Playwright smoke test for save URL -> reset/load -> continue in the serialization playground.
