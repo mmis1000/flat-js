@@ -33,6 +33,7 @@ import {
     ResultAwait,
     ResultDone,
     RuntimeAdmitValue,
+    RuntimeAsyncHost,
     Scope,
     ScopeWithInternals,
     StaticVariableStore,
@@ -242,7 +243,8 @@ export const getExecution = (
     compileFunction: typeof import('../compiler').compile = (...args: any[]) => { throw new Error('not supported') },
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
     variableEnvironmentScope: Scope | null = null,
-    admitValue: RuntimeAdmitValue = () => {}
+    admitValue: RuntimeAdmitValue = () => {},
+    asyncHost: RuntimeAsyncHost | null = null
 ) => {
     markVmOwned(program as unknown as object)
     for (const scope of scopes) {
@@ -785,7 +787,7 @@ export const getExecution = (
     ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
         // Build an initial frame via a throwaway execution; do NOT run it. The generator
         // always executes inside the caller's VM via handover (OpCode.Call & OpCode.Yield).
-        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue)
+        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue, asyncHost)
         const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
             (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
         )
@@ -916,7 +918,7 @@ export const getExecution = (
         return(value?: unknown): Promise<IteratorResult<unknown>>
         throw(error?: unknown): Promise<IteratorResult<unknown>>
     } => {
-        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue)
+        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue, asyncHost)
         const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
             (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
         )
@@ -1166,6 +1168,16 @@ export const getExecution = (
         pr: number[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): Promise<unknown> => {
+        if (asyncHost) {
+            return asyncHost.createAsyncFromExecution({
+                program: pr,
+                offset,
+                globalThis: gt,
+                scopes,
+                invokeData,
+                args,
+            }) as Promise<unknown>
+        }
         const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue)
         const PromiseCtor = Reflect.get(gt, 'Promise') ?? Promise
         const promiseResolve = (value: unknown) => Reflect.get(PromiseCtor, 'resolve').call(PromiseCtor, value) as PromiseLike<unknown>
@@ -1290,7 +1302,7 @@ export const getExecution = (
 
             return run_(
                 pr, offset, des[Fields.globalThis],
-                [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects, null, admitValue
+                [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects, null, admitValue, asyncHost
             )
         }
         fn = usesOrdinaryFunctionWrapper(type)
@@ -1560,7 +1572,8 @@ export const getExecution = (
             includesLocalScope
                 ? getCurrentFrame()[Fields.variableEnvironment] ?? null
                 : getCurrentFrame()[Fields.globalThis],
-            admitValue
+            admitValue,
+            asyncHost
         )
 
         return result
@@ -1598,7 +1611,8 @@ export const getExecution = (
             functionRedirects,
             getDebugFunction,
             null,
-            admitValue
+            admitValue,
+            asyncHost
         )
 
         Object.defineProperty(fn, 'name', { value: 'anonymous', configurable: true })
@@ -2329,7 +2343,8 @@ const run_ = (
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
     variableEnvironmentScope: Scope | null = null,
-    admitValue: RuntimeAdmitValue = () => {}
+    admitValue: RuntimeAdmitValue = () => {},
+    asyncHost: RuntimeAsyncHost | null = null
 ) => {
     const execution = getExecution(
         program,
@@ -2342,7 +2357,8 @@ const run_ = (
         compileFunction,
         functionRedirects,
         variableEnvironmentScope,
-        admitValue
+        admitValue,
+        asyncHost
     )
 
     let res
@@ -2372,7 +2388,8 @@ export const run = (
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
     getDebugFunction: () => null | DebugCallback = () => null,
     variableEnvironmentScope: Scope | null = null,
-    admitValue: RuntimeAdmitValue = () => {}
+    admitValue: RuntimeAdmitValue = () => {},
+    asyncHost: RuntimeAsyncHost | null = null
 ) => {
     return run_(
         program,
@@ -2391,6 +2408,7 @@ export const run = (
         compileFunction,
         functionRedirects,
         variableEnvironmentScope,
-        admitValue
+        admitValue,
+        asyncHost
     )
 }

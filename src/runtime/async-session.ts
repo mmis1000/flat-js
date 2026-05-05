@@ -9,7 +9,10 @@ import {
     type Execution,
     type FunctionDescriptor,
     type Result,
+    type ResultAwait,
     type RuntimeAdmitValue,
+    type RuntimeAsyncExecutionRequest,
+    type RuntimeAsyncHost,
     type Scope,
 } from "./shared"
 
@@ -26,17 +29,49 @@ type VmPromiseRecord = {
 
 type VmPromiseReactionKind = 'fulfilled' | 'rejected'
 
-type VmPromiseReaction = {
+type VmPromiseThenReaction = {
+    type: 'then'
     kind: VmPromiseReactionKind
     handler: unknown
     result: VmPromiseRecord
 }
 
-type VmReactionJob = {
+type VmPromiseAwaitReaction = {
+    type: 'await'
+    kind: VmPromiseReactionKind
+    task: VmAsyncTask
+}
+
+type VmPromiseReaction = VmPromiseThenReaction | VmPromiseAwaitReaction
+
+type VmThenJob = {
     id: number
-    reaction: VmPromiseReaction
+    type: 'then'
+    reaction: VmPromiseThenReaction
     argument: unknown
     execution?: Execution
+}
+
+type VmAsyncContinuationJob = {
+    id: number
+    type: 'asyncContinuation'
+    task: VmAsyncTask
+    kind: VmPromiseReactionKind
+    argument: unknown
+}
+
+type VmAsyncStartJob = {
+    id: number
+    type: 'asyncStart'
+    task: VmAsyncTask
+}
+
+type VmJob = VmThenJob | VmAsyncContinuationJob | VmAsyncStartJob
+
+type VmAsyncTask = {
+    id: number
+    execution: Execution
+    promise: VmPromiseRecord
 }
 
 type VmTimerRecord = {
@@ -74,7 +109,7 @@ export type VmAsyncSessionOptions = {
     onPause?: (info: VmAsyncSessionPauseInfo) => void
 }
 
-export class VmAsyncSession {
+export class VmAsyncSession implements RuntimeAsyncHost {
     readonly Promise: Function
     readonly vmSleep: (ticks?: unknown, value?: unknown) => object
     readonly mainExecution: Execution
@@ -86,18 +121,19 @@ export class VmAsyncSession {
     private readonly onPause?: (info: VmAsyncSessionPauseInfo) => void
     private readonly promisePrototype: object
     private readonly promiseRecords = new WeakMap<object, VmPromiseRecord>()
-    private readonly jobs: VmReactionJob[] = []
+    private readonly jobs: VmJob[] = []
     private readonly timers: VmTimerRecord[] = []
 
     private currentTickValue = 0
     private nextPromiseId = 1
     private nextJobId = 1
     private nextTimerId = 1
+    private nextAsyncTaskId = 1
     private mainDoneValue = false
     private pausedValue = false
     private pausedPtrValue: number | undefined
     private pausedExecutionValue: Execution | null = null
-    private activeJob: VmReactionJob | null = null
+    private activeJob: VmJob | null = null
 
     constructor(program: number[], options: VmAsyncSessionOptions) {
         this.globalThisValue = options.globalThis
@@ -120,7 +156,8 @@ export class VmAsyncSession {
             this.compileFunction,
             this.functionRedirects,
             null,
-            this.admitValue
+            this.admitValue,
+            this
         )
     }
 
@@ -218,8 +255,47 @@ export class VmAsyncSession {
         return promise.promise
     }
 
+    createAsyncFromExecution(request: RuntimeAsyncExecutionRequest): unknown {
+        const promise = this.createPromiseRecord()
+        const execution = getExecution(
+            request.program,
+            request.offset,
+            request.globalThis,
+            [...request.scopes],
+            request.invokeData,
+            request.args,
+            this.getDebugFunction,
+            this.compileFunction,
+            this.functionRedirects,
+            null,
+            this.admitValue,
+            this
+        )
+        const task: VmAsyncTask = {
+            id: this.nextAsyncTaskId++,
+            execution,
+            promise,
+        }
+        const previousActiveJob = this.activeJob
+        const startJob: VmAsyncStartJob = {
+            id: this.nextJobId++,
+            type: 'asyncStart',
+            task,
+        }
+        this.activeJob = startJob
+        this.runActiveJob()
+        if (!this.pausedValue) {
+            this.activeJob = previousActiveJob
+        }
+        return promise.promise
+    }
+
     private readonly getDebugFunction = (): DebugCallback => (ptr?: number) => {
-        const execution = this.activeJob?.execution ?? this.mainExecution ?? null
+        const execution = this.activeJob
+            ? this.activeJob.type === 'then'
+                ? this.activeJob.execution ?? null
+                : this.activeJob.task.execution
+            : this.mainExecution ?? null
         this.pausedValue = true
         this.pausedPtrValue = ptr
         this.pausedExecutionValue = execution
@@ -339,11 +415,13 @@ export class VmAsyncSession {
         }
         const result = this.createPromiseRecord()
         this.addReaction(record, {
+            type: 'then',
             kind: 'fulfilled',
             handler: typeof onFulfilled === 'function' ? onFulfilled : undefined,
             result,
         })
         this.addReaction(record, {
+            type: 'then',
             kind: 'rejected',
             handler: typeof onRejected === 'function' ? onRejected : undefined,
             result,
@@ -386,8 +464,8 @@ export class VmAsyncSession {
         }
         const adopted = this.promiseRecordFor(value)
         if (adopted) {
-            this.addReaction(adopted, { kind: 'fulfilled', handler: undefined, result: record })
-            this.addReaction(adopted, { kind: 'rejected', handler: undefined, result: record })
+            this.addReaction(adopted, { type: 'then', kind: 'fulfilled', handler: undefined, result: record })
+            this.addReaction(adopted, { type: 'then', kind: 'rejected', handler: undefined, result: record })
             return
         }
         this.fulfillRecord(record, value)
@@ -437,11 +515,22 @@ export class VmAsyncSession {
     }
 
     private enqueueReaction(reaction: VmPromiseReaction, argument: unknown) {
-        this.jobs.push({
-            id: this.nextJobId++,
-            reaction,
-            argument,
-        })
+        if (reaction.type === 'then') {
+            this.jobs.push({
+                id: this.nextJobId++,
+                type: 'then',
+                reaction,
+                argument,
+            })
+        } else {
+            this.jobs.push({
+                id: this.nextJobId++,
+                type: 'asyncContinuation',
+                task: reaction.task,
+                kind: reaction.kind,
+                argument,
+            })
+        }
     }
 
     private runMain() {
@@ -457,24 +546,37 @@ export class VmAsyncSession {
             return
         }
 
-        try {
-            const completion = this.runReactionJob(job)
-            if (!completion.done) {
-                return
+        if (job.type === 'then') {
+            try {
+                const completion = this.runReactionJob(job)
+                if (!completion.done) {
+                    return
+                }
+                if (completion.rejected) {
+                    this.rejectRecord(job.reaction.result, completion.value)
+                } else {
+                    this.resolveRecord(job.reaction.result, completion.value)
+                }
+                this.activeJob = null
+            } catch (error) {
+                this.rejectRecord(job.reaction.result, error)
+                this.activeJob = null
             }
-            if (completion.rejected) {
-                this.rejectRecord(job.reaction.result, completion.value)
-            } else {
-                this.resolveRecord(job.reaction.result, completion.value)
+            return
+        }
+
+        try {
+            if (!this.runAsyncJob(job)) {
+                return
             }
             this.activeJob = null
         } catch (error) {
-            this.rejectRecord(job.reaction.result, error)
+            this.rejectRecord(job.task.promise, error)
             this.activeJob = null
         }
     }
 
-    private runReactionJob(job: VmReactionJob): { done: false } | { done: true, rejected: boolean, value: unknown } {
+    private runReactionJob(job: VmThenJob): { done: false } | { done: true, rejected: boolean, value: unknown } {
         const { reaction } = job
         if (reaction.handler === undefined) {
             return {
@@ -510,7 +612,8 @@ export class VmAsyncSession {
                 this.compileFunction,
                 this.functionRedirects,
                 null,
-                this.admitValue
+                this.admitValue,
+                this
             )
         }
 
@@ -525,12 +628,100 @@ export class VmAsyncSession {
         }
     }
 
+    private runAsyncJob(job: VmAsyncStartJob | VmAsyncContinuationJob): boolean {
+        const resume = job.type === 'asyncContinuation'
+            ? { kind: job.kind, value: job.argument }
+            : undefined
+        return this.runAsyncTask(job.task, resume)
+    }
+
+    private runAsyncTask(
+        task: VmAsyncTask,
+        resume?: { kind: VmPromiseReactionKind, value: unknown }
+    ): boolean {
+        if (resume) {
+            if (resume.kind === 'fulfilled') {
+                task.execution[Fields.pushValue](resume.value)
+            } else {
+                task.execution[Fields.setPendingThrow](resume.value)
+            }
+        }
+
+        const result = this.runExecutionUntilAwait(task.execution)
+        if (result.kind === 'paused') {
+            return false
+        }
+        if (result.kind === 'done') {
+            this.resolveRecord(task.promise, result.value)
+            return true
+        }
+
+        this.attachAwaitContinuation(task, result.value)
+        return true
+    }
+
+    private attachAwaitContinuation(task: VmAsyncTask, value: unknown) {
+        const awaited = this.awaitableRecord(value)
+        this.addReaction(awaited, { type: 'await', kind: 'fulfilled', task })
+        this.addReaction(awaited, { type: 'await', kind: 'rejected', task })
+    }
+
+    private awaitableRecord(value: unknown): VmPromiseRecord {
+        const existing = this.promiseRecordFor(value)
+        if (existing) {
+            return existing
+        }
+
+        if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+            try {
+                const then = Reflect.get(value as object, 'then')
+                if (typeof then === 'function') {
+                    const rejected = this.createPromiseRecord()
+                    this.rejectRecord(rejected, new TypeError('Host thenables are unsupported in VM async sessions'))
+                    return rejected
+                }
+            } catch (error) {
+                const rejected = this.createPromiseRecord()
+                this.rejectRecord(rejected, error)
+                return rejected
+            }
+        }
+
+        const fulfilled = this.createPromiseRecord()
+        this.resolveRecord(fulfilled, value)
+        return fulfilled
+    }
+
     private stepableDescriptor(value: unknown): FunctionDescriptor | undefined {
         const descriptor = functionDescriptors.get(value)
         if (!descriptor || isAsyncType(descriptor[Fields.type])) {
             return undefined
         }
         return descriptor
+    }
+
+    private runExecutionUntilAwait(execution: Execution): (
+        | { kind: 'paused' }
+        | { kind: 'done', value: unknown }
+        | { kind: 'await', value: unknown }
+    ) {
+        let result: Result
+        do {
+            result = execution[Fields.step]()
+            if (this.pausedValue) {
+                return { kind: 'paused' }
+            }
+            if (!result[Fields.done] && result[Fields.yield]) {
+                throw new Error('Unhandled yield in VM async session task')
+            }
+            if (!result[Fields.done] && result[Fields.await]) {
+                return { kind: 'await', value: (result as ResultAwait)[Fields.value] }
+            }
+        } while (!result[Fields.done])
+        return {
+            kind: 'done',
+            value: (result as any)[Fields.value],
+        }
     }
 
     private runExecution(execution: Execution): { done: false } | { done: true, value: unknown } {

@@ -57,3 +57,44 @@ log('sync')
     expect(session.runUntilIdleOrPause().paused).toBe(false)
     expect(logs).toEqual(['sync', 'async'])
 })
+
+test('async await continuation pause blocks later timer jobs globally', () => {
+    const [program] = compile(`
+async function main() {
+    vmSleep(2).then(() => {
+        log('later')
+    })
+    await vmSleep(1)
+    debugger
+    log('first')
+}
+main()
+`, { range: true })
+    const logs: string[] = []
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{
+            log: (value: unknown) => logs.push(String(value)),
+            __proto__: null,
+        }],
+        compileFunction: compile,
+    })
+
+    expect(session.runUntilIdleOrPause().paused).toBe(false)
+    expect(logs).toEqual([])
+
+    session.advanceTime(1)
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+    expect(logs).toEqual([])
+
+    expect(session.advanceTime(10).settledTimers).toBe(0)
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+    expect(logs).toEqual([])
+
+    expect(session.resume().paused).toBe(false)
+    expect(logs).toEqual(['first'])
+
+    expect(session.advanceTime(1).settledTimers).toBe(1)
+    expect(session.runUntilIdleOrPause().paused).toBe(false)
+    expect(logs).toEqual(['first', 'later'])
+})

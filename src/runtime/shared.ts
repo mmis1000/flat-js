@@ -642,6 +642,19 @@ type InvokeParamConstruct = {
 
 export type InvokeParam = InvokeParamApply | InvokeParamConstruct
 
+type RuntimeAsyncExecutionRequest = {
+    program: number[]
+    offset: number
+    globalThis: object
+    scopes: Scope[]
+    invokeData: InvokeParam
+    args: unknown[]
+}
+
+type RuntimeAsyncHost = {
+    createAsyncFromExecution(request: RuntimeAsyncExecutionRequest): unknown
+}
+
 
 export {
     APPLY,
@@ -715,6 +728,8 @@ export type {
     PendingAction,
     RefinedEnvSet,
     RuntimeAdmitValue,
+    RuntimeAsyncExecutionRequest,
+    RuntimeAsyncHost,
     ScopeWithInternals,
     StaticVariableStore,
     TryFrame,
