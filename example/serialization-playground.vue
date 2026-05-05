@@ -115,22 +115,24 @@ type VmStatus = 'idle' | 'running' | 'paused' | 'done' | 'error'
 
 type VmExecution = ReturnType<typeof getExecution>
 
-const defaultSource = `function greet(name) {
-    const state = { name, count: 1 }
-    log('hello ' + state.name)
-    debugger
-    return function checkpoint() {
-        state.count += 1
-        log(state.name + ' checkpoint ' + state.count)
-        return state.count
-    }
+const defaultSource = `const events = []
+
+function record(value) {
+    events.push(value)
+    log(events.join(' -> '))
 }
 
-const name = input()
-const next = greet(name)
-next()
-debugger
-log('done ' + next())
+async function main() {
+    record('start')
+    vmSleep(2).then(() => {
+        record('later timer')
+    })
+    await vmSleep(1)
+    debugger
+    record('first after restore')
+}
+
+main()
 `
 
 function emptyDebugInfo(): DebugInfo {
