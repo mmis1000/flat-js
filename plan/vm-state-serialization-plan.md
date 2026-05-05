@@ -1,10 +1,58 @@
 # VM State Serialization Plan
 
-Status: investigation notes and proposed implementation direction. VM state serialization is still unimplemented.
+Status (updated 2026-05-05): optional V1 serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. V1 snapshots paused synchronous executions at `Fields.step()` boundaries, embeds the source/program buffers, preserves ordinary object/array/function identity, and restores runnable `Execution` objects. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
 
-Current assumption check (2026-05-04): the overall direction below still matches the runtime shape, but a future implementation must be built from inside `src/runtime` or through narrow internal hooks. The public `Execution` object exposes `ptr`, `stack`, `scopes`, and `step`, but it does not expose all closure-local execution state, registered callbacks, or runtime side-table/cache relationships needed for a complete restore.
+Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The remaining work is to expand the supported state set without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
 
 Goal: support pausing a Flat JS execution, serializing its observable state to a string-friendly snapshot, restoring it in another runtime instance, and continuing execution from the same VM point.
+
+## 0. Follow-Up Path From Current V1
+
+Current V1 support:
+
+- Optional public API: `snapshotExecution`, `restoreExecution`, `serializeExecutionSnapshot`, `parseExecutionSnapshot`, `createHostRegistry`, `createSerializableHostObjectRedirects`, and `UnsupportedSerializationError`.
+- Snapshot roots: execution pointer, eval result, frame stack, frame scopes, value stacks, globals reachable through frames, program buffers, static scope internals, TDZ sentinel, and ordinary VM function descriptors.
+- Graph support: primitive tags, ordinary object/array/function/frame records, descriptors, prototypes, well-known/internal symbol keys, cycles, shared references, and embedded program source.
+- Host support: stable host refs by registry id; host object mutations/overlays are still not serialized. Selected safe host factory returns can be admitted by optional `functionRedirects` from `createSerializableHostObjectRedirects`.
+- Playground support: Monaco/debugger/scope inspection/REPL, `log`, modal `input`, save/load text snapshots, save/load snapshot URLs, and home-page example link.
+- Guardrails: serializer remains outside `src/index.ts`, `src/runtime.ts`, `src/runtime-inline.ts`, CLI self-contained loader output, and generated inline runtime.
+
+Follow-up stages:
+
+1. **Close V1 correctness gaps**
+   - Add tests for plain loops, prototype-shared graphs, `JSON.parse`/`Object.fromEntries` adoption, `Object.create(null)`, accessors, symbol-keyed properties, sparse arrays, non-extensible objects, and restore-after-REPL state.
+   - Add negative tests for native iterator objects, DOM/browser objects, unregistered host functions, accessors that close over unsupported host state, and host object descriptor overlays.
+   - Keep the snapshot format same-runtime-only unless a versioned compatibility policy is explicitly added.
+
+2. **Host object boundary**
+   - Expand `createSerializableHostObjectRedirects` only for host functions whose object returns are ordinary data containers or descriptor containers.
+   - Keep rejecting unknown host/native objects by default.
+   - Add a host-overlay design before allowing mutations on registered host objects such as `Math.random.a = {}`.
+   - Decide whether descriptor overlays belong in V1.1 or a separate V2 capability model.
+
+3. **Iterator and loop coverage**
+   - Support common built-in iterator flows by redirecting or polyfilling selected iterator factories to VM-owned iterator records.
+   - Replace native `GetPropertyIterator` / `for...in` state with a VM-managed record when checkpointable serialization is active.
+   - Continue rejecting unknown native iterators until their internal state has a serializable representation.
+
+4. **Collection support**
+   - Add `Map` and `Set` records first, using captured intrinsics and explicit entry traversal.
+   - Add `WeakMap` and `WeakSet` later using reachable-key probing and fixed-point traversal.
+   - Keep `Date`, `RegExp`, `ArrayBuffer`, and typed arrays as separate opt-in additions with brand-specific records.
+
+5. **Function-family expansion**
+   - Decide whether ordinary classes without unsupported private/static metadata can be restored as VM function descriptors.
+   - Add bound VM function metadata restore after host-overlay rules are clear.
+   - Add generator state only after iterator support is settled; generators currently remain unsupported.
+
+6. **Async/promise state**
+   - Keep pending native `Promise` and async execution state unsupported for now.
+   - Later, model async only when the scheduler/host promise boundary has a deterministic checkpoint representation.
+
+7. **Tooling and CI**
+   - Add a Playwright smoke test for save URL -> reset/load -> continue in the serialization playground.
+   - Keep the runtime-inline/loader-size guard in tests and CI.
+   - Update README status once the current V1/V1.1 API has settled enough to document as a supported optional extension.
 
 ## 1. Product Contract
 
@@ -211,20 +259,24 @@ const weakMapHas = WeakMap.prototype.has
 
 Brand checks should call captured operations that require the right internal slots.
 
-Initial supported built-ins should be conservative:
+Current V1 supported built-ins are intentionally conservative:
 
 - primitives, including `undefined`, `NaN`, `Infinity`, `-0`, and `BigInt`
 - plain objects and arrays
-- `Date`
-- `RegExp`
+- ordinary VM functions without class/home-object metadata
+- selected host-created ordinary objects only when admitted by optional serialization redirects
+
+Future built-in additions should use brand-specific records:
+
 - `Map`
 - `Set`
 - `WeakMap` and `WeakSet` by reachable-key probing
-- `ArrayBuffer` and typed arrays, if needed
-- VM functions and classes
-- VM generators
+- `Date`
+- `RegExp`
+- `ArrayBuffer` and typed arrays
+- VM classes, bound functions, and generators
 
-Initial rejected built-ins:
+Current rejected built-ins:
 
 - `Promise` with pending native async state
 - unknown native iterators
@@ -335,42 +387,68 @@ The actual implementation may keep snapshots as objects internally and expose st
 
 ## 12. Implementation Phases
 
-### Phase 1: Snapshot Shape And Synchronous VM State
+### Phase 1: Optional V1 Snapshot Shape And Synchronous VM State
 
-- Add internal object-id graph traversal.
-- Serialize frames, scopes, value stacks, `ptr`, program references, and VM-created objects.
-- Probe and restore runtime side tables.
-- Reject unknown host objects and unsupported built-ins.
-- Add tests for pause, snapshot, restore, and continue for simple synchronous code.
+Status: implemented as an optional extension.
 
-### Phase 2: Host Capability Registry
+- Internal object-id graph traversal exists.
+- Frames, scopes, value stacks, `ptr`, eval result, program buffers/source, and VM-created ordinary objects/functions are serialized.
+- Runtime side tables needed for ordinary VM functions and environments are rebuilt.
+- Unknown host objects and unsupported built-ins reject with `UnsupportedSerializationError`.
+- Focused Jest coverage exists for pause, snapshot, restore, continue, source embedding, object identity/cycles, static slots, closures, try/finally, host refs, and unsupported-state rejection.
 
-- Register known host capabilities by stable id.
-- Capture baseline descriptors at VM setup.
-- Serialize host descriptor overlays.
-- Restore registered host references and overlays.
-- Cover cases like `Math.random.a = {}`.
+Follow-up:
 
-### Phase 3: Collections And Weak Collections
+- Broaden edge-case tests for loop snapshots, prototype graphs, sparse arrays, accessors, non-extensible objects, and symbol-keyed descriptors.
+- Keep snapshots guaranteed only at paused synchronous `Fields.step()` boundaries.
 
-- Add `Map`, `Set`, `WeakMap`, and `WeakSet`.
-- For weak collections, implement reachable-key probing and fixed-point traversal.
+### Phase 2: Host Boundary And Capability Registry
+
+Status: partially implemented.
+
+- Stable registered host refs round-trip by id.
+- Selected safe host-created ordinary objects can be admitted with optional serialization redirects.
+- Host property mutations/overlays are not serialized yet.
+
+Follow-up:
+
+- Design and implement descriptor overlays for registered host capabilities.
+- Add host-overlay tests for added/changed/deleted descriptors on registered capabilities.
+- Keep unknown host/native objects rejected unless admitted by a registry or a specific redirect.
+
+### Phase 3: Iteration Support
+
+Status: not implemented beyond VM-authored/ordinary state.
+
+- Native iterator objects are still rejected.
+- `for...of` over built-in native iterators and `for...in` native property iterators need explicit VM-managed state.
+
+Follow-up:
+
+- Redirect selected built-in iterator factories to VM-owned serializable iterator records.
+- Replace or augment `GetPropertyIterator` with a VM-managed for-in iterator in checkpointable mode.
+- Keep unknown native iterators rejected.
+
+### Phase 4: Collections And Weak Collections
+
+Status: not implemented.
+
+- Add `Map` and `Set` records first.
+- Add `WeakMap` and `WeakSet` later through reachable-key probing and fixed-point traversal.
 - Use captured intrinsics only.
 
-### Phase 4: Functions, Classes, And Generators
+### Phase 5: Functions, Classes, And Generators
 
-- Rebuild VM function objects from descriptors.
-- Restore bound wrapper metadata.
-- Restore generator state and reconnect `.next`, `.throw`, and `.return`.
-- Reject active async/promise state unless explicitly supported.
+Status: ordinary VM function descriptors are implemented; classes, bound functions, and generators are rejected.
 
-### Phase 5: Iteration Support
-
-- Add checkpointable built-in iterator redirects/polyfills.
-- Replace or augment `GetPropertyIterator` with a VM-managed for-in iterator in checkpointable mode.
-- Reject unknown native iterators.
+- Decide whether ordinary classes without unsupported metadata can use the VM function-descriptor restore path.
+- Restore bound wrapper metadata only after host-object and function-overlay behavior is defined.
+- Restore generator state after iterator records are serializable.
+- Keep active async/promise state rejected unless explicitly supported.
 
 ### Phase 6: Strict Checkpointable Mode
+
+Status: not implemented.
 
 - Add `admitValue` checks at host/native ingress points.
 - Throw early when unsupported state would enter reachable VM state.
