@@ -55,6 +55,8 @@ const CALL = Function.prototype.call
 const APPLY = Function.prototype.apply
 const BIND = Function.prototype.bind
 const REGEXP = RegExp
+const ARRAY_ITERATOR = Array.prototype[Symbol.iterator]
+const ARRAY_ITERATOR_NEXT = Object.getPrototypeOf([][Symbol.iterator]()).next
 /** Intrinsic `Function` from this realm; used to detect `Function(...)` / `new Function(...)` like `eval`. */
 const HOST_FUNCTION = Object.getPrototypeOf(function () {}).constructor
 
@@ -358,12 +360,21 @@ const getIterator = (iterable: unknown) => {
 
 /** ECMA-262 IteratorRecord creation captures the `next` method once. */
 const getIteratorRecord = (iterable: unknown): IteratorRecord => {
+    const method = (iterable as any)?.[Symbol.iterator]
+    if (
+        Array.isArray(iterable)
+        && method === ARRAY_ITERATOR
+        && Object.getPrototypeOf([][Symbol.iterator]()).next === ARRAY_ITERATOR_NEXT
+    ) {
+        return markVmOwned({ iterator: iterable, done: false, kind: 'array' as const, index: 0 })
+    }
+
     const iterator = getIterator(iterable)
     const next = (iterator as any).next
     if (typeof next !== 'function') {
         throw new TypeError('iterator must have next method')
     }
-    return { iterator, next, done: false }
+    return markVmOwned({ iterator, next, done: false })
 }
 
 const getAsyncIteratorRecord = (iterable: unknown): IteratorRecord => {
@@ -384,7 +395,7 @@ const getAsyncIteratorRecord = (iterable: unknown): IteratorRecord => {
         if (typeof next !== 'function') {
             throw new TypeError('iterator must have next method')
         }
-        return { iterator, next, done: false }
+        return markVmOwned({ iterator, next, done: false })
     }
 
     const syncMethod = (iterable as any)[Symbol.iterator]
@@ -399,7 +410,7 @@ const getAsyncIteratorRecord = (iterable: unknown): IteratorRecord => {
     if (typeof next !== 'function') {
         throw new TypeError('iterator must have next method')
     }
-    return { iterator, next, done: false, asyncFromSync: true }
+    return markVmOwned({ iterator, next, done: false, asyncFromSync: true })
 }
 
 const iteratorNext = (iterator: { next: unknown }, value?: unknown) => {
@@ -415,6 +426,19 @@ const iteratorNext = (iterator: { next: unknown }, value?: unknown) => {
 }
 
 const iteratorRecordNext = (record: IteratorRecord, value?: unknown) => {
+    if (record.kind === 'array') {
+        const index = record.index ?? 0
+        const array = record.iterator as ArrayLike<unknown>
+        if (index >= array.length) {
+            record.done = true
+            return markVmOwned({ value: undefined, done: true })
+        }
+        record.index = index + 1
+        return markVmOwned({ value: array[index], done: false })
+    }
+    if (typeof record.next !== 'function') {
+        throw new TypeError('iterator must have next method')
+    }
     const result = value === undefined
         ? record.next.call(record.iterator)
         : record.next.call(record.iterator, value)
@@ -431,6 +455,9 @@ const asyncIteratorRecordNext = (
     record: IteratorRecord,
     promiseResolve: (value: unknown) => PromiseLike<unknown>
 ) => {
+    if (typeof record.next !== 'function') {
+        throw new TypeError('iterator must have next method')
+    }
     const result = record.next.call(record.iterator)
     if (!record.asyncFromSync) {
         return result
@@ -449,6 +476,9 @@ const iteratorClose = (record: IteratorRecord, suppressErrors: boolean) => {
         return
     }
     record.done = true
+    if (record.kind === 'array') {
+        return
+    }
 
     try {
         const returnMethod = (record.iterator as { return?: unknown }).return
@@ -487,9 +517,11 @@ type Context = Record<string, any> | Frame
 
 type IteratorRecord = {
     iterator: any
-    next: Function
+    next?: Function
     done: boolean
     asyncFromSync?: boolean
+    kind?: 'array'
+    index?: number
 }
 
 export type ScopeDebugEntry = [string, unknown, boolean]

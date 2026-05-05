@@ -74,12 +74,20 @@ type SnapshotFunctionDescriptor = {
 
 type SnapshotRecord = {
     id: number
-    kind: 'object' | 'array' | 'function' | 'frame'
+    kind: 'object' | 'array' | 'function' | 'frame' | 'map' | 'set' | 'weakMap' | 'weakSet'
     extensible: boolean
     prototype: SnapshotValue
     descriptors: SnapshotDescriptor[]
     programSource?: string
     functionDescriptor?: SnapshotFunctionDescriptor
+    entries?: Array<[SnapshotValue, SnapshotValue]>
+    values?: SnapshotValue[]
+}
+
+type SnapshotHostOverlay = {
+    id: string
+    descriptors: SnapshotDescriptor[]
+    deleted: SnapshotKey[]
 }
 
 export type ExecutionSnapshot = {
@@ -89,11 +97,19 @@ export type ExecutionSnapshot = {
     evalResult: SnapshotValue
     stack: SnapshotValue
     records: SnapshotRecord[]
+    hostOverlays?: SnapshotHostOverlay[]
+}
+
+export type HostCapabilityDescriptorOverlay = {
+    descriptors: Array<[PropertyKey, PropertyDescriptor]>
+    deleted: PropertyKey[]
 }
 
 export type HostCapabilityRegistry = {
     getId(value: unknown): string | undefined
     getValue(id: string): unknown
+    getMutationReason?(value: unknown): string | undefined
+    getDescriptorOverlay?(value: unknown): HostCapabilityDescriptorOverlay | undefined
 }
 
 type SnapshotOptions = {
@@ -116,6 +132,9 @@ const SNAPSHOT_VERSION = 1
 
 const unsupportedMessage = (reason: string, path: string) => `${reason} at ${path}`
 
+const isObjectLike = (value: unknown): value is object =>
+    (typeof value === 'object' && value !== null) || typeof value === 'function'
+
 export class UnsupportedSerializationError extends Error {
     constructor(
         readonly reason: string,
@@ -126,9 +145,74 @@ export class UnsupportedSerializationError extends Error {
     }
 }
 
+type HostCapabilityBaseline = {
+    prototype: object | null
+    extensible: boolean
+    descriptors: Record<PropertyKey, PropertyDescriptor>
+}
+
+const captureHostBaseline = (value: object): HostCapabilityBaseline => ({
+    prototype: Object.getPrototypeOf(value),
+    extensible: Object.isExtensible(value),
+    descriptors: Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>,
+})
+
+const haveSameDescriptor = (left: PropertyDescriptor, right: PropertyDescriptor) => {
+    if (left.configurable !== right.configurable || left.enumerable !== right.enumerable) {
+        return false
+    }
+    const leftIsData = 'value' in left || 'writable' in left
+    const rightIsData = 'value' in right || 'writable' in right
+    if (leftIsData !== rightIsData) {
+        return false
+    }
+    if (leftIsData) {
+        return left.writable === right.writable && Object.is(left.value, right.value)
+    }
+    return left.get === right.get && left.set === right.set
+}
+
+const getHostMutationReason = (value: object, baseline: HostCapabilityBaseline) => {
+    if (Object.getPrototypeOf(value) !== baseline.prototype) {
+        return 'Registered host capability prototype overlays are unsupported'
+    }
+    if (Object.isExtensible(value) !== baseline.extensible) {
+        return 'Registered host capability extensibility overlays are unsupported'
+    }
+    return undefined
+}
+
+const getHostDescriptorOverlay = (
+    value: object,
+    baseline: HostCapabilityBaseline
+): HostCapabilityDescriptorOverlay | undefined => {
+    const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>
+    const overlay: HostCapabilityDescriptorOverlay = {
+        descriptors: [],
+        deleted: [],
+    }
+    for (const key of Reflect.ownKeys(descriptors)) {
+        if (
+            !Object.prototype.hasOwnProperty.call(baseline.descriptors, key)
+            || !haveSameDescriptor(descriptors[key], baseline.descriptors[key])
+        ) {
+            overlay.descriptors.push([key, descriptors[key]])
+        }
+    }
+    for (const key of Reflect.ownKeys(baseline.descriptors)) {
+        if (!Object.prototype.hasOwnProperty.call(descriptors, key)) {
+            overlay.deleted.push(key)
+        }
+    }
+    return overlay.descriptors.length === 0 && overlay.deleted.length === 0
+        ? undefined
+        : overlay
+}
+
 export function createHostRegistry(entries: Iterable<[string, unknown]> | Record<string, unknown>): HostCapabilityRegistry {
     const idToValue = new Map<string, unknown>()
     const valueToId = new Map<unknown, string>()
+    const baselines = new WeakMap<object, HostCapabilityBaseline>()
     const list = Symbol.iterator in Object(entries)
         ? entries as Iterable<[string, unknown]>
         : Object.entries(entries)
@@ -136,6 +220,9 @@ export function createHostRegistry(entries: Iterable<[string, unknown]> | Record
     for (const [id, value] of list) {
         idToValue.set(id, value)
         valueToId.set(value, id)
+        if (isObjectLike(value)) {
+            baselines.set(value, captureHostBaseline(value))
+        }
     }
 
     return {
@@ -147,6 +234,20 @@ export function createHostRegistry(entries: Iterable<[string, unknown]> | Record
                 throw new UnsupportedSerializationError(`Missing host capability '${id}'`, '$')
             }
             return idToValue.get(id)
+        },
+        getMutationReason(value: unknown) {
+            if (!isObjectLike(value)) {
+                return undefined
+            }
+            const baseline = baselines.get(value)
+            return baseline === undefined ? undefined : getHostMutationReason(value, baseline)
+        },
+        getDescriptorOverlay(value: unknown) {
+            if (!isObjectLike(value)) {
+                return undefined
+            }
+            const baseline = baselines.get(value)
+            return baseline === undefined ? undefined : getHostDescriptorOverlay(value, baseline)
         },
     }
 }
@@ -260,6 +361,50 @@ const getBuiltinValue = (id: BuiltinRefId): unknown => {
     throw new Error(`Unsupported builtin reference '${id}'`)
 }
 
+const mapSizeGet = Reflect.getOwnPropertyDescriptor(Map.prototype, 'size')!.get!
+const setSizeGet = Reflect.getOwnPropertyDescriptor(Set.prototype, 'size')!.get!
+const mapEntries = Map.prototype.entries
+const setValues = Set.prototype.values
+const weakMapHas = WeakMap.prototype.has
+const weakMapGet = WeakMap.prototype.get
+const weakSetHas = WeakSet.prototype.has
+
+const isMap = (value: object): value is Map<unknown, unknown> => {
+    try {
+        mapSizeGet.call(value)
+        return true
+    } catch {
+        return false
+    }
+}
+
+const isSet = (value: object): value is Set<unknown> => {
+    try {
+        setSizeGet.call(value)
+        return true
+    } catch {
+        return false
+    }
+}
+
+const isWeakMap = (value: object): value is WeakMap<object, unknown> => {
+    try {
+        weakMapHas.call(value, value)
+        return true
+    } catch {
+        return false
+    }
+}
+
+const isWeakSet = (value: object): value is WeakSet<object> => {
+    try {
+        weakSetHas.call(value, value)
+        return true
+    } catch {
+        return false
+    }
+}
+
 const hasOwnPrototype = (record: SnapshotRecord) =>
     record.descriptors.some(descriptor => descriptor.key.t === 'string' && descriptor.key.v === 'prototype')
 
@@ -286,10 +431,6 @@ const assertSupportedFunctionDescriptor = (descriptor: FunctionDescriptor, path:
 const unsupportedBrand = (value: object) => {
     if (value instanceof Date) return 'Date is unsupported'
     if (value instanceof RegExp) return 'RegExp is unsupported'
-    if (value instanceof Map) return 'Map is unsupported'
-    if (value instanceof Set) return 'Set is unsupported'
-    if (value instanceof WeakMap) return 'WeakMap is unsupported'
-    if (value instanceof WeakSet) return 'WeakSet is unsupported'
     if (value instanceof Promise) return 'Promise is unsupported'
     if (value instanceof ArrayBuffer) return 'ArrayBuffer is unsupported'
     if (ArrayBuffer.isView(value)) return 'TypedArray/DataView is unsupported'
@@ -297,9 +438,6 @@ const unsupportedBrand = (value: object) => {
 }
 
 const serializableHostObjects = new WeakSet<object>()
-
-const isObjectLike = (value: unknown): value is object =>
-    (typeof value === 'object' && value !== null) || typeof value === 'function'
 
 const trackSerializableHostObject = <T>(value: T): T => {
     if (isObjectLike(value) && typeof value !== 'function' && unsupportedBrand(value) === undefined) {
@@ -377,6 +515,10 @@ export const createSerializableHostObjectRedirects = (
 class SnapshotWriter {
     private readonly ids = new Map<object, number>()
     private readonly records: SnapshotRecord[] = []
+    private readonly hostOverlays: SnapshotHostOverlay[] = []
+    private readonly serializedHostOverlays = new Set<string>()
+    private readonly weakCollections: Array<{ value: WeakMap<object, unknown> | WeakSet<object>, record: SnapshotRecord, path: string }> = []
+    private readonly weakCollectionKeyIds = new WeakMap<SnapshotRecord, Set<number>>()
 
     constructor(private readonly hostRegistry?: HostCapabilityRegistry) {}
 
@@ -389,14 +531,17 @@ class SnapshotWriter {
             throw new UnsupportedSerializationError('Missing JS program source', '$.source')
         }
 
-        return {
+        const snapshot: ExecutionSnapshot = {
             version: SNAPSHOT_VERSION,
             source,
             ptr: execution[Fields.ptr],
             evalResult: this.value(execution[Fields.evalResult], '$.evalResult'),
             stack: this.value(execution[Fields.stack], '$.stack'),
             records: this.records,
+            hostOverlays: this.hostOverlays,
         }
+        this.finalizeWeakCollections()
+        return snapshot
     }
 
     private unsupported(reason: string, path: string): never {
@@ -443,6 +588,78 @@ class SnapshotWriter {
         }
     }
 
+    private hostOverlay(value: unknown, id: string, path: string) {
+        if (this.serializedHostOverlays.has(id)) {
+            return
+        }
+        const overlay = this.hostRegistry?.getDescriptorOverlay?.(value)
+        if (overlay === undefined) {
+            return
+        }
+
+        this.serializedHostOverlays.add(id)
+        const snapshotOverlay: SnapshotHostOverlay = {
+            id,
+            descriptors: [],
+            deleted: [],
+        }
+        this.hostOverlays.push(snapshotOverlay)
+
+        for (let index = 0; index < overlay.descriptors.length; index++) {
+            const [key, descriptor] = overlay.descriptors[index]
+            snapshotOverlay.descriptors.push(this.descriptor(
+                key,
+                descriptor,
+                `${path}.hostOverlay[${index}]`
+            ))
+        }
+        for (let index = 0; index < overlay.deleted.length; index++) {
+            snapshotOverlay.deleted.push(this.key(
+                overlay.deleted[index],
+                `${path}.hostOverlay.deleted[${index}]`
+            ))
+        }
+    }
+
+    private finalizeWeakCollections() {
+        let changed = true
+        while (changed) {
+            changed = false
+            const candidates = [...this.ids.keys()]
+            const collections = [...this.weakCollections]
+            for (const { value, record, path } of collections) {
+                const seenKeyIds = this.weakCollectionKeyIds.get(record) ?? new Set<number>()
+                this.weakCollectionKeyIds.set(record, seenKeyIds)
+                for (const candidate of candidates) {
+                    const keyId = this.ids.get(candidate)!
+                    if (seenKeyIds.has(keyId)) {
+                        continue
+                    }
+                    if (record.kind === 'weakMap') {
+                        if (!weakMapHas.call(value as WeakMap<object, unknown>, candidate)) {
+                            continue
+                        }
+                        seenKeyIds.add(keyId)
+                        record.entries ??= []
+                        record.entries.push([
+                            this.value(candidate, `${path}.entries[${record.entries.length}].key`),
+                            this.value(weakMapGet.call(value as WeakMap<object, unknown>, candidate), `${path}.entries[${record.entries.length}].value`),
+                        ])
+                        changed = true
+                    } else if (record.kind === 'weakSet') {
+                        if (!weakSetHas.call(value as WeakSet<object>, candidate)) {
+                            continue
+                        }
+                        seenKeyIds.add(keyId)
+                        record.values ??= []
+                        record.values.push(this.value(candidate, `${path}.values[${record.values.length}]`))
+                        changed = true
+                    }
+                }
+            }
+        }
+    }
+
     value(value: unknown, path: string): SnapshotValue {
         if (value === undefined) return { t: 'undefined' }
         if (value === null) return { t: 'null' }
@@ -465,6 +682,11 @@ class SnapshotWriter {
 
         const hostId = this.hostRegistry?.getId(value)
         if (hostId !== undefined) {
+            const mutationReason = this.hostRegistry?.getMutationReason?.(value)
+            if (mutationReason) {
+                return this.unsupported(mutationReason, path)
+            }
+            this.hostOverlay(value, hostId, path)
             return { t: 'host', id: hostId }
         }
 
@@ -492,6 +714,18 @@ class SnapshotWriter {
             const brandError = unsupportedBrand(value)
             if (brandError) {
                 return this.unsupported(brandError, path)
+            }
+            if (isMap(value)) {
+                return this.object(value, 'map', path)
+            }
+            if (isSet(value)) {
+                return this.object(value, 'set', path)
+            }
+            if (isWeakMap(value)) {
+                return this.object(value, 'weakMap', path)
+            }
+            if (isWeakSet(value)) {
+                return this.object(value, 'weakSet', path)
             }
             if (
                 !Array.isArray(value)
@@ -560,6 +794,31 @@ class SnapshotWriter {
                     ? undefined
                     : this.value(descriptor[Fields.homeObject], `${path}.descriptor.homeObject`),
             }
+        }
+
+        if (record.kind === 'map') {
+            record.entries = []
+            let index = 0
+            for (const [key, entryValue] of mapEntries.call(value as Map<unknown, unknown>)) {
+                record.entries.push([
+                    this.value(key, `${path}.entries[${index}].key`),
+                    this.value(entryValue, `${path}.entries[${index}].value`),
+                ])
+                index++
+            }
+        } else if (record.kind === 'set') {
+            record.values = []
+            let index = 0
+            for (const entryValue of setValues.call(value as Set<unknown>)) {
+                record.values.push(this.value(entryValue, `${path}.values[${index}]`))
+                index++
+            }
+        } else if (record.kind === 'weakMap' || record.kind === 'weakSet') {
+            this.weakCollections.push({
+                value: value as WeakMap<object, unknown> | WeakSet<object>,
+                record,
+                path,
+            })
         }
 
         return { t: 'ref', id }
@@ -644,6 +903,7 @@ class SnapshotReader {
         for (const record of this.snapshot.records) {
             this.fill(record)
         }
+        this.applyHostOverlays()
 
         const stack = this.value(this.snapshot.stack) as Stack
         if (!Array.isArray(stack) || stack.length === 0) {
@@ -676,6 +936,14 @@ class SnapshotReader {
         let value: any
         if (record.kind === 'array') {
             value = markVmOwned([])
+        } else if (record.kind === 'map') {
+            value = markVmOwned(new Map())
+        } else if (record.kind === 'set') {
+            value = markVmOwned(new Set())
+        } else if (record.kind === 'weakMap') {
+            value = markVmOwned(new WeakMap())
+        } else if (record.kind === 'weakSet') {
+            value = markVmOwned(new WeakSet())
         } else if (record.kind === 'function') {
             const holder: FunctionHolder = { options: this.options }
             value = hasOwnPrototype(record)
@@ -760,6 +1028,28 @@ class SnapshotReader {
             functionDescriptors.set(target, descriptor)
         }
 
+        if (record.kind === 'map') {
+            const map = target as Map<unknown, unknown>
+            for (const [key, value] of record.entries ?? []) {
+                map.set(this.value(key), this.value(value))
+            }
+        } else if (record.kind === 'weakMap') {
+            const map = target as WeakMap<object, unknown>
+            for (const [key, value] of record.entries ?? []) {
+                map.set(this.value(key) as object, this.value(value))
+            }
+        } else if (record.kind === 'set') {
+            const set = target as Set<unknown>
+            for (const value of record.values ?? []) {
+                set.add(this.value(value))
+            }
+        } else if (record.kind === 'weakSet') {
+            const set = target as WeakSet<object>
+            for (const value of record.values ?? []) {
+                set.add(this.value(value) as object)
+            }
+        }
+
         if (record.programSource !== undefined) {
             if (!Array.isArray(target)) {
                 throw new Error('Program source metadata is only valid on array records')
@@ -769,6 +1059,29 @@ class SnapshotReader {
 
         if (!record.extensible) {
             Object.preventExtensions(target)
+        }
+    }
+
+    private applyHostOverlays() {
+        for (const overlay of this.snapshot.hostOverlays ?? []) {
+            if (!this.options.hostRegistry) {
+                throw new UnsupportedSerializationError(`Missing host registry for '${overlay.id}'`, '$')
+            }
+            const target = this.options.hostRegistry.getValue(overlay.id)
+            if (!isObjectLike(target)) {
+                throw new UnsupportedSerializationError(`Host capability '${overlay.id}' is not an object`, '$')
+            }
+            for (const key of overlay.deleted) {
+                if (!Reflect.deleteProperty(target, this.key(key))) {
+                    throw new UnsupportedSerializationError(
+                        `Unable to delete host capability property for '${overlay.id}'`,
+                        '$'
+                    )
+                }
+            }
+            for (const descriptor of overlay.descriptors) {
+                Object.defineProperty(target, this.key(descriptor.key), this.descriptor(descriptor))
+            }
         }
     }
 

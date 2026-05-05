@@ -22,6 +22,39 @@ import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type Runti
 
 const templateObjectCache = new WeakMap<number[], WeakMap<object, any[]>>()
 
+type PropertyIteratorRecord = {
+    __flatPropertyIterator: true
+    keys: string[]
+    index: number
+}
+
+const createPropertyIteratorRecord = (input: unknown): PropertyIteratorRecord => {
+    const keys = markVmOwned([] as string[])
+    for (const key in input as object) {
+        keys.push(key)
+    }
+    return markVmOwned({
+        __flatPropertyIterator: true as const,
+        keys,
+        index: 0,
+    })
+}
+
+const isPropertyIteratorRecord = (value: unknown): value is PropertyIteratorRecord =>
+    value !== null
+    && typeof value === 'object'
+    && (value as Partial<PropertyIteratorRecord>).__flatPropertyIterator === true
+
+const nextPropertyIteratorEntry = (iterator: PropertyIteratorRecord) => {
+    if (iterator.index >= iterator.keys.length) {
+        return markVmOwned({ value: undefined, done: true })
+    }
+    return markVmOwned({
+        value: iterator.keys[iterator.index++],
+        done: false,
+    })
+}
+
 const applyUpdate = (value: unknown, delta: 1 | -1) => {
     const oldValue = toNumeric(value)
     const newValue = typeof oldValue === 'bigint'
@@ -225,12 +258,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             break
         case OpCode.GetPropertyIterator: {
             const value = ctx[OpcodeContextField.popCurrentFrameStack]()
-            const iterator = (function* (input: any) {
-                for (const key in input) {
-                    yield key
-                }
-            })(value)
-            ctx[OpcodeContextField.pushCurrentFrameStack](iterator)
+            ctx[OpcodeContextField.pushCurrentFrameStack](createPropertyIteratorRecord(value))
         }
             break
         case OpCode.GetIterator: {
@@ -263,7 +291,11 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
             break
         case OpCode.NextEntry: {
             const iterator: Iterator<any> = ctx[OpcodeContextField.popCurrentFrameStack]()
-            ctx[OpcodeContextField.pushCurrentFrameStack](iterator.next())
+            ctx[OpcodeContextField.pushCurrentFrameStack](
+                isPropertyIteratorRecord(iterator)
+                    ? nextPropertyIteratorEntry(iterator)
+                    : iterator.next()
+            )
         }
             break
         case OpCode.EntryIsDone: {

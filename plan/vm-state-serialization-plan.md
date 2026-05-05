@@ -1,6 +1,6 @@
 # VM State Serialization Plan
 
-Status (updated 2026-05-05): optional V1 serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. V1 snapshots paused synchronous executions at `Fields.step()` boundaries, embeds the source/program buffers, preserves ordinary object/array/function identity, and restores runnable `Execution` objects. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
+Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, and support `Map`, `Set`, `WeakMap`, and `WeakSet` records. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
 
 Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The remaining work is to expand the supported state set without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
 
@@ -21,49 +21,50 @@ Advance serialization one phase at a time:
 
 Recommended next sequence:
 
-1. Phase 1A: harden V1 edge cases and rejection coverage.
-2. Phase 2A: specify host descriptor overlay semantics before implementation.
-3. Phase 2B: implement registered host descriptor overlays.
-4. Phase 3A: replace `for...in` checkpoint state with a VM-managed record.
-5. Phase 3B: redirect selected built-in iterator factories to VM-owned iterator records.
-6. Phase 4A: add `Map` and `Set` records.
-7. Phase 4B: add `WeakMap` and `WeakSet` reachable-key probing.
-8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases.
+1. Phase 1A: harden V1 edge cases and rejection coverage. Implemented 2026-05-05.
+2. Phase 2A: specify host descriptor overlay semantics before implementation. Implemented 2026-05-05.
+3. Phase 2B: implement registered host descriptor overlays. Implemented 2026-05-05.
+4. Phase 3A: replace `for...in` checkpoint state with a VM-managed record. Implemented 2026-05-05.
+5. Phase 3B: redirect selected built-in iterator factories to VM-owned iterator records. Implemented for VM-authored iterators and unpatched array iterators 2026-05-05.
+6. Phase 4A: add `Map` and `Set` records. Implemented 2026-05-05.
+7. Phase 4B: add `WeakMap` and `WeakSet` reachable-key probing. Implemented 2026-05-05.
+8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases. Blocked on support-policy decision.
 9. Phase 6: add strict checkpointable ingress checks.
 10. Phase 7: revisit async/promise state only after a deterministic scheduler/host-promise boundary design exists.
 
 ## 0. Follow-Up Path From Current V1
 
-Current V1 support:
+Current support:
 
 - Optional public API: `snapshotExecution`, `restoreExecution`, `serializeExecutionSnapshot`, `parseExecutionSnapshot`, `createHostRegistry`, `createSerializableHostObjectRedirects`, and `UnsupportedSerializationError`.
 - Snapshot roots: execution pointer, eval result, frame stack, frame scopes, value stacks, globals reachable through frames, program buffers, static scope internals, TDZ sentinel, and ordinary VM function descriptors.
 - Graph support: primitive tags, ordinary object/array/function/frame records, descriptors, prototypes, well-known/internal symbol keys, cycles, shared references, and embedded program source.
-- Host support: stable host refs by registry id; host object mutations/overlays are still not serialized. Selected safe host factory returns can be admitted by optional `functionRedirects` from `createSerializableHostObjectRedirects`.
+- Host support: stable host refs by registry id; registered host descriptor additions/changes/deletions are serialized as overlays, while host prototype/extensibility overlays remain rejected. Selected safe host factory returns can be admitted by optional `functionRedirects` from `createSerializableHostObjectRedirects`.
+- Iterator/collection support: `for...in` uses VM-managed key/index records, VM-authored iterator records are VM-owned, unpatched array iterators use VM-owned index records, and `Map`/`Set`/`WeakMap`/`WeakSet` have brand-specific snapshot records.
 - Playground support: Monaco/debugger/scope inspection/REPL, `log`, modal `input`, save/load text snapshots, save/load snapshot URLs, and home-page example link.
 - Guardrails: serializer remains outside `src/index.ts`, `src/runtime.ts`, `src/runtime-inline.ts`, CLI self-contained loader output, and generated inline runtime.
 
 Follow-up stages:
 
 1. **Close V1 correctness gaps**
-   - Add tests for plain loops, prototype-shared graphs, `JSON.parse`/`Object.fromEntries` adoption, `Object.create(null)`, accessors, symbol-keyed properties, sparse arrays, non-extensible objects, and restore-after-REPL state.
-   - Add negative tests for native iterator objects, DOM/browser objects, unregistered host functions, accessors that close over unsupported host state, and host object descriptor overlays.
+   - Implemented coverage for plain loops, prototype-shared graphs, `JSON.parse`/`Object.fromEntries` adoption, `Object.create(null)`, accessors, symbol-keyed properties, sparse arrays, non-extensible objects, and restore-after-REPL state.
+   - Implemented negative coverage for native iterator objects, unregistered host functions, accessors that close over unsupported host state, and unsupported local symbol-keyed properties.
    - Keep the snapshot format same-runtime-only unless a versioned compatibility policy is explicitly added.
 
 2. **Host object boundary**
    - Expand `createSerializableHostObjectRedirects` only for host functions whose object returns are ordinary data containers or descriptor containers.
    - Keep rejecting unknown host/native objects by default.
-   - Add a host-overlay design before allowing mutations on registered host objects such as `Math.random.a = {}`.
-   - Decide whether descriptor overlays belong in V1.1 or a separate V2 capability model.
+   - Registered host descriptor overlays are implemented for added, changed, and deleted own descriptors.
+   - Keep rejecting registered host prototype and extensibility overlays.
 
 3. **Iterator and loop coverage**
-   - Support common built-in iterator flows by redirecting or polyfilling selected iterator factories to VM-owned iterator records.
-   - Replace native `GetPropertyIterator` / `for...in` state with a VM-managed record when checkpointable serialization is active.
+   - VM-authored iterator records and unpatched array iterator records are VM-owned and serializable.
+   - Native `GetPropertyIterator` / `for...in` state is replaced with a VM-managed record.
    - Continue rejecting unknown native iterators until their internal state has a serializable representation.
 
 4. **Collection support**
-   - Add `Map` and `Set` records first, using captured intrinsics and explicit entry traversal.
-   - Add `WeakMap` and `WeakSet` later using reachable-key probing and fixed-point traversal.
+   - `Map` and `Set` records are implemented using captured intrinsics and explicit entry traversal.
+   - `WeakMap` and `WeakSet` records are implemented through reachable-key probing and fixed-point traversal.
    - Keep `Date`, `RegExp`, `ArrayBuffer`, and typed arrays as separate opt-in additions with brand-specific records.
 
 5. **Function-family expansion**
@@ -286,18 +287,18 @@ const weakMapHas = WeakMap.prototype.has
 
 Brand checks should call captured operations that require the right internal slots.
 
-Current V1 supported built-ins are intentionally conservative:
+Current supported built-ins are intentionally conservative:
 
 - primitives, including `undefined`, `NaN`, `Infinity`, `-0`, and `BigInt`
 - plain objects and arrays
 - ordinary VM functions without class/home-object metadata
 - selected host-created ordinary objects only when admitted by optional serialization redirects
+- `Map` and `Set` through brand-specific records
+- `WeakMap` and `WeakSet` through reachable-key probing
+- unpatched array iterator records
 
 Future built-in additions should use brand-specific records:
 
-- `Map`
-- `Set`
-- `WeakMap` and `WeakSet` by reachable-key probing
 - `Date`
 - `RegExp`
 - `ArrayBuffer` and typed arrays
@@ -306,7 +307,7 @@ Future built-in additions should use brand-specific records:
 Current rejected built-ins:
 
 - `Promise` with pending native async state
-- unknown native iterators
+- unknown native iterators other than unpatched array iterators
 - `Proxy`
 - DOM nodes
 - module namespace objects
@@ -416,7 +417,7 @@ The actual implementation may keep snapshots as objects internally and expose st
 
 ### Phase 1: Optional V1 Snapshot Shape And Synchronous VM State
 
-Status: implemented as an optional extension.
+Status: implemented as an optional extension; edge-case coverage hardened 2026-05-05.
 
 - Internal object-id graph traversal exists.
 - Frames, scopes, value stacks, `ptr`, eval result, program buffers/source, and VM-created ordinary objects/functions are serialized.
@@ -424,53 +425,43 @@ Status: implemented as an optional extension.
 - Unknown host objects and unsupported built-ins reject with `UnsupportedSerializationError`.
 - Focused Jest coverage exists for pause, snapshot, restore, continue, source embedding, object identity/cycles, static slots, closures, try/finally, host refs, and unsupported-state rejection.
 
-Follow-up:
-
-- Broaden edge-case tests for loop snapshots, prototype graphs, sparse arrays, accessors, non-extensible objects, and symbol-keyed descriptors.
-- Keep snapshots guaranteed only at paused synchronous `Fields.step()` boundaries.
+Current boundary: snapshots are guaranteed only at paused synchronous `Fields.step()` boundaries.
 
 ### Phase 2: Host Boundary And Capability Registry
 
-Status: partially implemented.
+Status: descriptor overlays implemented.
 
 - Stable registered host refs round-trip by id.
+- Added/changed/deleted own descriptors on registered host capabilities round-trip as overlays.
 - Selected safe host-created ordinary objects can be admitted with optional serialization redirects.
-- Host property mutations/overlays are not serialized yet.
-
-Follow-up:
-
-- Design and implement descriptor overlays for registered host capabilities.
-- Add host-overlay tests for added/changed/deleted descriptors on registered capabilities.
-- Keep unknown host/native objects rejected unless admitted by a registry or a specific redirect.
+- Host prototype and extensibility overlays remain unsupported.
+- Unknown host/native objects remain rejected unless admitted by a registry or a specific redirect.
 
 ### Phase 3: Iteration Support
 
-Status: not implemented beyond VM-authored/ordinary state.
+Status: implemented for `for...in`, VM-authored iterators, and unpatched array iterators.
 
-- Native iterator objects are still rejected.
-- `for...of` over built-in native iterators and `for...in` native property iterators need explicit VM-managed state.
-
-Follow-up:
-
-- Redirect selected built-in iterator factories to VM-owned serializable iterator records.
-- Replace or augment `GetPropertyIterator` with a VM-managed for-in iterator in checkpointable mode.
-- Keep unknown native iterators rejected.
+- `for...in` uses VM-managed key/index records.
+- VM-authored `for...of` iterator records are VM-owned.
+- Unpatched array `for...of` uses VM-owned index records.
+- Unknown native iterator objects and other built-in iterator families remain rejected.
 
 ### Phase 4: Collections And Weak Collections
 
-Status: not implemented.
+Status: implemented for `Map`, `Set`, `WeakMap`, and `WeakSet`.
 
-- Add `Map` and `Set` records first.
-- Add `WeakMap` and `WeakSet` later through reachable-key probing and fixed-point traversal.
-- Use captured intrinsics only.
+- `Map` and `Set` use captured intrinsic entry/value traversal.
+- `WeakMap` and `WeakSet` use reachable-key probing and fixed-point traversal.
+- `Date`, `RegExp`, `ArrayBuffer`, and typed arrays remain unsupported.
 
 ### Phase 5: Functions, Classes, And Generators
 
-Status: ordinary VM function descriptors are implemented; classes, bound functions, and generators are rejected.
+Status: ordinary VM function descriptors are implemented; classes, bound functions, and generators are still rejected pending support-policy decisions.
 
-- Decide whether ordinary classes without unsupported metadata can use the VM function-descriptor restore path.
-- Restore bound wrapper metadata only after host-object and function-overlay behavior is defined.
-- Restore generator state after iterator records are serializable.
+- Decide whether to support only explicit-constructor classes first or to require default-constructor class records in the same phase.
+- Decide whether method/accessor `homeObject` restore should be included with class support, since class and object methods need `this`/`super`-aware wrappers rather than the current arrow-style non-constructible restore path.
+- Decide whether bound wrapper metadata should include construct behavior in the first bound-function phase or only apply-call behavior.
+- Restore generator state only after choosing the snapshot shape for active generator stacks and generator method side-table records.
 - Keep active async/promise state rejected unless explicitly supported.
 
 ### Phase 6: Strict Checkpointable Mode
