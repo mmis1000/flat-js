@@ -1,4 +1,13 @@
 export {
+    createVmAsyncSession,
+    VmAsyncSession,
+    type VmAsyncSessionAdvanceResult,
+    type VmAsyncSessionOptions,
+    type VmAsyncSessionPauseInfo,
+    type VmAsyncSessionRunResult,
+} from "./runtime/async-session"
+
+export {
     createHostRegistry,
     createCheckpointableAdmission,
     createSerializableHostObjectRedirects,

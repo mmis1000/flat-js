@@ -1,0 +1,564 @@
+import { InvokeType } from "../compiler"
+import { getExecution } from "./execution"
+import type { DebugCallback } from "./opcodes/types"
+import {
+    Fields,
+    functionDescriptors,
+    isAsyncType,
+    markVmOwned,
+    type Execution,
+    type FunctionDescriptor,
+    type Result,
+    type RuntimeAdmitValue,
+    type Scope,
+} from "./shared"
+
+type VmPromiseState = 'pending' | 'fulfilled' | 'rejected'
+
+type VmPromiseRecord = {
+    id: number
+    promise: object
+    state: VmPromiseState
+    value: unknown
+    fulfillReactions: VmPromiseReaction[]
+    rejectReactions: VmPromiseReaction[]
+}
+
+type VmPromiseReactionKind = 'fulfilled' | 'rejected'
+
+type VmPromiseReaction = {
+    kind: VmPromiseReactionKind
+    handler: unknown
+    result: VmPromiseRecord
+}
+
+type VmReactionJob = {
+    id: number
+    reaction: VmPromiseReaction
+    argument: unknown
+    execution?: Execution
+}
+
+type VmTimerRecord = {
+    id: number
+    dueTick: number
+    promise: VmPromiseRecord
+    value: unknown
+}
+
+export type VmAsyncSessionRunResult = {
+    paused: boolean
+    mainDone: boolean
+    queuedJobs: number
+    pendingTimers: number
+}
+
+export type VmAsyncSessionAdvanceResult = {
+    currentTick: number
+    settledTimers: number
+}
+
+export type VmAsyncSessionPauseInfo = {
+    ptr: number | undefined
+    execution: Execution | null
+}
+
+export type VmAsyncSessionOptions = {
+    entryPoint?: number
+    globalThis: object
+    scopes?: Scope[]
+    args?: unknown[]
+    compileFunction?: typeof import('../compiler').compile
+    functionRedirects?: WeakMap<Function, Function>
+    admitValue?: RuntimeAdmitValue
+    onPause?: (info: VmAsyncSessionPauseInfo) => void
+}
+
+export class VmAsyncSession {
+    readonly Promise: Function
+    readonly vmSleep: (ticks?: unknown, value?: unknown) => object
+    readonly mainExecution: Execution
+
+    private readonly globalThisValue: object
+    private readonly compileFunction: typeof import('../compiler').compile
+    private readonly functionRedirects: WeakMap<Function, Function>
+    private readonly admitValue: RuntimeAdmitValue
+    private readonly onPause?: (info: VmAsyncSessionPauseInfo) => void
+    private readonly promisePrototype: object
+    private readonly promiseRecords = new WeakMap<object, VmPromiseRecord>()
+    private readonly jobs: VmReactionJob[] = []
+    private readonly timers: VmTimerRecord[] = []
+
+    private currentTickValue = 0
+    private nextPromiseId = 1
+    private nextJobId = 1
+    private nextTimerId = 1
+    private mainDoneValue = false
+    private pausedValue = false
+    private pausedPtrValue: number | undefined
+    private pausedExecutionValue: Execution | null = null
+    private activeJob: VmReactionJob | null = null
+
+    constructor(program: number[], options: VmAsyncSessionOptions) {
+        this.globalThisValue = options.globalThis
+        this.compileFunction = options.compileFunction ?? ((..._args: any[]) => { throw new Error('not supported') })
+        this.functionRedirects = options.functionRedirects ?? new WeakMap()
+        this.admitValue = options.admitValue ?? (() => {})
+        this.onPause = options.onPause
+        this.promisePrototype = markVmOwned(Object.create((this.globalThisValue as any).Object?.prototype ?? Object.prototype))
+        this.Promise = this.createPromiseConstructor()
+        this.vmSleep = markVmOwned((ticks?: unknown, value?: unknown) => this.sleep(ticks, value))
+        this.installGlobals()
+        this.mainExecution = getExecution(
+            program,
+            options.entryPoint ?? 0,
+            this.globalThisValue,
+            options.scopes ?? [],
+            undefined,
+            options.args ?? [],
+            this.getDebugFunction,
+            this.compileFunction,
+            this.functionRedirects,
+            null,
+            this.admitValue
+        )
+    }
+
+    get paused() {
+        return this.pausedValue
+    }
+
+    get pausedPtr() {
+        return this.pausedPtrValue
+    }
+
+    get pausedExecution() {
+        return this.pausedExecutionValue
+    }
+
+    get currentTick() {
+        return this.currentTickValue
+    }
+
+    runUntilIdleOrPause(): VmAsyncSessionRunResult {
+        if (this.pausedValue) {
+            return this.result()
+        }
+
+        if (this.activeJob) {
+            this.runActiveJob()
+            if (this.pausedValue) {
+                return this.result()
+            }
+        }
+
+        if (!this.mainDoneValue) {
+            this.runMain()
+            if (this.pausedValue) {
+                return this.result()
+            }
+        }
+
+        while (!this.pausedValue && this.jobs.length > 0) {
+            this.activeJob = this.jobs.shift()!
+            this.runActiveJob()
+        }
+
+        return this.result()
+    }
+
+    resume(): VmAsyncSessionRunResult {
+        this.pausedValue = false
+        this.pausedPtrValue = undefined
+        this.pausedExecutionValue = null
+        return this.runUntilIdleOrPause()
+    }
+
+    advanceTime(ticks: number): VmAsyncSessionAdvanceResult {
+        if (this.pausedValue) {
+            return { currentTick: this.currentTickValue, settledTimers: 0 }
+        }
+        if (!Number.isFinite(ticks) || ticks < 0) {
+            throw new RangeError('ticks must be a non-negative finite number')
+        }
+        this.currentTickValue += ticks
+        let settledTimers = 0
+        let changed = true
+        while (changed) {
+            changed = false
+            for (let index = 0; index < this.timers.length; index++) {
+                const timer = this.timers[index]
+                if (timer.dueTick > this.currentTickValue) {
+                    continue
+                }
+                this.timers.splice(index, 1)
+                settledTimers++
+                changed = true
+                this.resolveRecord(timer.promise, timer.value)
+                break
+            }
+        }
+        return { currentTick: this.currentTickValue, settledTimers }
+    }
+
+    sleep(ticks?: unknown, value: unknown = undefined): object {
+        const promise = this.createPromiseRecord()
+        const delay = Math.max(0, Math.ceil(Number(ticks) || 0))
+        if (delay === 0) {
+            this.resolveRecord(promise, value)
+        } else {
+            this.timers.push({
+                id: this.nextTimerId++,
+                dueTick: this.currentTickValue + delay,
+                promise,
+                value,
+            })
+            this.timers.sort((left, right) => left.dueTick - right.dueTick || left.id - right.id)
+        }
+        return promise.promise
+    }
+
+    private readonly getDebugFunction = (): DebugCallback => (ptr?: number) => {
+        const execution = this.activeJob?.execution ?? this.mainExecution ?? null
+        this.pausedValue = true
+        this.pausedPtrValue = ptr
+        this.pausedExecutionValue = execution
+        this.onPause?.({ ptr, execution })
+    }
+
+    private createPromiseConstructor(): Function {
+        const session = this
+        const then = markVmOwned(function then(this: object, onFulfilled?: unknown, onRejected?: unknown) {
+            return session.then(this, onFulfilled, onRejected)
+        })
+        const catchMethod = markVmOwned(function catchMethod(this: object, onRejected?: unknown) {
+            return session.then(this, undefined, onRejected)
+        })
+
+        let PromiseCtor: any
+        PromiseCtor = markVmOwned(function VmPromise(this: object, executor: unknown) {
+            if (!(this instanceof PromiseCtor)) {
+                throw new TypeError('Promise constructor requires new')
+            }
+            if (typeof executor !== 'function') {
+                throw new TypeError('Promise resolver is not a function')
+            }
+            const record = session.initializePromiseObject(this)
+            let settled = false
+            const resolve = markVmOwned(function resolve(value: unknown) {
+                if (settled) return
+                settled = true
+                session.resolveRecord(record, value)
+            })
+            const reject = markVmOwned(function reject(reason: unknown) {
+                if (settled) return
+                settled = true
+                session.rejectRecord(record, reason)
+            })
+            try {
+                Reflect.apply(executor, undefined, [resolve, reject])
+            } catch (error) {
+                reject(error)
+            }
+        })
+
+        Object.defineProperties(this.promisePrototype, {
+            constructor: {
+                configurable: true,
+                writable: true,
+                value: PromiseCtor,
+            },
+            then: {
+                configurable: true,
+                writable: true,
+                value: then,
+            },
+            catch: {
+                configurable: true,
+                writable: true,
+                value: catchMethod,
+            },
+        })
+        Object.defineProperties(PromiseCtor, {
+            prototype: {
+                configurable: false,
+                writable: false,
+                value: this.promisePrototype,
+            },
+            resolve: {
+                configurable: true,
+                writable: true,
+                value: markVmOwned(function resolve(value: unknown) {
+                    return session.resolve(value)
+                }),
+            },
+            reject: {
+                configurable: true,
+                writable: true,
+                value: markVmOwned(function reject(reason: unknown) {
+                    return session.reject(reason)
+                }),
+            },
+        })
+        Object.setPrototypeOf(PromiseCtor, (this.globalThisValue as any).Function?.prototype ?? Function.prototype)
+        return PromiseCtor
+    }
+
+    private installGlobals() {
+        for (const [name, value] of [
+            ['Promise', this.Promise],
+            ['vmSleep', this.vmSleep],
+        ] as const) {
+            if (!Reflect.defineProperty(this.globalThisValue, name, {
+                configurable: true,
+                enumerable: false,
+                writable: true,
+                value,
+            })) {
+                throw new TypeError(`Cannot install ${name} on VM global`)
+            }
+        }
+    }
+
+    private resolve(value: unknown): object {
+        const record = this.createPromiseRecord()
+        this.resolveRecord(record, value)
+        return record.promise
+    }
+
+    private reject(reason: unknown): object {
+        const record = this.createPromiseRecord()
+        this.rejectRecord(record, reason)
+        return record.promise
+    }
+
+    private then(promise: object, onFulfilled: unknown, onRejected: unknown): object {
+        const record = this.promiseRecords.get(promise)
+        if (!record) {
+            throw new TypeError('Promise.prototype.then called on incompatible receiver')
+        }
+        const result = this.createPromiseRecord()
+        this.addReaction(record, {
+            kind: 'fulfilled',
+            handler: typeof onFulfilled === 'function' ? onFulfilled : undefined,
+            result,
+        })
+        this.addReaction(record, {
+            kind: 'rejected',
+            handler: typeof onRejected === 'function' ? onRejected : undefined,
+            result,
+        })
+        return result.promise
+    }
+
+    private initializePromiseObject(promise: object): VmPromiseRecord {
+        markVmOwned(promise)
+        const record: VmPromiseRecord = {
+            id: this.nextPromiseId++,
+            promise,
+            state: 'pending',
+            value: undefined,
+            fulfillReactions: [],
+            rejectReactions: [],
+        }
+        this.promiseRecords.set(promise, record)
+        return record
+    }
+
+    private createPromiseRecord(): VmPromiseRecord {
+        return this.initializePromiseObject(Object.create(this.promisePrototype))
+    }
+
+    private promiseRecordFor(value: unknown): VmPromiseRecord | undefined {
+        if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+            return undefined
+        }
+        return this.promiseRecords.get(value as object)
+    }
+
+    private resolveRecord(record: VmPromiseRecord, value: unknown) {
+        if (record.state !== 'pending') {
+            return
+        }
+        if (value === record.promise) {
+            this.rejectRecord(record, new TypeError('Cannot resolve promise with itself'))
+            return
+        }
+        const adopted = this.promiseRecordFor(value)
+        if (adopted) {
+            this.addReaction(adopted, { kind: 'fulfilled', handler: undefined, result: record })
+            this.addReaction(adopted, { kind: 'rejected', handler: undefined, result: record })
+            return
+        }
+        this.fulfillRecord(record, value)
+    }
+
+    private fulfillRecord(record: VmPromiseRecord, value: unknown) {
+        this.settleRecord(record, 'fulfilled', value, record.fulfillReactions)
+    }
+
+    private rejectRecord(record: VmPromiseRecord, reason: unknown) {
+        this.settleRecord(record, 'rejected', reason, record.rejectReactions)
+    }
+
+    private settleRecord(
+        record: VmPromiseRecord,
+        state: Exclude<VmPromiseState, 'pending'>,
+        value: unknown,
+        reactions: VmPromiseReaction[]
+    ) {
+        if (record.state !== 'pending') {
+            return
+        }
+        record.state = state
+        record.value = value
+        record.fulfillReactions = []
+        record.rejectReactions = []
+        for (const reaction of reactions) {
+            this.enqueueReaction(reaction, value)
+        }
+    }
+
+    private addReaction(record: VmPromiseRecord, reaction: VmPromiseReaction) {
+        if (record.state === 'pending') {
+            if (reaction.kind === 'fulfilled') {
+                record.fulfillReactions.push(reaction)
+            } else {
+                record.rejectReactions.push(reaction)
+            }
+            return
+        }
+        if (
+            (record.state === 'fulfilled' && reaction.kind === 'fulfilled')
+            || (record.state === 'rejected' && reaction.kind === 'rejected')
+        ) {
+            this.enqueueReaction(reaction, record.value)
+        }
+    }
+
+    private enqueueReaction(reaction: VmPromiseReaction, argument: unknown) {
+        this.jobs.push({
+            id: this.nextJobId++,
+            reaction,
+            argument,
+        })
+    }
+
+    private runMain() {
+        const result = this.runExecution(this.mainExecution)
+        if (result.done) {
+            this.mainDoneValue = true
+        }
+    }
+
+    private runActiveJob() {
+        const job = this.activeJob
+        if (!job) {
+            return
+        }
+
+        try {
+            const completion = this.runReactionJob(job)
+            if (!completion.done) {
+                return
+            }
+            if (completion.rejected) {
+                this.rejectRecord(job.reaction.result, completion.value)
+            } else {
+                this.resolveRecord(job.reaction.result, completion.value)
+            }
+            this.activeJob = null
+        } catch (error) {
+            this.rejectRecord(job.reaction.result, error)
+            this.activeJob = null
+        }
+    }
+
+    private runReactionJob(job: VmReactionJob): { done: false } | { done: true, rejected: boolean, value: unknown } {
+        const { reaction } = job
+        if (reaction.handler === undefined) {
+            return {
+                done: true,
+                rejected: reaction.kind === 'rejected',
+                value: job.argument,
+            }
+        }
+
+        const descriptor = this.stepableDescriptor(reaction.handler)
+        if (!descriptor) {
+            return {
+                done: true,
+                rejected: false,
+                value: Reflect.apply(reaction.handler as Function, undefined, [job.argument]),
+            }
+        }
+
+        if (!job.execution) {
+            job.execution = getExecution(
+                descriptor[Fields.programSection],
+                descriptor[Fields.offset],
+                descriptor[Fields.globalThis],
+                [...descriptor[Fields.scopes]],
+                {
+                    [Fields.type]: InvokeType.Apply,
+                    [Fields.function]: reaction.handler,
+                    [Fields.name]: descriptor[Fields.name],
+                    [Fields.self]: undefined,
+                },
+                [job.argument],
+                this.getDebugFunction,
+                this.compileFunction,
+                this.functionRedirects,
+                null,
+                this.admitValue
+            )
+        }
+
+        const result = this.runExecution(job.execution)
+        if (!result.done) {
+            return { done: false }
+        }
+        return {
+            done: true,
+            rejected: false,
+            value: result.value,
+        }
+    }
+
+    private stepableDescriptor(value: unknown): FunctionDescriptor | undefined {
+        const descriptor = functionDescriptors.get(value)
+        if (!descriptor || isAsyncType(descriptor[Fields.type])) {
+            return undefined
+        }
+        return descriptor
+    }
+
+    private runExecution(execution: Execution): { done: false } | { done: true, value: unknown } {
+        let result: Result
+        do {
+            result = execution[Fields.step]()
+            if (this.pausedValue) {
+                return { done: false }
+            }
+            if (!result[Fields.done] && (result[Fields.await] || result[Fields.yield])) {
+                throw new Error('Unhandled suspension in VM async session job')
+            }
+        } while (!result[Fields.done])
+        return {
+            done: true,
+            value: (result as any)[Fields.value],
+        }
+    }
+
+    private result(): VmAsyncSessionRunResult {
+        return {
+            paused: this.pausedValue,
+            mainDone: this.mainDoneValue,
+            queuedJobs: this.jobs.length + (this.activeJob ? 1 : 0),
+            pendingTimers: this.timers.length,
+        }
+    }
+}
+
+export const createVmAsyncSession = (program: number[], options: VmAsyncSessionOptions) =>
+    new VmAsyncSession(program, options)
