@@ -908,6 +908,36 @@ class SnapshotWriter {
         this.value(value, path)
     }
 
+    private hasThenableShape(value: object): boolean {
+        let current: object | null = value
+        while (current !== null) {
+            const descriptor = Reflect.getOwnPropertyDescriptor(current, 'then')
+            if (descriptor) {
+                if ('value' in descriptor) {
+                    return typeof descriptor.value === 'function'
+                }
+                return descriptor.get !== undefined || descriptor.set !== undefined
+            }
+            current = Object.getPrototypeOf(current)
+        }
+        return false
+    }
+
+    private rejectUnsupportedVmAsyncBoundary(value: unknown, path: string) {
+        if (!this.vmAsyncSession || !isObjectLike(value)) {
+            return
+        }
+        if (this.vmAsyncSession.getPromiseRecordForSerialization(value)) {
+            return
+        }
+        if (value instanceof Promise) {
+            return this.unsupported('Native Promise is unsupported in VM async session snapshots', path)
+        }
+        if (this.hasThenableShape(value)) {
+            return this.unsupported('Host thenables are unsupported in VM async session snapshots', path)
+        }
+    }
+
     private assertSyncGeneratorState(state: GeneratorState, path: string) {
         if (isAsyncGeneratorObject(state[Fields.gen]) || state[Fields.asyncYieldResumeAwaitReturn]) {
             return this.unsupported('Async generators are unsupported', path)
@@ -1100,6 +1130,7 @@ class SnapshotWriter {
             }
             return { t: 'vmAsyncBuiltin', id: vmAsyncBuiltinId }
         }
+        this.rejectUnsupportedVmAsyncBoundary(value, path)
 
         const hostId = this.hostRegistry?.getId(value)
         if (hostId !== undefined) {
@@ -2072,6 +2103,7 @@ export const restoreVmAsyncSession = (
         compileFunction: options.compileFunction,
         functionRedirects: options.functionRedirects,
         admitValue: options.admitValue,
+        hostPromisePolicy: options.hostPromisePolicy,
         onPause: options.onPause,
     })
     const reader = new SnapshotReader(snapshot, {

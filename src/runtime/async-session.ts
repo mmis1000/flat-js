@@ -115,7 +115,12 @@ export type VmAsyncSessionRestoreShellOptions = {
     compileFunction?: typeof import('../compiler').compile
     functionRedirects?: WeakMap<Function, Function>
     admitValue?: RuntimeAdmitValue
+    hostPromisePolicy?: VmAsyncSessionHostPromisePolicy
     onPause?: (info: VmAsyncSessionPauseInfo) => void
+}
+
+export type VmAsyncSessionHostPromisePolicy = {
+    createHostThenableRejection(value: unknown, cause?: unknown): unknown
 }
 
 type VmAsyncSessionInternalOptions = {
@@ -152,6 +157,12 @@ const haveSameDescriptor = (left: PropertyDescriptor, right: PropertyDescriptor)
     return left.get === right.get && left.set === right.set
 }
 
+const strictHostPromisePolicy: VmAsyncSessionHostPromisePolicy = {
+    createHostThenableRejection(_value, cause) {
+        return cause ?? new TypeError('Host thenables are unsupported in VM async sessions')
+    },
+}
+
 export type VmAsyncSessionRunResult = {
     paused: boolean
     mainDone: boolean
@@ -177,6 +188,7 @@ export type VmAsyncSessionOptions = {
     compileFunction?: typeof import('../compiler').compile
     functionRedirects?: WeakMap<Function, Function>
     admitValue?: RuntimeAdmitValue
+    hostPromisePolicy?: VmAsyncSessionHostPromisePolicy
     onPause?: (info: VmAsyncSessionPauseInfo) => void
 }
 
@@ -190,6 +202,7 @@ export class VmAsyncSession implements RuntimeAsyncHost {
     private readonly compileFunction: typeof import('../compiler').compile
     private readonly functionRedirects: WeakMap<Function, Function>
     private readonly admitValue: RuntimeAdmitValue
+    private readonly hostPromisePolicy: VmAsyncSessionHostPromisePolicy
     private readonly onPause?: (info: VmAsyncSessionPauseInfo) => void
     private readonly promisePrototype: object
     private readonly promiseRecords = new WeakMap<object, VmPromiseRecord>()
@@ -223,6 +236,7 @@ export class VmAsyncSession implements RuntimeAsyncHost {
         this.compileFunction = options.compileFunction ?? ((..._args: any[]) => { throw new Error('not supported') })
         this.functionRedirects = options.functionRedirects ?? new WeakMap()
         this.admitValue = options.admitValue ?? (() => {})
+        this.hostPromisePolicy = options.hostPromisePolicy ?? strictHostPromisePolicy
         this.onPause = options.onPause
         this.promisePrototype = markVmOwned(Object.create((this.globalThisValue as any).Object?.prototype ?? Object.prototype))
         this.Promise = this.createPromiseConstructor()
@@ -378,6 +392,10 @@ export class VmAsyncSession implements RuntimeAsyncHost {
             }
         }
         return undefined
+    }
+
+    getPromiseRecordForSerialization(value: unknown): VmPromiseRecord | undefined {
+        return this.promiseRecordFor(value)
     }
 
     runUntilIdleOrPause(): VmAsyncSessionRunResult {
@@ -914,12 +932,12 @@ export class VmAsyncSession implements RuntimeAsyncHost {
                 const then = Reflect.get(value as object, 'then')
                 if (typeof then === 'function') {
                     const rejected = this.createPromiseRecord()
-                    this.rejectRecord(rejected, new TypeError('Host thenables are unsupported in VM async sessions'))
+                    this.rejectRecord(rejected, this.hostPromisePolicy.createHostThenableRejection(value))
                     return rejected
                 }
             } catch (error) {
                 const rejected = this.createPromiseRecord()
-                this.rejectRecord(rejected, error)
+                this.rejectRecord(rejected, this.hostPromisePolicy.createHostThenableRejection(value, error))
                 return rejected
             }
         }
@@ -997,5 +1015,6 @@ export const createRestoredVmAsyncSession = (options: VmAsyncSessionRestoreShell
         compileFunction: options.compileFunction,
         functionRedirects: options.functionRedirects,
         admitValue: options.admitValue,
+        hostPromisePolicy: options.hostPromisePolicy,
         onPause: options.onPause,
     }, { skipMainExecution: true })

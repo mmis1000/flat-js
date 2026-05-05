@@ -8,6 +8,7 @@ import {
     restoreVmAsyncSession,
     serializeVmAsyncSessionSnapshot,
     snapshotVmAsyncSession,
+    UnsupportedSerializationError,
 } from '../serialization'
 
 test('VM sleep promise reactions pause and resume as scheduler jobs', () => {
@@ -222,4 +223,108 @@ main()
     expect(restored.advanceTime(1).settledTimers).toBe(1)
     expect(restored.runUntilIdleOrPause().paused).toBe(false)
     expect(logs).toEqual(['first', 'later'])
+})
+
+test('session snapshots reject native Promise.resolve().then results', () => {
+    const NativePromise = Promise
+    const [program] = compile(`
+const p = NativePromise.resolve('native').then(() => 1)
+debugger
+p
+`, { range: true })
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{
+            NativePromise,
+            __proto__: null,
+        }],
+        compileFunction: compile,
+    })
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['NativePromise', NativePromise],
+    ])
+
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+    expect(() => snapshotVmAsyncSession(session, { hostRegistry })).toThrow(UnsupportedSerializationError)
+})
+
+test('session snapshots reject registered native pending promises', () => {
+    const nativePending = new Promise(() => {})
+    const [program] = compile(`
+const p = nativePending
+debugger
+p
+`, { range: true })
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{
+            nativePending,
+            __proto__: null,
+        }],
+        compileFunction: compile,
+    })
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['nativePending', nativePending],
+    ])
+
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+    expect(() => snapshotVmAsyncSession(session, { hostRegistry })).toThrow(UnsupportedSerializationError)
+})
+
+test('session snapshots reject registered host thenables without invoking then getters', () => {
+    let thenGetterCalls = 0
+    const thenable = {}
+    Object.defineProperty(thenable, 'then', {
+        configurable: true,
+        enumerable: true,
+        get() {
+            thenGetterCalls++
+            return () => {}
+        },
+    })
+    const [program] = compile(`
+const value = thenable
+debugger
+value
+`, { range: true })
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{
+            thenable,
+            __proto__: null,
+        }],
+        compileFunction: compile,
+    })
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['thenable', thenable],
+    ])
+
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+    expect(() => snapshotVmAsyncSession(session, { hostRegistry })).toThrow(UnsupportedSerializationError)
+    expect(thenGetterCalls).toBe(0)
+})
+
+test('session snapshots keep async generators unsupported', () => {
+    const [program] = compile(`
+async function* gen() {
+    yield 1
+}
+const g = gen()
+debugger
+g
+`, { range: true })
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [],
+        compileFunction: compile,
+    })
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+    ])
+
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+    expect(() => snapshotVmAsyncSession(session, { hostRegistry })).toThrow(UnsupportedSerializationError)
 })

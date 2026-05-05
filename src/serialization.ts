@@ -2,6 +2,7 @@ export {
     createVmAsyncSession,
     VmAsyncSession,
     type VmAsyncSessionAdvanceResult,
+    type VmAsyncSessionHostPromisePolicy,
     type VmAsyncSessionOptions,
     type VmAsyncSessionPauseInfo,
     type VmAsyncSessionRunResult,
