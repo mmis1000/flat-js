@@ -16,9 +16,9 @@ import {
     type Scope,
 } from "./shared"
 
-type VmPromiseState = 'pending' | 'fulfilled' | 'rejected'
+export type VmPromiseState = 'pending' | 'fulfilled' | 'rejected'
 
-type VmPromiseRecord = {
+export type VmPromiseRecord = {
     id: number
     promise: object
     state: VmPromiseState
@@ -27,24 +27,24 @@ type VmPromiseRecord = {
     rejectReactions: VmPromiseReaction[]
 }
 
-type VmPromiseReactionKind = 'fulfilled' | 'rejected'
+export type VmPromiseReactionKind = 'fulfilled' | 'rejected'
 
-type VmPromiseThenReaction = {
+export type VmPromiseThenReaction = {
     type: 'then'
     kind: VmPromiseReactionKind
     handler: unknown
     result: VmPromiseRecord
 }
 
-type VmPromiseAwaitReaction = {
+export type VmPromiseAwaitReaction = {
     type: 'await'
     kind: VmPromiseReactionKind
     task: VmAsyncTask
 }
 
-type VmPromiseReaction = VmPromiseThenReaction | VmPromiseAwaitReaction
+export type VmPromiseReaction = VmPromiseThenReaction | VmPromiseAwaitReaction
 
-type VmThenJob = {
+export type VmThenJob = {
     id: number
     type: 'then'
     reaction: VmPromiseThenReaction
@@ -52,7 +52,7 @@ type VmThenJob = {
     execution?: Execution
 }
 
-type VmAsyncContinuationJob = {
+export type VmAsyncContinuationJob = {
     id: number
     type: 'asyncContinuation'
     task: VmAsyncTask
@@ -60,25 +60,96 @@ type VmAsyncContinuationJob = {
     argument: unknown
 }
 
-type VmAsyncStartJob = {
+export type VmAsyncStartJob = {
     id: number
     type: 'asyncStart'
     task: VmAsyncTask
 }
 
-type VmJob = VmThenJob | VmAsyncContinuationJob | VmAsyncStartJob
+export type VmJob = VmThenJob | VmAsyncContinuationJob | VmAsyncStartJob
 
-type VmAsyncTask = {
+export type VmAsyncTask = {
     id: number
     execution: Execution
     promise: VmPromiseRecord
 }
 
-type VmTimerRecord = {
+export type VmTimerRecord = {
     id: number
     dueTick: number
     promise: VmPromiseRecord
     value: unknown
+}
+
+export type VmAsyncSessionBuiltinId =
+    | 'Promise'
+    | 'Promise.prototype'
+    | 'Promise.prototype.then'
+    | 'Promise.prototype.catch'
+    | 'Promise.resolve'
+    | 'Promise.reject'
+    | 'vmSleep'
+
+export type VmAsyncSessionSerializableState = {
+    program: number[]
+    globalThis: object
+    mainExecution: Execution
+    promises: VmPromiseRecord[]
+    asyncTasks: VmAsyncTask[]
+    jobs: VmJob[]
+    timers: VmTimerRecord[]
+    activeJob: VmJob | null
+    currentTick: number
+    nextPromiseId: number
+    nextJobId: number
+    nextTimerId: number
+    nextAsyncTaskId: number
+    mainDone: boolean
+    paused: boolean
+    pausedPtr: number | undefined
+    pausedExecution: Execution | null
+}
+
+export type VmAsyncSessionRestoreShellOptions = {
+    globalThis?: object
+    compileFunction?: typeof import('../compiler').compile
+    functionRedirects?: WeakMap<Function, Function>
+    admitValue?: RuntimeAdmitValue
+    onPause?: (info: VmAsyncSessionPauseInfo) => void
+}
+
+type VmAsyncSessionInternalOptions = {
+    skipMainExecution?: boolean
+}
+
+type VmAsyncSessionBuiltinBaseline = {
+    prototype: object | null
+    extensible: boolean
+    descriptors: Record<PropertyKey, PropertyDescriptor>
+}
+
+const isObjectLike = (value: unknown): value is object =>
+    (typeof value === 'object' && value !== null) || typeof value === 'function'
+
+const captureBuiltinBaseline = (value: object): VmAsyncSessionBuiltinBaseline => ({
+    prototype: Object.getPrototypeOf(value),
+    extensible: Object.isExtensible(value),
+    descriptors: Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>,
+})
+
+const haveSameDescriptor = (left: PropertyDescriptor, right: PropertyDescriptor) => {
+    if (left.configurable !== right.configurable || left.enumerable !== right.enumerable) {
+        return false
+    }
+    const leftIsData = 'value' in left || 'writable' in left
+    const rightIsData = 'value' in right || 'writable' in right
+    if (leftIsData !== rightIsData) {
+        return false
+    }
+    if (leftIsData) {
+        return left.writable === right.writable && Object.is(left.value, right.value)
+    }
+    return left.get === right.get && left.set === right.set
 }
 
 export type VmAsyncSessionRunResult = {
@@ -112,17 +183,23 @@ export type VmAsyncSessionOptions = {
 export class VmAsyncSession implements RuntimeAsyncHost {
     readonly Promise: Function
     readonly vmSleep: (ticks?: unknown, value?: unknown) => object
-    readonly mainExecution: Execution
+    mainExecution: Execution
 
-    private readonly globalThisValue: object
+    private programValue: number[]
+    private globalThisValue: object
     private readonly compileFunction: typeof import('../compiler').compile
     private readonly functionRedirects: WeakMap<Function, Function>
     private readonly admitValue: RuntimeAdmitValue
     private readonly onPause?: (info: VmAsyncSessionPauseInfo) => void
     private readonly promisePrototype: object
     private readonly promiseRecords = new WeakMap<object, VmPromiseRecord>()
+    private readonly promises: VmPromiseRecord[] = []
+    private readonly asyncTasks: VmAsyncTask[] = []
     private readonly jobs: VmJob[] = []
     private readonly timers: VmTimerRecord[] = []
+    private readonly serializationBuiltinIds = new WeakMap<object, VmAsyncSessionBuiltinId>()
+    private readonly serializationBuiltinValues = new Map<VmAsyncSessionBuiltinId, unknown>()
+    private readonly serializationBuiltinBaselines = new WeakMap<object, VmAsyncSessionBuiltinBaseline>()
 
     private currentTickValue = 0
     private nextPromiseId = 1
@@ -135,8 +212,14 @@ export class VmAsyncSession implements RuntimeAsyncHost {
     private pausedExecutionValue: Execution | null = null
     private activeJob: VmJob | null = null
 
-    constructor(program: number[], options: VmAsyncSessionOptions) {
+    constructor(
+        program: number[],
+        options: VmAsyncSessionOptions,
+        internalOptions: VmAsyncSessionInternalOptions = {}
+    ) {
+        this.programValue = program
         this.globalThisValue = options.globalThis
+        markVmOwned(this.globalThisValue)
         this.compileFunction = options.compileFunction ?? ((..._args: any[]) => { throw new Error('not supported') })
         this.functionRedirects = options.functionRedirects ?? new WeakMap()
         this.admitValue = options.admitValue ?? (() => {})
@@ -144,21 +227,27 @@ export class VmAsyncSession implements RuntimeAsyncHost {
         this.promisePrototype = markVmOwned(Object.create((this.globalThisValue as any).Object?.prototype ?? Object.prototype))
         this.Promise = this.createPromiseConstructor()
         this.vmSleep = markVmOwned((ticks?: unknown, value?: unknown) => this.sleep(ticks, value))
+        this.registerSerializationBuiltin('vmSleep', this.vmSleep)
         this.installGlobals()
-        this.mainExecution = getExecution(
-            program,
-            options.entryPoint ?? 0,
-            this.globalThisValue,
-            options.scopes ?? [],
-            undefined,
-            options.args ?? [],
-            this.getDebugFunction,
-            this.compileFunction,
-            this.functionRedirects,
-            null,
-            this.admitValue,
-            this
-        )
+        this.captureSerializationBuiltinBaselines()
+        if (internalOptions.skipMainExecution) {
+            this.mainExecution = undefined as unknown as Execution
+        } else {
+            this.mainExecution = getExecution(
+                program,
+                options.entryPoint ?? 0,
+                this.globalThisValue,
+                options.scopes ?? [],
+                undefined,
+                options.args ?? [],
+                this.getDebugFunction,
+                this.compileFunction,
+                this.functionRedirects,
+                null,
+                this.admitValue,
+                this
+            )
+        }
     }
 
     get paused() {
@@ -189,6 +278,106 @@ export class VmAsyncSession implements RuntimeAsyncHost {
 
     get currentTick() {
         return this.currentTickValue
+    }
+
+    getSerializableState(): VmAsyncSessionSerializableState {
+        return {
+            program: this.programValue,
+            globalThis: this.globalThisValue,
+            mainExecution: this.mainExecution,
+            promises: [...this.promises],
+            asyncTasks: [...this.asyncTasks],
+            jobs: [...this.jobs],
+            timers: [...this.timers],
+            activeJob: this.activeJob,
+            currentTick: this.currentTickValue,
+            nextPromiseId: this.nextPromiseId,
+            nextJobId: this.nextJobId,
+            nextTimerId: this.nextTimerId,
+            nextAsyncTaskId: this.nextAsyncTaskId,
+            mainDone: this.mainDoneValue,
+            paused: this.pausedValue,
+            pausedPtr: this.pausedPtrValue,
+            pausedExecution: this.pausedExecutionValue,
+        }
+    }
+
+    restoreSerializableState(state: VmAsyncSessionSerializableState) {
+        this.programValue = state.program
+        this.globalThisValue = state.globalThis
+        this.mainExecution = state.mainExecution
+
+        this.promises.length = 0
+        for (const promise of state.promises) {
+            this.promises.push(promise)
+            this.promiseRecords.set(promise.promise, promise)
+        }
+
+        this.asyncTasks.length = 0
+        this.asyncTasks.push(...state.asyncTasks)
+        this.jobs.length = 0
+        this.jobs.push(...state.jobs)
+        this.timers.length = 0
+        this.timers.push(...state.timers)
+
+        this.activeJob = state.activeJob
+        this.currentTickValue = state.currentTick
+        this.nextPromiseId = state.nextPromiseId
+        this.nextJobId = state.nextJobId
+        this.nextTimerId = state.nextTimerId
+        this.nextAsyncTaskId = state.nextAsyncTaskId
+        this.mainDoneValue = state.mainDone
+        this.pausedValue = state.paused
+        this.pausedPtrValue = state.pausedPtr
+        this.pausedExecutionValue = state.pausedExecution
+    }
+
+    getDebugFunctionForSerialization(): () => null | DebugCallback {
+        return this.getDebugFunction
+    }
+
+    getSerializationBuiltinId(value: unknown): VmAsyncSessionBuiltinId | undefined {
+        if (!isObjectLike(value)) {
+            return undefined
+        }
+        return this.serializationBuiltinIds.get(value)
+    }
+
+    getSerializationBuiltinValue(id: VmAsyncSessionBuiltinId): unknown {
+        if (!this.serializationBuiltinValues.has(id)) {
+            throw new Error(`Missing VM async session builtin '${id}'`)
+        }
+        return this.serializationBuiltinValues.get(id)
+    }
+
+    getSerializationBuiltinMutationReason(value: unknown): string | undefined {
+        if (!isObjectLike(value)) {
+            return undefined
+        }
+        const id = this.serializationBuiltinIds.get(value)
+        if (id === undefined) {
+            return undefined
+        }
+        const baseline = this.serializationBuiltinBaselines.get(value)
+        if (baseline === undefined) {
+            return `VM async session builtin '${id}' baseline is missing`
+        }
+        if (Object.getPrototypeOf(value) !== baseline.prototype) {
+            return `VM async session builtin '${id}' prototype changes are unsupported`
+        }
+        if (Object.isExtensible(value) !== baseline.extensible) {
+            return `VM async session builtin '${id}' extensibility changes are unsupported`
+        }
+        const descriptors = Object.getOwnPropertyDescriptors(value) as Record<PropertyKey, PropertyDescriptor>
+        const keys = new Set([...Reflect.ownKeys(baseline.descriptors), ...Reflect.ownKeys(descriptors)])
+        for (const key of keys) {
+            const baselineDescriptor = baseline.descriptors[key]
+            const descriptor = descriptors[key]
+            if (baselineDescriptor === undefined || descriptor === undefined || !haveSameDescriptor(descriptor, baselineDescriptor)) {
+                return `VM async session builtin '${id}' property changes are unsupported`
+            }
+        }
+        return undefined
     }
 
     runUntilIdleOrPause(): VmAsyncSessionRunResult {
@@ -290,6 +479,7 @@ export class VmAsyncSession implements RuntimeAsyncHost {
             execution,
             promise,
         }
+        this.asyncTasks.push(task)
         const previousActiveJob = this.activeJob
         const startJob: VmAsyncStartJob = {
             id: this.nextJobId++,
@@ -314,6 +504,21 @@ export class VmAsyncSession implements RuntimeAsyncHost {
         this.pausedPtrValue = ptr
         this.pausedExecutionValue = execution
         this.onPause?.({ ptr, execution })
+    }
+
+    private registerSerializationBuiltin(id: VmAsyncSessionBuiltinId, value: unknown) {
+        this.serializationBuiltinValues.set(id, value)
+        if (isObjectLike(value)) {
+            this.serializationBuiltinIds.set(value, id)
+        }
+    }
+
+    private captureSerializationBuiltinBaselines() {
+        for (const value of this.serializationBuiltinValues.values()) {
+            if (isObjectLike(value)) {
+                this.serializationBuiltinBaselines.set(value, captureBuiltinBaseline(value))
+            }
+        }
     }
 
     private createPromiseConstructor(): Function {
@@ -351,6 +556,12 @@ export class VmAsyncSession implements RuntimeAsyncHost {
                 reject(error)
             }
         })
+        const resolveMethod = markVmOwned(function resolve(value: unknown) {
+            return session.resolve(value)
+        })
+        const rejectMethod = markVmOwned(function reject(reason: unknown) {
+            return session.reject(reason)
+        })
 
         Object.defineProperties(this.promisePrototype, {
             constructor: {
@@ -378,19 +589,21 @@ export class VmAsyncSession implements RuntimeAsyncHost {
             resolve: {
                 configurable: true,
                 writable: true,
-                value: markVmOwned(function resolve(value: unknown) {
-                    return session.resolve(value)
-                }),
+                value: resolveMethod,
             },
             reject: {
                 configurable: true,
                 writable: true,
-                value: markVmOwned(function reject(reason: unknown) {
-                    return session.reject(reason)
-                }),
+                value: rejectMethod,
             },
         })
         Object.setPrototypeOf(PromiseCtor, (this.globalThisValue as any).Function?.prototype ?? Function.prototype)
+        this.registerSerializationBuiltin('Promise', PromiseCtor)
+        this.registerSerializationBuiltin('Promise.prototype', this.promisePrototype)
+        this.registerSerializationBuiltin('Promise.prototype.then', then)
+        this.registerSerializationBuiltin('Promise.prototype.catch', catchMethod)
+        this.registerSerializationBuiltin('Promise.resolve', resolveMethod)
+        this.registerSerializationBuiltin('Promise.reject', rejectMethod)
         return PromiseCtor
     }
 
@@ -454,6 +667,7 @@ export class VmAsyncSession implements RuntimeAsyncHost {
             rejectReactions: [],
         }
         this.promiseRecords.set(promise, record)
+        this.promises.push(record)
         return record
     }
 
@@ -586,6 +800,7 @@ export class VmAsyncSession implements RuntimeAsyncHost {
             this.activeJob = null
         } catch (error) {
             this.rejectRecord(job.task.promise, error)
+            this.forgetAsyncTask(job.task)
             this.activeJob = null
         }
     }
@@ -667,11 +882,19 @@ export class VmAsyncSession implements RuntimeAsyncHost {
         }
         if (result.kind === 'done') {
             this.resolveRecord(task.promise, result.value)
+            this.forgetAsyncTask(task)
             return true
         }
 
         this.attachAwaitContinuation(task, result.value)
         return true
+    }
+
+    private forgetAsyncTask(task: VmAsyncTask) {
+        const index = this.asyncTasks.indexOf(task)
+        if (index >= 0) {
+            this.asyncTasks.splice(index, 1)
+        }
     }
 
     private attachAwaitContinuation(task: VmAsyncTask, value: unknown) {
@@ -767,3 +990,12 @@ export class VmAsyncSession implements RuntimeAsyncHost {
 
 export const createVmAsyncSession = (program: number[], options: VmAsyncSessionOptions) =>
     new VmAsyncSession(program, options)
+
+export const createRestoredVmAsyncSession = (options: VmAsyncSessionRestoreShellOptions = {}) =>
+    new VmAsyncSession([], {
+        globalThis: options.globalThis ?? Object.create(globalThis),
+        compileFunction: options.compileFunction,
+        functionRedirects: options.functionRedirects,
+        admitValue: options.admitValue,
+        onPause: options.onPause,
+    }, { skipMainExecution: true })

@@ -96,9 +96,13 @@ import {
     createHostRegistry,
     createSerializableHostObjectRedirects,
     parseExecutionSnapshot,
+    parseVmAsyncSessionSnapshot,
     restoreExecution,
+    restoreVmAsyncSession,
     serializeExecutionSnapshot,
+    serializeVmAsyncSessionSnapshot,
     snapshotExecution,
+    snapshotVmAsyncSession,
     type VmAsyncSession,
 } from '../src/serialization'
 import {
@@ -182,6 +186,18 @@ function readSnapshotTextFromHash() {
     }
     const encoded = window.location.hash.slice(SNAPSHOT_HASH_PREFIX.length)
     return encoded ? decodeSnapshotFromUrl(encoded) : ''
+}
+
+function isVmAsyncSessionSnapshotText(text: string) {
+    try {
+        const parsed = JSON.parse(text)
+        return parsed != null
+            && typeof parsed === 'object'
+            && Array.isArray((parsed as { executions?: unknown }).executions)
+            && Array.isArray((parsed as { promises?: unknown }).promises)
+    } catch {
+        return false
+    }
 }
 
 function shouldUseAsyncSession(source: string) {
@@ -703,8 +719,9 @@ export default defineComponent({
             }
         },
         createSnapshotText() {
-            if (this.asyncSession) {
-                throw new Error('Async session snapshots are not implemented yet')
+            if (this.asyncSession && this.state === 'paused') {
+                const snapshot = snapshotVmAsyncSession(this.asyncSession, { hostRegistry })
+                return serializeVmAsyncSessionSnapshot(snapshot)
             }
             const execution = this.execution
             if (this.state === 'paused' && execution) {
@@ -728,6 +745,30 @@ export default defineComponent({
             }
         },
         loadSnapshotText(snapshotText: string, statusText = 'Snapshot loaded') {
+            if (isVmAsyncSessionSnapshotText(snapshotText)) {
+                const snapshot = parseVmAsyncSessionSnapshot(snapshotText)
+                const [, debugInfo] = compile(snapshot.source, { range: true })
+                const session = markRaw(restoreVmAsyncSession(snapshot, {
+                    hostRegistry,
+                    compileFunction: compile,
+                    functionRedirects,
+                    onPause: ({ ptr }) => {
+                        this.pause(typeof ptr === 'number' ? ptr : null)
+                    },
+                }))
+                this.snapshotText = snapshotText
+                this.text = snapshot.source
+                this.asyncSession = session
+                this.execution = markRaw(session.mainExecution)
+                this.program = markRaw(session.debugExecution[Fields.stack][0]?.[Fields.programSection] ?? [])
+                this.debugInfo = markRaw(debugInfo)
+                this.state = 'paused'
+                this.statusText = statusText
+                this.debugPausePtr = this.getNextVisibleSourcePtr(session.debugExecution)
+                this.flushDebugHighlightSync()
+                this.revealDebugHighlight()
+                return
+            }
             const snapshot = parseExecutionSnapshot(snapshotText)
             const [, debugInfo] = compile(snapshot.source, { range: true })
             const execution = restoreExecution(snapshot, {

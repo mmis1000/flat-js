@@ -1,7 +1,14 @@
 import { compile } from '../compiler'
 import { getLogicalDebugFrames } from '../../web/debug-stack'
 import { Fields } from '../runtime'
-import { createVmAsyncSession } from '../serialization'
+import {
+    createHostRegistry,
+    createVmAsyncSession,
+    parseVmAsyncSessionSnapshot,
+    restoreVmAsyncSession,
+    serializeVmAsyncSessionSnapshot,
+    snapshotVmAsyncSession,
+} from '../serialization'
 
 test('VM sleep promise reactions pause and resume as scheduler jobs', () => {
     const [program] = compile(`
@@ -129,4 +136,90 @@ vmSleep(1).then(function reactionJob() {
 
     expect(session.resume().paused).toBe(false)
     expect(logs).toEqual(['job'])
+})
+
+test('snapshot and restore a paused VM promise reaction job', () => {
+    const [program] = compile(`
+vmSleep(1).then(() => {
+    debugger
+    return 'end'
+}).then(log)
+`, { range: true })
+    const logs: string[] = []
+    const log = (value: unknown) => logs.push(String(value))
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{
+            log,
+            __proto__: null,
+        }],
+        compileFunction: compile,
+    })
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['log', log],
+    ])
+
+    session.runUntilIdleOrPause()
+    session.advanceTime(1)
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+
+    const snapshotText = serializeVmAsyncSessionSnapshot(snapshotVmAsyncSession(session, { hostRegistry }))
+    const restored = restoreVmAsyncSession(parseVmAsyncSessionSnapshot(snapshotText), {
+        hostRegistry,
+        compileFunction: compile,
+    })
+
+    expect(restored.paused).toBe(true)
+    expect(restored.resume().paused).toBe(false)
+    expect(logs).toEqual(['end'])
+})
+
+test('snapshot and restore a paused async continuation with later timers blocked', () => {
+    const [program] = compile(`
+async function main() {
+    vmSleep(2).then(() => {
+        log('later')
+    })
+    await vmSleep(1)
+    debugger
+    log('first')
+}
+main()
+`, { range: true })
+    const logs: string[] = []
+    const log = (value: unknown) => logs.push(String(value))
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{
+            log,
+            __proto__: null,
+        }],
+        compileFunction: compile,
+    })
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['log', log],
+    ])
+
+    session.runUntilIdleOrPause()
+    session.advanceTime(1)
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+
+    const snapshotText = serializeVmAsyncSessionSnapshot(snapshotVmAsyncSession(session, { hostRegistry }))
+    const restored = restoreVmAsyncSession(parseVmAsyncSessionSnapshot(snapshotText), {
+        hostRegistry,
+        compileFunction: compile,
+    })
+
+    expect(restored.advanceTime(10).settledTimers).toBe(0)
+    expect(restored.runUntilIdleOrPause().paused).toBe(true)
+    expect(logs).toEqual([])
+
+    expect(restored.resume().paused).toBe(false)
+    expect(logs).toEqual(['first'])
+
+    expect(restored.advanceTime(1).settledTimers).toBe(1)
+    expect(restored.runUntilIdleOrPause().paused).toBe(false)
+    expect(logs).toEqual(['first', 'later'])
 })

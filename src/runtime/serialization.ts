@@ -1,6 +1,20 @@
 import { FunctionTypes, InvokeType } from "../compiler"
 import { getProgramSource, setProgramSource } from "../compiler/shared"
 import {
+    createRestoredVmAsyncSession,
+    VmAsyncSession,
+    type VmAsyncSessionBuiltinId,
+    type VmAsyncSessionRestoreShellOptions,
+    type VmAsyncSessionSerializableState,
+    type VmAsyncTask,
+    type VmJob,
+    type VmPromiseReaction,
+    type VmPromiseRecord,
+    type VmPromiseState,
+    type VmThenJob,
+    type VmTimerRecord,
+} from "./async-session"
+import {
     bindInfo,
     defaultClassConstructors,
     DefaultClassConstructorInfo,
@@ -19,10 +33,13 @@ import {
     generatorStates,
     InvokeParam,
     isGeneratorType,
+    isAsyncType,
     isIteratorYieldDone,
     isResultDone,
     isResultYield,
     markVmOwned,
+    RuntimeAdmitValue,
+    RuntimeAsyncHost,
     Scope,
     Stack,
     TDZ_VALUE,
@@ -56,6 +73,7 @@ type SnapshotValue =
     | { t: 'ref', id: number }
     | { t: 'host', id: string }
     | { t: 'builtin', id: BuiltinRefId }
+    | { t: 'vmAsyncBuiltin', id: VmAsyncSessionBuiltinId }
 
 type SnapshotKey =
     | { t: 'string', v: string }
@@ -149,6 +167,98 @@ export type ExecutionSnapshot = {
     hostOverlays?: SnapshotHostOverlay[]
 }
 
+type SnapshotExecutionState = {
+    ptr: number
+    evalResult: SnapshotValue
+    stack: SnapshotValue
+}
+
+type SnapshotVmPromiseReaction =
+    | {
+        type: 'then'
+        kind: 'fulfilled' | 'rejected'
+        handler: SnapshotValue
+        result: number
+    }
+    | {
+        type: 'await'
+        kind: 'fulfilled' | 'rejected'
+        task: number
+    }
+
+type SnapshotVmPromiseRecord = {
+    id: number
+    promise: SnapshotValue
+    state: VmPromiseState
+    value: SnapshotValue
+    fulfillReactions: SnapshotVmPromiseReaction[]
+    rejectReactions: SnapshotVmPromiseReaction[]
+}
+
+type SnapshotVmJob =
+    | {
+        id: number
+        type: 'then'
+        reaction: SnapshotVmPromiseReaction & { type: 'then' }
+        argument: SnapshotValue
+        execution?: number
+    }
+    | {
+        id: number
+        type: 'asyncContinuation'
+        task: number
+        kind: 'fulfilled' | 'rejected'
+        argument: SnapshotValue
+    }
+    | {
+        id: number
+        type: 'asyncStart'
+        task: number
+    }
+
+type SnapshotVmAsyncTask = {
+    id: number
+    execution: number
+    promise: number
+}
+
+type SnapshotVmTimerRecord = {
+    id: number
+    dueTick: number
+    promise: number
+    value: SnapshotValue
+}
+
+type SnapshotVmExecutionRecord = {
+    id: number
+    state: SnapshotExecutionState
+}
+
+export type VmAsyncSessionSnapshot = {
+    version: 1
+    source: string
+    program: SnapshotValue
+    globalThis: SnapshotValue
+    mainExecution: number
+    executions: SnapshotVmExecutionRecord[]
+    promises: SnapshotVmPromiseRecord[]
+    asyncTasks: SnapshotVmAsyncTask[]
+    jobs: SnapshotVmJob[]
+    timers: SnapshotVmTimerRecord[]
+    activeJob: SnapshotVmJob | null
+    currentTick: number
+    nextPromiseId: number
+    nextJobId: number
+    nextTimerId: number
+    nextAsyncTaskId: number
+    mainDone: boolean
+    paused: boolean
+    pausedPtr?: number
+    pausedExecution?: number
+    records: SnapshotRecord[]
+    hostOverlays?: SnapshotHostOverlay[]
+}
+
 export type HostCapabilityDescriptorOverlay = {
     descriptors: Array<[PropertyKey, PropertyDescriptor]>
     deleted: PropertyKey[]
@@ -177,6 +287,9 @@ type RestoreOptions = {
     compileFunction?: typeof import('../compiler').compile
     functionRedirects?: WeakMap<Function, Function>
     getDebugFunction?: () => null | DebugCallback
+    admitValue?: RuntimeAdmitValue
+    asyncHost?: RuntimeAsyncHost | null
+    vmAsyncSession?: VmAsyncSession
 }
 
 const SNAPSHOT_VERSION = 1
@@ -315,6 +428,20 @@ export const parseExecutionSnapshot = (text: string): ExecutionSnapshot => {
         throw new Error('Execution snapshot is missing JS source')
     }
     return parsed as ExecutionSnapshot
+}
+
+export const serializeVmAsyncSessionSnapshot = (snapshot: VmAsyncSessionSnapshot): string =>
+    JSON.stringify(snapshot)
+
+export const parseVmAsyncSessionSnapshot = (text: string): VmAsyncSessionSnapshot => {
+    const parsed = JSON.parse(text)
+    if (parsed == null || typeof parsed !== 'object' || parsed.version !== SNAPSHOT_VERSION) {
+        throw new Error('Unsupported VM async session snapshot version')
+    }
+    if (typeof parsed.source !== 'string') {
+        throw new Error('VM async session snapshot is missing JS source')
+    }
+    return parsed as VmAsyncSessionSnapshot
 }
 
 type InternalSymbolName =
@@ -467,7 +594,10 @@ const isWeakSet = (value: object): value is WeakSet<object> => {
 const hasOwnPrototype = (record: SnapshotRecord) =>
     record.descriptors.some(descriptor => descriptor.key.t === 'string' && descriptor.key.v === 'prototype')
 
-const isSupportedFunctionType = (type: FunctionTypes) => {
+const isSupportedFunctionType = (type: FunctionTypes, includeAsync: boolean) => {
+    if (includeAsync && isAsyncType(type)) {
+        return true
+    }
     switch (type) {
         case FunctionTypes.FunctionDeclaration:
         case FunctionTypes.FunctionExpression:
@@ -486,8 +616,8 @@ const isSupportedFunctionType = (type: FunctionTypes) => {
     }
 }
 
-const assertSupportedFunctionDescriptor = (descriptor: FunctionDescriptor, path: string) => {
-    if (!isSupportedFunctionType(descriptor[Fields.type])) {
+const assertSupportedFunctionDescriptor = (descriptor: FunctionDescriptor, path: string, includeAsync = false) => {
+    if (!isSupportedFunctionType(descriptor[Fields.type], includeAsync)) {
         throw new UnsupportedSerializationError('Unsupported VM function type', path)
     }
 }
@@ -617,7 +747,10 @@ class SnapshotWriter {
     private readonly weakCollections: Array<{ value: WeakMap<object, unknown> | WeakSet<object>, record: SnapshotRecord, path: string }> = []
     private readonly weakCollectionKeyIds = new WeakMap<SnapshotRecord, Set<number>>()
 
-    constructor(private readonly hostRegistry?: HostCapabilityRegistry) {}
+    constructor(
+        private readonly hostRegistry?: HostCapabilityRegistry,
+        private readonly vmAsyncSession?: VmAsyncSession
+    ) {}
 
     snapshot(execution: Execution): ExecutionSnapshot {
         if (execution[Fields.stack].length === 0) {
@@ -631,14 +764,140 @@ class SnapshotWriter {
         const snapshot: ExecutionSnapshot = {
             version: SNAPSHOT_VERSION,
             source,
-            ptr: execution[Fields.ptr],
-            evalResult: this.value(execution[Fields.evalResult], '$.evalResult'),
-            stack: this.value(execution[Fields.stack], '$.stack'),
+            ...this.executionState(execution, '$.execution'),
             records: this.records,
             hostOverlays: this.hostOverlays,
         }
         this.finalizeWeakCollections()
         return snapshot
+    }
+
+    snapshotVmAsyncSession(session: VmAsyncSession): VmAsyncSessionSnapshot {
+        const state = session.getSerializableState()
+        const source = getProgramSource(state.program)
+        if (source === undefined) {
+            throw new UnsupportedSerializationError('Missing JS program source', '$.source')
+        }
+
+        const executionIds = new Map<Execution, number>()
+        const executions: SnapshotVmExecutionRecord[] = []
+        const executionRef = (execution: Execution, path: string) => {
+            const existing = executionIds.get(execution)
+            if (existing !== undefined) {
+                return existing
+            }
+            const id = executions.length + 1
+            executionIds.set(execution, id)
+            executions.push({
+                id,
+                state: this.executionState(execution, path),
+            })
+            return id
+        }
+        const reaction = (reaction: VmPromiseReaction, path: string): SnapshotVmPromiseReaction => {
+            if (reaction.type === 'then') {
+                return {
+                    type: 'then',
+                    kind: reaction.kind,
+                    handler: this.value(reaction.handler, `${path}.handler`),
+                    result: reaction.result.id,
+                }
+            }
+            return {
+                type: 'await',
+                kind: reaction.kind,
+                task: reaction.task.id,
+            }
+        }
+        const job = (job: VmJob, path: string): SnapshotVmJob => {
+            if (job.type === 'then') {
+                const snapshotReaction = reaction(job.reaction, `${path}.reaction`)
+                if (snapshotReaction.type !== 'then') {
+                    throw new Error('Invalid VM promise reaction job snapshot')
+                }
+                const snapshotJob: SnapshotVmJob = {
+                    id: job.id,
+                    type: 'then',
+                    reaction: snapshotReaction,
+                    argument: this.value(job.argument, `${path}.argument`),
+                }
+                if (job.execution) {
+                    snapshotJob.execution = executionRef(job.execution, `${path}.execution`)
+                }
+                return snapshotJob
+            }
+            if (job.type === 'asyncContinuation') {
+                return {
+                    id: job.id,
+                    type: 'asyncContinuation',
+                    task: job.task.id,
+                    kind: job.kind,
+                    argument: this.value(job.argument, `${path}.argument`),
+                }
+            }
+            return {
+                id: job.id,
+                type: 'asyncStart',
+                task: job.task.id,
+            }
+        }
+
+        const snapshot: VmAsyncSessionSnapshot = {
+            version: SNAPSHOT_VERSION,
+            source,
+            program: this.value(state.program, '$.program'),
+            globalThis: this.value(state.globalThis, '$.globalThis'),
+            mainExecution: executionRef(state.mainExecution, '$.mainExecution'),
+            executions,
+            promises: state.promises.map((promise, index) => ({
+                id: promise.id,
+                promise: this.value(promise.promise, `$.promises[${index}].promise`),
+                state: promise.state,
+                value: this.value(promise.value, `$.promises[${index}].value`),
+                fulfillReactions: promise.fulfillReactions.map((entry, reactionIndex) =>
+                    reaction(entry, `$.promises[${index}].fulfillReactions[${reactionIndex}]`)
+                ),
+                rejectReactions: promise.rejectReactions.map((entry, reactionIndex) =>
+                    reaction(entry, `$.promises[${index}].rejectReactions[${reactionIndex}]`)
+                ),
+            })),
+            asyncTasks: state.asyncTasks.map(task => ({
+                id: task.id,
+                execution: executionRef(task.execution, `$.asyncTasks[${task.id}].execution`),
+                promise: task.promise.id,
+            })),
+            jobs: state.jobs.map((entry, index) => job(entry, `$.jobs[${index}]`)),
+            timers: state.timers.map((timer, index) => ({
+                id: timer.id,
+                dueTick: timer.dueTick,
+                promise: timer.promise.id,
+                value: this.value(timer.value, `$.timers[${index}].value`),
+            })),
+            activeJob: state.activeJob === null ? null : job(state.activeJob, '$.activeJob'),
+            currentTick: state.currentTick,
+            nextPromiseId: state.nextPromiseId,
+            nextJobId: state.nextJobId,
+            nextTimerId: state.nextTimerId,
+            nextAsyncTaskId: state.nextAsyncTaskId,
+            mainDone: state.mainDone,
+            paused: state.paused,
+            pausedPtr: state.pausedPtr,
+            pausedExecution: state.pausedExecution === null
+                ? undefined
+                : executionRef(state.pausedExecution, '$.pausedExecution'),
+            records: this.records,
+            hostOverlays: this.hostOverlays,
+        }
+        this.finalizeWeakCollections()
+        return snapshot
+    }
+
+    private executionState(execution: Execution, path: string): SnapshotExecutionState {
+        return {
+            ptr: execution[Fields.ptr],
+            evalResult: this.value(execution[Fields.evalResult], `${path}.evalResult`),
+            stack: this.value(execution[Fields.stack], `${path}.stack`),
+        }
     }
 
     private unsupported(reason: string, path: string): never {
@@ -833,6 +1092,15 @@ class SnapshotWriter {
             return this.unsupported('Unsupported symbol value', path)
         }
 
+        const vmAsyncBuiltinId = this.vmAsyncSession?.getSerializationBuiltinId(value)
+        if (vmAsyncBuiltinId !== undefined) {
+            const mutationReason = this.vmAsyncSession?.getSerializationBuiltinMutationReason(value)
+            if (mutationReason) {
+                return this.unsupported(mutationReason, path)
+            }
+            return { t: 'vmAsyncBuiltin', id: vmAsyncBuiltinId }
+        }
+
         const hostId = this.hostRegistry?.getId(value)
         if (hostId !== undefined) {
             const mutationReason = this.hostRegistry?.getMutationReason?.(value)
@@ -860,7 +1128,7 @@ class SnapshotWriter {
                 this.assertSyncGeneratorState(generatorMethod.state, path)
             }
             if (descriptor) {
-                assertSupportedFunctionDescriptor(descriptor, path)
+                assertSupportedFunctionDescriptor(descriptor, path, this.vmAsyncSession !== undefined)
             }
             return this.object(value, 'function', path)
         }
@@ -1068,7 +1336,10 @@ const runRestoredFunction = (
         args,
         holder.options.getDebugFunction ?? (() => null),
         holder.options.compileFunction,
-        holder.options.functionRedirects ?? new WeakMap()
+        holder.options.functionRedirects ?? new WeakMap(),
+        null,
+        holder.options.admitValue,
+        holder.options.asyncHost ?? null
     )
 
     let result
@@ -1109,7 +1380,10 @@ const createGeneratorExecution = (state: GeneratorState, options: RestoreOptions
         [],
         options.getDebugFunction ?? (() => null),
         options.compileFunction,
-        options.functionRedirects ?? new WeakMap()
+        options.functionRedirects ?? new WeakMap(),
+        null,
+        options.admitValue,
+        options.asyncHost ?? null
     )
     execution[Fields.stack].length = 0
     return execution
@@ -1240,7 +1514,10 @@ const createRestoredGeneratorFromDescriptor = (
         args,
         holder.options.getDebugFunction ?? (() => null),
         holder.options.compileFunction,
-        holder.options.functionRedirects ?? new WeakMap()
+        holder.options.functionRedirects ?? new WeakMap(),
+        null,
+        holder.options.admitValue,
+        holder.options.asyncHost ?? null
     )
     const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
         (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
@@ -1287,9 +1564,10 @@ class SnapshotReader {
     private readonly refs = new Map<number, any>()
     private readonly holders = new Map<number, FunctionHolder>()
     private readonly generatorStatesByObject = new WeakMap<object, GeneratorState>()
+    private graphRestored = false
 
     constructor(
-        private readonly snapshot: ExecutionSnapshot,
+        private readonly snapshot: ExecutionSnapshot | VmAsyncSessionSnapshot,
         private readonly options: RestoreOptions
     ) {}
 
@@ -1300,17 +1578,11 @@ class SnapshotReader {
         if (typeof this.snapshot.source !== 'string') {
             throw new Error('Execution snapshot is missing JS source')
         }
-
-        for (const record of this.snapshot.records) {
-            this.allocate(record)
+        if (!('stack' in this.snapshot)) {
+            throw new Error('Execution snapshot root is missing')
         }
-        for (const record of this.snapshot.records) {
-            this.fill(record)
-        }
-        this.restoreGeneratorStates()
-        this.restoreGeneratorSideTables()
-        this.applyHostOverlays()
 
+        this.restoreGraph()
         const stack = this.value(this.snapshot.stack) as Stack
         if (!Array.isArray(stack) || stack.length === 0) {
             throw new Error('Invalid execution snapshot stack')
@@ -1329,12 +1601,68 @@ class SnapshotReader {
             [],
             this.options.getDebugFunction ?? (() => null),
             this.options.compileFunction,
-            this.options.functionRedirects ?? new WeakMap()
+            this.options.functionRedirects ?? new WeakMap(),
+            null,
+            this.options.admitValue,
+            this.options.asyncHost ?? null
         )
         execution[Fields.stack].length = 0
         execution[Fields.stack].push(...stack)
         execution[Fields.ptr] = this.snapshot.ptr
         execution[Fields.evalResult] = this.value(this.snapshot.evalResult)
+        return execution
+    }
+
+    restoreGraph() {
+        if (this.graphRestored) {
+            return
+        }
+        this.graphRestored = true
+        for (const record of this.snapshot.records) {
+            this.allocate(record)
+        }
+        for (const record of this.snapshot.records) {
+            this.fill(record)
+        }
+        this.restoreGeneratorStates()
+        this.restoreGeneratorSideTables()
+        this.applyHostOverlays()
+    }
+
+    restoreExecutionState(
+        state: SnapshotExecutionState,
+        fallbackProgram: number[],
+        fallbackGlobalThis: object
+    ): Execution {
+        this.restoreGraph()
+        const stack = this.value(state.stack) as Stack
+        if (!Array.isArray(stack)) {
+            throw new Error('Invalid VM async execution stack')
+        }
+        const firstFrame = stack[0]
+        const program = firstFrame?.[Fields.programSection] ?? fallbackProgram
+        const globalThis = firstFrame?.[Fields.globalThis] ?? fallbackGlobalThis
+        if (getProgramSource(program) === undefined) {
+            setProgramSource(program, this.snapshot.source)
+        }
+        const execution = getExecution(
+            program,
+            state.ptr,
+            globalThis,
+            [],
+            undefined,
+            [],
+            this.options.getDebugFunction ?? (() => null),
+            this.options.compileFunction,
+            this.options.functionRedirects ?? new WeakMap(),
+            null,
+            this.options.admitValue,
+            this.options.asyncHost ?? null
+        )
+        execution[Fields.stack].length = 0
+        execution[Fields.stack].push(...stack)
+        execution[Fields.ptr] = state.ptr
+        execution[Fields.evalResult] = this.value(state.evalResult)
         return execution
     }
 
@@ -1698,6 +2026,11 @@ class SnapshotReader {
                 return this.options.hostRegistry.getValue(value.id)
             case 'builtin':
                 return getBuiltinValue(value.id)
+            case 'vmAsyncBuiltin':
+                if (!this.options.vmAsyncSession) {
+                    throw new UnsupportedSerializationError(`Missing VM async session for '${value.id}'`, '$')
+                }
+                return this.options.vmAsyncSession.getSerializationBuiltinValue(value.id)
         }
     }
 }
@@ -1711,3 +2044,194 @@ export const restoreExecution = (
     snapshot: ExecutionSnapshot,
     options: RestoreOptions = {}
 ): Execution => new SnapshotReader(snapshot, options).restore()
+
+export type VmAsyncSessionSnapshotOptions = SnapshotOptions
+
+export type VmAsyncSessionRestoreOptions = VmAsyncSessionRestoreShellOptions & {
+    hostRegistry?: HostCapabilityRegistry
+}
+
+export const snapshotVmAsyncSession = (
+    session: VmAsyncSession,
+    options: VmAsyncSessionSnapshotOptions = {}
+): VmAsyncSessionSnapshot => new SnapshotWriter(options.hostRegistry, session).snapshotVmAsyncSession(session)
+
+export const restoreVmAsyncSession = (
+    snapshot: VmAsyncSessionSnapshot,
+    options: VmAsyncSessionRestoreOptions = {}
+): VmAsyncSession => {
+    if (snapshot.version !== SNAPSHOT_VERSION) {
+        throw new Error('Unsupported VM async session snapshot version')
+    }
+    if (typeof snapshot.source !== 'string') {
+        throw new Error('VM async session snapshot is missing JS source')
+    }
+
+    const session = createRestoredVmAsyncSession({
+        globalThis: options.globalThis,
+        compileFunction: options.compileFunction,
+        functionRedirects: options.functionRedirects,
+        admitValue: options.admitValue,
+        onPause: options.onPause,
+    })
+    const reader = new SnapshotReader(snapshot, {
+        hostRegistry: options.hostRegistry,
+        compileFunction: options.compileFunction,
+        functionRedirects: options.functionRedirects,
+        admitValue: options.admitValue,
+        asyncHost: session,
+        vmAsyncSession: session,
+        getDebugFunction: session.getDebugFunctionForSerialization(),
+    })
+    reader.restoreGraph()
+
+    const program = reader.value(snapshot.program) as number[]
+    const restoredGlobalThis = reader.value(snapshot.globalThis) as object
+    if (!Array.isArray(program)) {
+        throw new Error('Invalid VM async session program')
+    }
+    if (!isObjectLike(restoredGlobalThis)) {
+        throw new Error('Invalid VM async session global')
+    }
+    if (getProgramSource(program) === undefined) {
+        setProgramSource(program, snapshot.source)
+    }
+
+    const executions = new Map<number, Execution>()
+    for (const execution of snapshot.executions) {
+        executions.set(
+            execution.id,
+            reader.restoreExecutionState(execution.state, program, restoredGlobalThis)
+        )
+    }
+    const requireExecution = (id: number) => {
+        const execution = executions.get(id)
+        if (!execution) {
+            throw new Error(`Missing VM async execution '${id}'`)
+        }
+        return execution
+    }
+
+    const promises = new Map<number, VmPromiseRecord>()
+    const restoredPromises: VmPromiseRecord[] = []
+    for (const promise of snapshot.promises) {
+        const restored: VmPromiseRecord = {
+            id: promise.id,
+            promise: reader.value(promise.promise) as object,
+            state: promise.state,
+            value: reader.value(promise.value),
+            fulfillReactions: [],
+            rejectReactions: [],
+        }
+        if (!isObjectLike(restored.promise)) {
+            throw new Error(`Invalid VM promise '${promise.id}'`)
+        }
+        promises.set(restored.id, restored)
+        restoredPromises.push(restored)
+    }
+    const requirePromise = (id: number) => {
+        const promise = promises.get(id)
+        if (!promise) {
+            throw new Error(`Missing VM promise '${id}'`)
+        }
+        return promise
+    }
+
+    const tasks = new Map<number, VmAsyncTask>()
+    const restoredTasks: VmAsyncTask[] = []
+    for (const task of snapshot.asyncTasks) {
+        const restored: VmAsyncTask = {
+            id: task.id,
+            execution: requireExecution(task.execution),
+            promise: requirePromise(task.promise),
+        }
+        tasks.set(restored.id, restored)
+        restoredTasks.push(restored)
+    }
+    const requireTask = (id: number) => {
+        const task = tasks.get(id)
+        if (!task) {
+            throw new Error(`Missing VM async task '${id}'`)
+        }
+        return task
+    }
+
+    const restoreReaction = (reaction: SnapshotVmPromiseReaction): VmPromiseReaction => {
+        if (reaction.type === 'then') {
+            return {
+                type: 'then',
+                kind: reaction.kind,
+                handler: reader.value(reaction.handler),
+                result: requirePromise(reaction.result),
+            }
+        }
+        return {
+            type: 'await',
+            kind: reaction.kind,
+            task: requireTask(reaction.task),
+        }
+    }
+    for (const promise of snapshot.promises) {
+        const restored = requirePromise(promise.id)
+        restored.fulfillReactions = promise.fulfillReactions.map(restoreReaction)
+        restored.rejectReactions = promise.rejectReactions.map(restoreReaction)
+    }
+
+    const restoreJob = (job: SnapshotVmJob): VmJob => {
+        if (job.type === 'then') {
+            const restored: VmThenJob = {
+                id: job.id,
+                type: 'then',
+                reaction: restoreReaction(job.reaction) as VmThenJob['reaction'],
+                argument: reader.value(job.argument),
+            }
+            if (job.execution !== undefined) {
+                restored.execution = requireExecution(job.execution)
+            }
+            return restored
+        }
+        if (job.type === 'asyncContinuation') {
+            return {
+                id: job.id,
+                type: 'asyncContinuation',
+                task: requireTask(job.task),
+                kind: job.kind,
+                argument: reader.value(job.argument),
+            }
+        }
+        return {
+            id: job.id,
+            type: 'asyncStart',
+            task: requireTask(job.task),
+        }
+    }
+
+    const state: VmAsyncSessionSerializableState = {
+        program,
+        globalThis: restoredGlobalThis,
+        mainExecution: requireExecution(snapshot.mainExecution),
+        promises: restoredPromises,
+        asyncTasks: restoredTasks,
+        jobs: snapshot.jobs.map(restoreJob),
+        timers: snapshot.timers.map(timer => ({
+            id: timer.id,
+            dueTick: timer.dueTick,
+            promise: requirePromise(timer.promise),
+            value: reader.value(timer.value),
+        })),
+        activeJob: snapshot.activeJob === null ? null : restoreJob(snapshot.activeJob),
+        currentTick: snapshot.currentTick,
+        nextPromiseId: snapshot.nextPromiseId,
+        nextJobId: snapshot.nextJobId,
+        nextTimerId: snapshot.nextTimerId,
+        nextAsyncTaskId: snapshot.nextAsyncTaskId,
+        mainDone: snapshot.mainDone,
+        paused: snapshot.paused,
+        pausedPtr: snapshot.pausedPtr,
+        pausedExecution: snapshot.pausedExecution === undefined
+            ? null
+            : requireExecution(snapshot.pausedExecution),
+    }
+    session.restoreSerializableState(state)
+    return session
+}
