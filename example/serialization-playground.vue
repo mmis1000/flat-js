@@ -92,12 +92,14 @@ import {
     type Stack,
 } from '../src/runtime'
 import {
+    createVmAsyncSession,
     createHostRegistry,
     createSerializableHostObjectRedirects,
     parseExecutionSnapshot,
     restoreExecution,
     serializeExecutionSnapshot,
     snapshotExecution,
+    type VmAsyncSession,
 } from '../src/serialization'
 import {
     getLogicalDebugFrames,
@@ -106,6 +108,8 @@ import {
 } from '../web/debug-stack'
 
 type VmStatus = 'idle' | 'running' | 'paused' | 'done' | 'error'
+
+type VmExecution = ReturnType<typeof getExecution>
 
 const defaultSource = `function greet(name) {
     const state = { name, count: 1 }
@@ -178,6 +182,10 @@ function readSnapshotTextFromHash() {
     }
     const encoded = window.location.hash.slice(SNAPSHOT_HASH_PREFIX.length)
     return encoded ? decodeSnapshotFromUrl(encoded) : ''
+}
+
+function shouldUseAsyncSession(source: string) {
+    return /\basync\b|\bvmSleep\b/.test(source)
 }
 
 function createSnapshotUrl(text: string) {
@@ -271,7 +279,8 @@ export default defineComponent({
             snapshotUrl: '',
             state: 'idle' as VmStatus,
             statusText: 'Idle',
-            execution: null as ReturnType<typeof getExecution> | null,
+            execution: null as VmExecution | null,
+            asyncSession: null as VmAsyncSession | null,
             program: [] as number[],
             debugInfo: emptyDebugInfo(),
             stackContainer: { stack: [] as Stack },
@@ -334,6 +343,7 @@ export default defineComponent({
         resetDebugState() {
             this.cancelDebugHighlightRaf()
             this.execution = null
+            this.asyncSession = null
             this.program = []
             this.debugInfo = emptyDebugInfo()
             this.stackContainer = { stack: [] as Stack }
@@ -345,7 +355,10 @@ export default defineComponent({
         getSourceMapForProgramPtr(programSection: number[] | undefined, ptr: number): [number, number, number, number] | undefined {
             return programSection === this.program ? this.debugInfo.sourceMap[ptr] : undefined
         },
-        getSourceMapAtPtr(execution: ReturnType<typeof getExecution> | null): [number, number, number, number] | undefined {
+        getDebugExecution(): VmExecution | null {
+            return this.asyncSession?.debugExecution ?? this.execution
+        },
+        getSourceMapAtPtr(execution: VmExecution | null): [number, number, number, number] | undefined {
             if (!execution || execution[Fields.stack].length === 0) {
                 return undefined
             }
@@ -377,7 +390,7 @@ export default defineComponent({
             }
             return null
         },
-        getNextVisibleSourcePtr(execution: ReturnType<typeof getExecution>): number | null {
+        getNextVisibleSourcePtr(execution: VmExecution): number | null {
             const stack = execution[Fields.stack]
             if (stack.length === 0) {
                 return null
@@ -389,7 +402,7 @@ export default defineComponent({
             }
             return this.findNextVisibleSourcePtr(top[Fields.programSection], ptr)
         },
-        isExecutionAtVisibleUserCode(execution: ReturnType<typeof getExecution>): boolean {
+        isExecutionAtVisibleUserCode(execution: VmExecution): boolean {
             const stack = execution[Fields.stack]
             if (stack.length === 0) {
                 return false
@@ -398,7 +411,7 @@ export default defineComponent({
             return !!this.getSourceMapForProgramPtr(top[Fields.programSection], execution[Fields.ptr])
                 && !this.isSourcePointerInternal(top[Fields.programSection], execution[Fields.ptr])
         },
-        getSelectedSourceMapAtPtr(execution: ReturnType<typeof getExecution> | null): [number, number, number, number] | undefined {
+        getSelectedSourceMapAtPtr(execution: VmExecution | null): [number, number, number, number] | undefined {
             if (!execution) {
                 return undefined
             }
@@ -433,7 +446,7 @@ export default defineComponent({
             }
             return undefined
         },
-        getInternalsAtPtr(execution: ReturnType<typeof getExecution> | null): boolean {
+        getInternalsAtPtr(execution: VmExecution | null): boolean {
             if (!execution || execution[Fields.stack].length === 0) {
                 return false
             }
@@ -453,12 +466,12 @@ export default defineComponent({
                 this.selectedDebugFrameIndex = null
             }
         },
-        updateDebugStackContainer(execution: ReturnType<typeof getExecution>) {
+        updateDebugStackContainer(execution: VmExecution) {
             const stack = execution[Fields.stack]
             this.syncSelectedDebugFrame(stack)
             this.stackContainer = { get stack() { return stack } }
         },
-        applyDebugHighlight(execution: ReturnType<typeof getExecution>) {
+        applyDebugHighlight(execution: VmExecution) {
             const pos = this.getSelectedSourceMapAtPtr(execution)
             this.highlights = pos
                 ? [[pos[0] + 1, pos[1] + 1, pos[2] + 1, pos[3] + 1]]
@@ -474,7 +487,7 @@ export default defineComponent({
             if (this.highlightRafId) return
             this.highlightRafId = requestAnimationFrame(() => {
                 this.highlightRafId = 0
-                const execution = this.execution
+                const execution = this.getDebugExecution()
                 if (!execution) return
                 this.updateDebugStackContainer(execution)
                 this.applyDebugHighlight(execution)
@@ -483,7 +496,7 @@ export default defineComponent({
         },
         flushDebugHighlightSync() {
             this.cancelDebugHighlightRaf()
-            const execution = this.execution
+            const execution = this.getDebugExecution()
             if (!execution) {
                 this.highlights = []
                 return
@@ -504,7 +517,7 @@ export default defineComponent({
             this.revealDebugHighlight()
         },
         pause(debugPtr: number | null = null) {
-            const execution = this.execution
+            const execution = this.getDebugExecution()
             this.debugPausePtr = debugPtr ?? (execution ? this.getNextVisibleSourcePtr(execution) : null)
             this.state = 'paused'
             this.statusText = debugPtr == null ? 'Paused' : 'Paused at debugger'
@@ -528,11 +541,33 @@ export default defineComponent({
             this.debugPausePtr = null
             this.state = 'running'
             this.statusText = 'Running'
-            this.updateDebugStackContainer(execution)
+            this.updateDebugStackContainer(this.getDebugExecution() ?? execution)
 
             try {
+                const session = this.asyncSession
                 let guard = 0
                 while (this.state === 'running') {
+                    if (session) {
+                        const result = session.runUntilIdleOrPause()
+                        if (result.paused) {
+                            return
+                        }
+                        if (result.mainDone && result.queuedJobs === 0 && result.pendingTimers === 0) {
+                            this.state = 'done'
+                            this.statusText = 'Done'
+                            this.highlights = []
+                            this.flushDebugHighlightSync()
+                            break
+                        }
+                        if (result.pendingTimers > 0) {
+                            session.advanceTime(1)
+                        }
+                        if (++guard > 20000) {
+                            throw new Error('Async session guard exceeded')
+                        }
+                        continue
+                    }
+
                     const result = execution[Fields.step](true)
                     this.ensureSynchronousResult(result)
                     if (result[Fields.done]) {
@@ -554,6 +589,11 @@ export default defineComponent({
             }
         },
         stepExecution(stepIn = false) {
+            if (this.asyncSession) {
+                this.continueExecution()
+                return
+            }
+
             const execution = this.execution
             if (!execution) return
 
@@ -624,17 +664,31 @@ export default defineComponent({
                 this.program = markRaw(program)
                 this.debugInfo = markRaw(debugInfo)
                 const scope = { log: hostLog, input: hostInput, __proto__: null } as Record<string, unknown>
-                this.execution = markRaw(getExecution(
-                    program,
-                    0,
-                    vmGlobal,
-                    [scope],
-                    undefined,
-                    [],
-                    () => this.getDebugPauseCallback(),
-                    compile,
-                    functionRedirects
-                ))
+                if (shouldUseAsyncSession(this.text)) {
+                    const session = markRaw(createVmAsyncSession(program, {
+                        globalThis: Object.create(vmGlobal),
+                        scopes: [scope],
+                        compileFunction: compile,
+                        functionRedirects,
+                        onPause: ({ ptr }) => {
+                            this.pause(typeof ptr === 'number' ? ptr : null)
+                        },
+                    }))
+                    this.asyncSession = session
+                    this.execution = markRaw(session.mainExecution)
+                } else {
+                    this.execution = markRaw(getExecution(
+                        program,
+                        0,
+                        vmGlobal,
+                        [scope],
+                        undefined,
+                        [],
+                        () => this.getDebugPauseCallback(),
+                        compile,
+                        functionRedirects
+                    ))
+                }
                 this.continueExecution()
             } catch (error) {
                 this.setError(error)
@@ -649,6 +703,9 @@ export default defineComponent({
             }
         },
         createSnapshotText() {
+            if (this.asyncSession) {
+                throw new Error('Async session snapshots are not implemented yet')
+            }
             const execution = this.execution
             if (this.state === 'paused' && execution) {
                 const snapshot = snapshotExecution(execution, { hostRegistry })
@@ -681,6 +738,7 @@ export default defineComponent({
             })
             this.snapshotText = snapshotText
             this.text = snapshot.source
+            this.asyncSession = null
             this.execution = markRaw(execution)
             this.program = markRaw(execution[Fields.stack][0]?.[Fields.programSection] ?? [])
             this.debugInfo = markRaw(debugInfo)
@@ -729,7 +787,7 @@ export default defineComponent({
             this.replOutput += `> ${text}\n`
 
             try {
-                const execution = this.execution
+                const execution = this.getDebugExecution()
                 if (!execution) {
                     this.replOutput += '(no VM)\n'
                     return
@@ -738,20 +796,23 @@ export default defineComponent({
                 const replScopes = [...execution[Fields.scopes]]
                 const frame = execution[Fields.stack][execution[Fields.stack].length - 1]
                 const variableEnvironmentScope = frame?.[Fields.variableEnvironment] ?? null
+                const replGlobal = frame?.[Fields.globalThis] ?? vmGlobal
                 const cleanupMaterializedScopes = this.materializeReplScopes(replScopes)
                 let result
                 try {
                     result = run(
                         programData,
                         0,
-                        vmGlobal,
+                        replGlobal,
                         replScopes,
                         undefined,
                         [],
                         compile,
                         functionRedirects,
                         () => this.getDebugPauseCallback(),
-                        variableEnvironmentScope
+                        variableEnvironmentScope,
+                        undefined,
+                        this.asyncSession
                     )
                 } finally {
                     for (let index = cleanupMaterializedScopes.length - 1; index >= 0; index--) {

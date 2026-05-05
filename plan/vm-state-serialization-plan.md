@@ -1,6 +1,6 @@
 # VM State Serialization Plan
 
-Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, support `Map`, `Set`, `WeakMap`, `WeakSet`, and synchronous VM generator records, and can opt into strict checkpointable admission checks. Phase 7 is scoped as VM-owned async scheduling first, with Phase 7A scheduler core and Phase 7B async/await integration implemented; host/native pending promises remain rejected. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
+Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, support `Map`, `Set`, `WeakMap`, `WeakSet`, and synchronous VM generator records, and can opt into strict checkpointable admission checks. Phase 7 is scoped as VM-owned async scheduling first, with Phase 7A scheduler core, Phase 7B async/await integration, and Phase 7C playground debugger integration implemented; host/native pending promises remain rejected. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
 
 Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The next work is a deterministic VM-owned async scheduler/session, without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
 
@@ -32,7 +32,8 @@ Recommended next sequence:
 9. Phase 6: add strict checkpointable ingress checks. Implemented as opt-in admission callbacks 2026-05-05.
 10. Phase 7A: add VM-owned scheduler core. Implemented 2026-05-05.
 11. Phase 7B: integrate async/await into the VM scheduler. Implemented 2026-05-05.
-12. Phase 7C-7E: add global web debugger pause, session snapshots, and host-boundary guardrails. Host/native pending promises stay unsupported until a later host-boundary phase.
+12. Phase 7C: expose session debug execution and wire the serialization playground debugger to session jobs. Implemented 2026-05-05.
+13. Phase 7D-7E: add session snapshots and host-boundary guardrails. Host/native pending promises stay unsupported until a later host-boundary phase.
 
 ## 0. Follow-Up Path From Current V1
 
@@ -483,7 +484,7 @@ Status: implemented as opt-in admission callbacks.
 
 ### Phase 7: VM-Owned Async Scheduler And Session Snapshots
 
-Status: Phase 7A and 7B implemented 2026-05-05; remaining sub-phases planned. First version is VM-owned only. Native pending promises and host thenables remain unsupported in snapshots.
+Status: Phase 7A, 7B, and 7C implemented 2026-05-05; remaining sub-phases planned. First version is VM-owned only. Native pending promises and host thenables remain unsupported in snapshots.
 
 Current runtime shape to account for:
 
@@ -523,10 +524,11 @@ Sub-phases:
    - Validation run: focused scheduler Jest, existing async/serialization Jest, and `npm run build:tsc`.
 
 3. **Phase 7C: global debugger pause in web/runtime stepping**
-   - Expose helpers that return the session's current debug execution: paused job execution first, otherwise active job, otherwise main execution.
-   - Update web run/resume/step/debug-stack/REPL code to read from the session execution instead of assuming `this.execution` is the only paused VM.
-   - Acceptance test: a debugger pause inside a promise job shows the callback stack/scope and resume continues the same job.
-   - Commit before continuing.
+   - Implemented session helpers that return the current debug execution: paused job execution first, otherwise active job, otherwise main execution.
+   - The serialization playground now uses async session mode for `async` / `vmSleep` sources, advances virtual timers deterministically, and reads debug stack/highlight/REPL state from the session execution.
+   - Acceptance covered: a debugger pause inside a promise job exposes the callback execution as `debugExecution` and resumes the same job.
+   - Async session snapshots remain blocked with an explicit error until Phase 7D.
+   - Validation run: focused scheduler Jest, existing async/serialization Jest, `npm run build:tsc`, and `npm run build-example:serialization-playground`.
 
 4. **Phase 7D: session snapshot and restore**
    - Add optional APIs from `src/serialization.ts`: `snapshotVmAsyncSession`, `restoreVmAsyncSession`, `serializeVmAsyncSessionSnapshot`, and `parseVmAsyncSessionSnapshot`.

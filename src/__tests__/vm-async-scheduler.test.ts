@@ -1,4 +1,6 @@
 import { compile } from '../compiler'
+import { getLogicalDebugFrames } from '../../web/debug-stack'
+import { Fields } from '../runtime'
 import { createVmAsyncSession } from '../serialization'
 
 test('VM sleep promise reactions pause and resume as scheduler jobs', () => {
@@ -97,4 +99,34 @@ main()
     expect(session.advanceTime(1).settledTimers).toBe(1)
     expect(session.runUntilIdleOrPause().paused).toBe(false)
     expect(logs).toEqual(['first', 'later'])
+})
+
+test('debug execution points at a paused promise reaction job', () => {
+    const [program] = compile(`
+vmSleep(1).then(function reactionJob() {
+    const local = 'job'
+    debugger
+    log(local)
+})
+`, { range: true })
+    const logs: string[] = []
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{
+            log: (value: unknown) => logs.push(String(value)),
+            __proto__: null,
+        }],
+        compileFunction: compile,
+    })
+
+    session.runUntilIdleOrPause()
+    session.advanceTime(1)
+
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+    expect(session.debugExecution).toBe(session.pausedExecution)
+    expect(session.debugExecution).not.toBe(session.mainExecution)
+    expect(getLogicalDebugFrames(session.debugExecution[Fields.stack])[0].functionName).toBe('reactionJob')
+
+    expect(session.resume().paused).toBe(false)
+    expect(logs).toEqual(['job'])
 })

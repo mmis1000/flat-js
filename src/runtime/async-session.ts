@@ -173,6 +173,20 @@ export class VmAsyncSession implements RuntimeAsyncHost {
         return this.pausedExecutionValue
     }
 
+    get activeExecution(): Execution {
+        if (!this.activeJob) {
+            return this.mainExecution
+        }
+        if (this.activeJob.type === 'then') {
+            return this.activeJob.execution ?? this.mainExecution
+        }
+        return this.activeJob.task.execution
+    }
+
+    get debugExecution(): Execution {
+        return this.pausedExecutionValue ?? this.activeExecution
+    }
+
     get currentTick() {
         return this.currentTickValue
     }
