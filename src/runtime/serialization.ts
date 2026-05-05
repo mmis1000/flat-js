@@ -165,6 +165,8 @@ type SnapshotOptions = {
     hostRegistry?: HostCapabilityRegistry
 }
 
+export type CheckpointableAdmission = (value: unknown, path?: string) => void
+
 type SerializableHostObjectRedirectOptions = {
     globalThis?: any
     functionRedirects?: WeakMap<Function, Function>
@@ -601,6 +603,12 @@ export const createSerializableHostObjectRedirects = (
     return redirects
 }
 
+export const createCheckpointableAdmission = (
+    options: SnapshotOptions = {}
+): CheckpointableAdmission => (value, path = '$') => {
+    new SnapshotWriter(options.hostRegistry).admit(value, path)
+}
+
 class SnapshotWriter {
     private readonly ids = new Map<object, number>()
     private readonly records: SnapshotRecord[] = []
@@ -635,6 +643,10 @@ class SnapshotWriter {
 
     private unsupported(reason: string, path: string): never {
         throw new UnsupportedSerializationError(reason, path)
+    }
+
+    admit(value: unknown, path = '$') {
+        this.value(value, path)
     }
 
     private assertSyncGeneratorState(state: GeneratorState, path: string) {

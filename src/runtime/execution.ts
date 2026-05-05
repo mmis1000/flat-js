@@ -32,6 +32,7 @@ import {
     Result,
     ResultAwait,
     ResultDone,
+    RuntimeAdmitValue,
     Scope,
     ScopeWithInternals,
     StaticVariableStore,
@@ -240,11 +241,26 @@ export const getExecution = (
     getDebugFunction: () => null | DebugCallback = () => null,
     compileFunction: typeof import('../compiler').compile = (...args: any[]) => { throw new Error('not supported') },
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
-    variableEnvironmentScope: Scope | null = null
+    variableEnvironmentScope: Scope | null = null,
+    admitValue: RuntimeAdmitValue = () => {}
 ) => {
     markVmOwned(program as unknown as object)
     for (const scope of scopes) {
         markVmOwned(scope)
+    }
+    const admitRuntimeValue = <T>(value: T, path: string): T => {
+        admitValue(value, path)
+        return value
+    }
+    admitRuntimeValue(globalThis, '$.globalThis')
+    scopes.forEach((scope, index) => admitRuntimeValue(scope, `$.scopes[${index}]`))
+    args.forEach((arg, index) => admitRuntimeValue(arg, `$.args[${index}]`))
+    const invokeRecord = invokeData as Record<number, unknown>
+    admitRuntimeValue(invokeRecord[Fields.function], '$.invoke.function')
+    if (invokeData[Fields.type] === InvokeType.Apply) {
+        admitRuntimeValue(invokeRecord[Fields.self], '$.invoke.self')
+    } else {
+        admitRuntimeValue(invokeRecord[Fields.newTarget], '$.invoke.newTarget')
     }
 
     let currentProgram = program
@@ -342,7 +358,7 @@ export const getExecution = (
         }
 
         const scope = getEmptyObject() as ScopeWithInternals
-        scope[SCOPE_WITH_OBJECT] = Object(value)
+        scope[SCOPE_WITH_OBJECT] = admitRuntimeValue(Object(value), '$.withObject')
         return scope
     }
 
@@ -497,7 +513,7 @@ export const getExecution = (
         if (value === TDZ_VALUE) {
             throw new ReferenceError(`Cannot access '${name}' before initialization`)
         }
-        return value
+        return admitRuntimeValue(value, `$.binding.${name}`)
     }
 
     const setBindingValueChecked = (scope: Scope, name: string, value: any) => {
@@ -681,9 +697,9 @@ export const getExecution = (
             && scope === frame[Fields.globalThis]
             && (flags & VariableFlags.Lexical) === 0
         ) {
-            return scope[name]
+            return admitRuntimeValue(scope[name], `$.static.${name}`)
         }
-        return store[Fields.values][index]
+        return admitRuntimeValue(store[Fields.values][index], `$.static.${name}`)
     }
 
     const getStaticVariableValueChecked = (frame: Frame, depth: number, index: number) => {
@@ -769,7 +785,7 @@ export const getExecution = (
     ): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
         // Build an initial frame via a throwaway execution; do NOT run it. The generator
         // always executes inside the caller's VM via handover (OpCode.Call & OpCode.Yield).
-        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue)
         const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
             (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
         )
@@ -900,7 +916,7 @@ export const getExecution = (
         return(value?: unknown): Promise<IteratorResult<unknown>>
         throw(error?: unknown): Promise<IteratorResult<unknown>>
     } => {
-        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const scratchExecution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue)
         const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
             (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
         )
@@ -1150,7 +1166,7 @@ export const getExecution = (
         pr: number[], offset: number, gt: object,
         scopes: Scope[], invokeData: InvokeParam, args: unknown[]
     ): Promise<unknown> => {
-        const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects)
+        const execution: Execution = getExecution(pr, offset, gt, scopes, invokeData, args, getDebugFunction, compileFunction, functionRedirects, null, admitValue)
         const PromiseCtor = Reflect.get(gt, 'Promise') ?? Promise
         const promiseResolve = (value: unknown) => Reflect.get(PromiseCtor, 'resolve').call(PromiseCtor, value) as PromiseLike<unknown>
         const performPromiseThen = (
@@ -1274,7 +1290,7 @@ export const getExecution = (
 
             return run_(
                 pr, offset, des[Fields.globalThis],
-                [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects
+                [...scopeClone], invokeData, args, getDebugFunction, false, compileFunction, functionRedirects, null, admitValue
             )
         }
         fn = usesOrdinaryFunctionWrapper(type)
@@ -1378,21 +1394,28 @@ export const getExecution = (
                 const env = ctx[IDENTIFIER_REFERENCE_FRAME]
                 const currentGlobal = env[Fields.globalThis]
                 if (name === SpecialVariable.This) {
-                    return currentGlobal
+                    return admitRuntimeValue(currentGlobal, '$.get.this')
                 }
                 if (name in currentGlobal) {
-                    return (currentGlobal as any)[name]
+                    return admitRuntimeValue((currentGlobal as any)[name], `$.get.${String(name)}`)
                 }
                 throw new ReferenceError(String(name) + is_not_defined)
             }
             if (isSuperReference(ctx)) {
                 const propertyKey = toPropertyKey(name)
-                return Reflect.get(toSuperReferenceBaseObject(ctx[SUPER_REFERENCE_BASE]), propertyKey, ctx[SUPER_REFERENCE_THIS])
+                return admitRuntimeValue(
+                    Reflect.get(toSuperReferenceBaseObject(ctx[SUPER_REFERENCE_BASE]), propertyKey, ctx[SUPER_REFERENCE_THIS]),
+                    `$.get.${String(propertyKey)}`
+                )
             }
             if (ctx == null) {
                 throw new TypeError('Cannot convert undefined or null to object')
             }
-            return Reflect.get(toObjectInCurrentRealm(ctx), toPropertyKey(name), ctx)
+            const propertyKey = toPropertyKey(name)
+            return admitRuntimeValue(
+                Reflect.get(toObjectInCurrentRealm(ctx), propertyKey, ctx),
+                `$.get.${String(propertyKey)}`
+            )
         } else {
             const env: Frame = ctx
             const scope = findScope(env, bindingName)
@@ -1402,9 +1425,9 @@ export const getExecution = (
             } else {
                 const currentGlobal = env[Fields.globalThis]
                 if (name === SpecialVariable.This) {
-                    return currentGlobal
+                    return admitRuntimeValue(currentGlobal, '$.get.this')
                 } else if (name in currentGlobal) {
-                    return (currentGlobal as any)[name]
+                    return admitRuntimeValue((currentGlobal as any)[name], `$.get.${String(name)}`)
                 } else {
                     throw new ReferenceError(String(name) + is_not_defined)
                 }
@@ -1536,7 +1559,8 @@ export const getExecution = (
             getDebugFunction,
             includesLocalScope
                 ? getCurrentFrame()[Fields.variableEnvironment] ?? null
-                : getCurrentFrame()[Fields.globalThis]
+                : getCurrentFrame()[Fields.globalThis],
+            admitValue
         )
 
         return result
@@ -1572,7 +1596,9 @@ export const getExecution = (
             [],
             compileFunction,
             functionRedirects,
-            getDebugFunction
+            getDebugFunction,
+            null,
+            admitValue
         )
 
         Object.defineProperty(fn, 'name', { value: 'anonymous', configurable: true })
@@ -1896,6 +1922,7 @@ export const getExecution = (
     }
 
     const pushCurrentFrameStack = (arg: any): number => {
+        admitRuntimeValue(arg, '$.valueStack')
         return currentFrameStack.push(arg)
     }
 
@@ -1955,6 +1982,7 @@ export const getExecution = (
 
     opcodeContextSlots[OpcodeContextField.stack] = stack
     opcodeContextSlots[OpcodeContextField.functionRedirects] = functionRedirects
+    opcodeContextSlots[OpcodeContextField.admitValue] = admitRuntimeValue
     opcodeContextSlots[OpcodeContextField.read] = read
     opcodeContextSlots[OpcodeContextField.peak] = peak
     opcodeContextSlots[OpcodeContextField.popCurrentFrameStack] = popCurrentFrameStack
@@ -2279,6 +2307,7 @@ export const getExecution = (
         },
         [Fields.step]: step,
         [Fields.pushValue](value: unknown) {
+            admitRuntimeValue(value, '$.valueStack')
             const vs = getCurrentFrame()[Fields.valueStack];
             vs.push(value);
         },
@@ -2299,7 +2328,8 @@ const run_ = (
     evalResultInstead = false,
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
-    variableEnvironmentScope: Scope | null = null
+    variableEnvironmentScope: Scope | null = null,
+    admitValue: RuntimeAdmitValue = () => {}
 ) => {
     const execution = getExecution(
         program,
@@ -2311,7 +2341,8 @@ const run_ = (
         getDebugFunction,
         compileFunction,
         functionRedirects,
-        variableEnvironmentScope
+        variableEnvironmentScope,
+        admitValue
     )
 
     let res
@@ -2340,7 +2371,8 @@ export const run = (
     compileFunction: typeof import('../compiler').compile | undefined = undefined,
     functionRedirects: WeakMap<Function, Function> = new WeakMap(),
     getDebugFunction: () => null | DebugCallback = () => null,
-    variableEnvironmentScope: Scope | null = null
+    variableEnvironmentScope: Scope | null = null,
+    admitValue: RuntimeAdmitValue = () => {}
 ) => {
     return run_(
         program,
@@ -2358,6 +2390,7 @@ export const run = (
         true,
         compileFunction,
         functionRedirects,
-        variableEnvironmentScope
+        variableEnvironmentScope,
+        admitValue
     )
 }

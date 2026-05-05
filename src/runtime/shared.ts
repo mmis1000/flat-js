@@ -529,6 +529,8 @@ type DefaultClassConstructorInfo = {
     superClass?: unknown
 }
 
+type RuntimeAdmitValue = (value: unknown, path: string) => void
+
 export type ScopeDebugEntry = [string, unknown, boolean]
 
 type Execution = {
@@ -712,6 +714,7 @@ export type {
     InvokeParamConstruct,
     PendingAction,
     RefinedEnvSet,
+    RuntimeAdmitValue,
     ScopeWithInternals,
     StaticVariableStore,
     TryFrame,

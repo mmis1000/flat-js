@@ -4,6 +4,7 @@ import { compile } from '../compiler'
 import { Fields, getExecution, materializeScopeStaticBindings, run } from '../runtime'
 import {
     UnsupportedSerializationError,
+    createCheckpointableAdmission,
     createHostRegistry,
     createSerializableHostObjectRedirects,
     parseExecutionSnapshot,
@@ -246,6 +247,130 @@ log(descriptors.parsed.value === parsed)
     continueToDone(restored)
 
     expect(harness.logs).toEqual(['2', 'Ada', 'true', 'true'])
+})
+
+test('checkpointable admission rejects unsupported initial scope state', () => {
+    const [program] = compile(`debugger`, { range: true })
+    const scope = { bad: {}, __proto__: null } as Record<string, unknown>
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+    ])
+
+    expect(() => getExecution(
+        program,
+        0,
+        globalThis,
+        [scope],
+        undefined,
+        [],
+        () => null,
+        compile,
+        new WeakMap(),
+        null,
+        createCheckpointableAdmission({ hostRegistry })
+    )).toThrow(UnsupportedSerializationError)
+})
+
+test('checkpointable admission rejects unsupported host function returns before snapshot', () => {
+    const [program] = compile(`
+const value = getHostObject()
+debugger
+`, { range: true })
+    const getHostObject = () => ({ ok: true })
+    const scope = { getHostObject, __proto__: null } as Record<string, unknown>
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['getHostObject', getHostObject],
+    ])
+    let paused = false
+    const execution = getExecution(
+        program,
+        0,
+        globalThis,
+        [scope],
+        undefined,
+        [],
+        () => () => {
+            paused = true
+        },
+        compile,
+        new WeakMap(),
+        null,
+        createCheckpointableAdmission({ hostRegistry })
+    )
+
+    expect(() => runUntilPause(execution, () => paused)).toThrow(UnsupportedSerializationError)
+})
+
+test('checkpointable admission allows registered host function returns', () => {
+    const [program] = compile(`
+const value = getRegistered()
+debugger
+log(value.ok)
+`, { range: true })
+    const logs: string[] = []
+    const registered = { ok: true }
+    const getRegistered = () => registered
+    const log = (value: unknown) => logs.push(String(value))
+    const scope = { getRegistered, log, __proto__: null } as Record<string, unknown>
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['getRegistered', getRegistered],
+        ['registered', registered],
+        ['log', log],
+    ])
+    let paused = false
+    const execution = getExecution(
+        program,
+        0,
+        globalThis,
+        [scope],
+        undefined,
+        [],
+        () => () => {
+            paused = true
+        },
+        compile,
+        new WeakMap(),
+        null,
+        createCheckpointableAdmission({ hostRegistry })
+    )
+
+    runUntilPause(execution, () => paused)
+    continueToDone(execution)
+
+    expect(logs).toEqual(['true'])
+})
+
+test('checkpointable admission rejects unsupported host property reads before snapshot', () => {
+    const [program] = compile(`
+const value = host.child
+debugger
+`, { range: true })
+    const host = { child: { ok: true } }
+    const scope = { host, __proto__: null } as Record<string, unknown>
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['host', host],
+    ])
+    let paused = false
+    const execution = getExecution(
+        program,
+        0,
+        globalThis,
+        [scope],
+        undefined,
+        [],
+        () => () => {
+            paused = true
+        },
+        compile,
+        new WeakMap(),
+        null,
+        createCheckpointableAdmission({ hostRegistry })
+    )
+
+    expect(() => runUntilPause(execution, () => paused)).toThrow(UnsupportedSerializationError)
 })
 
 test('snapshot and restore preserve loop progress', () => {

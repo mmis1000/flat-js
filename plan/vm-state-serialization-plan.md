@@ -1,8 +1,8 @@
 # VM State Serialization Plan
 
-Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, and support `Map`, `Set`, `WeakMap`, `WeakSet`, and synchronous VM generator records. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
+Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, support `Map`, `Set`, `WeakMap`, `WeakSet`, and synchronous VM generator records, and can opt into strict checkpointable admission checks. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
 
-Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The remaining work is strict checkpointable ingress and a future async/promise scheduler design, without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
+Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The remaining work is a future async/promise scheduler design, without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
 
 Goal: support pausing a Flat JS execution, serializing its observable state to a string-friendly snapshot, restoring it in another runtime instance, and continuing execution from the same VM point.
 
@@ -29,17 +29,17 @@ Recommended next sequence:
 6. Phase 4A: add `Map` and `Set` records. Implemented 2026-05-05.
 7. Phase 4B: add `WeakMap` and `WeakSet` reachable-key probing. Implemented 2026-05-05.
 8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases. Implemented for classes, bound functions, and synchronous VM generators 2026-05-05.
-9. Phase 6: add strict checkpointable ingress checks.
+9. Phase 6: add strict checkpointable ingress checks. Implemented as opt-in admission callbacks 2026-05-05.
 10. Phase 7: revisit async/promise state only after a deterministic scheduler/host-promise boundary design exists.
 
 ## 0. Follow-Up Path From Current V1
 
 Current support:
 
-- Optional public API: `snapshotExecution`, `restoreExecution`, `serializeExecutionSnapshot`, `parseExecutionSnapshot`, `createHostRegistry`, `createSerializableHostObjectRedirects`, and `UnsupportedSerializationError`.
+- Optional public API: `snapshotExecution`, `restoreExecution`, `serializeExecutionSnapshot`, `parseExecutionSnapshot`, `createHostRegistry`, `createSerializableHostObjectRedirects`, `createCheckpointableAdmission`, and `UnsupportedSerializationError`.
 - Snapshot roots: execution pointer, eval result, frame stack, frame scopes, value stacks, globals reachable through frames, program buffers, static scope internals, TDZ sentinel, VM function descriptors, and active/suspended synchronous generator state.
 - Graph support: primitive tags, ordinary object/array/function/frame records, descriptors, prototypes, well-known/internal symbol keys, cycles, shared references, and embedded program source.
-- Host support: stable host refs by registry id; registered host descriptor additions/changes/deletions are serialized as overlays, while host prototype/extensibility overlays remain rejected. Selected safe host factory returns can be admitted by optional `functionRedirects` from `createSerializableHostObjectRedirects`.
+- Host support: stable host refs by registry id; registered host descriptor additions/changes/deletions are serialized as overlays, while host prototype/extensibility overlays remain rejected. Selected safe host factory returns can be admitted by optional `functionRedirects` from `createSerializableHostObjectRedirects`; strict checkpointable execution can reject unsupported initial scopes, host returns, and host property/object-spread ingress before snapshot time.
 - Iterator/collection support: `for...in` uses VM-managed key/index records, VM-authored iterator records are VM-owned, unpatched array iterators use VM-owned index records, and `Map`/`Set`/`WeakMap`/`WeakSet` have brand-specific snapshot records.
 - Function-family support: classes, default constructors, method/accessor `homeObject`, bound VM functions, synchronous generator functions, generator method references, suspended generator stacks, active generator frames, and VM generator `yield*` delegate state round-trip.
 - Playground support: Monaco/debugger/scope inspection/REPL, `log`, modal `input`, save/load text snapshots, save/load snapshot URLs, and home-page example link.
@@ -56,6 +56,7 @@ Follow-up stages:
    - Expand `createSerializableHostObjectRedirects` only for host functions whose object returns are ordinary data containers or descriptor containers.
    - Keep rejecting unknown host/native objects by default.
    - Registered host descriptor overlays are implemented for added, changed, and deleted own descriptors.
+   - Strict checkpointable admission is implemented as an optional runtime callback, with a serialization helper that applies the same supported-state rules at initial scopes, property reads, value-stack ingress, host call/construct returns, iterator values, and object spread/rest ingress.
    - Keep rejecting registered host prototype and extensibility overlays.
 
 3. **Iterator and loop coverage**
@@ -408,11 +409,14 @@ type CheckpointableOptions = {
   hostRegistry?: HostCapabilityRegistry
 }
 
+type CheckpointableAdmission = (value: unknown, path?: string) => void
+
 snapshotExecution(execution, options?: SnapshotOptions): string
 restoreExecution(snapshot: string, options: RestoreOptions): Execution
+createCheckpointableAdmission(options?: SnapshotOptions): CheckpointableAdmission
 ```
 
-The actual implementation may keep snapshots as objects internally and expose stringification separately.
+The actual implementation keeps snapshots as objects internally, exposes stringification separately, and wires strict checkpointable mode through an optional runtime `admitValue` callback.
 
 ## 12. Implementation Phases
 
@@ -466,10 +470,12 @@ Status: ordinary VM function descriptors, classes, default class constructors, m
 
 ### Phase 6: Strict Checkpointable Mode
 
-Status: not implemented.
+Status: implemented as opt-in admission callbacks.
 
-- Add `admitValue` checks at host/native ingress points.
-- Throw early when unsupported state would enter reachable VM state.
+- `getExecution` / `run` can receive an optional `admitValue` callback without importing serializer APIs into the default runtime.
+- `createCheckpointableAdmission({ hostRegistry })` builds an admission callback from the snapshot writer's supported-state rules.
+- Admission checks cover initial scopes, function arguments, property reads, value-stack ingress, host call/construct returns that flow through the VM stack, iterator values, object spread/rest ingress, and `with` object ingress.
+- Unsupported state throws `UnsupportedSerializationError` before snapshot time when strict admission is enabled.
 - Keep normal mode permissive.
 
 ## 13. Runtime Performance Guidance

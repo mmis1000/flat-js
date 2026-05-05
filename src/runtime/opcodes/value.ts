@@ -103,7 +103,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                 if (iteratorComplete(result)) {
                     break
                 }
-                arr.push(result.value)
+                arr.push(ctx[OpcodeContextField.admitValue](result.value, '$.iterator.value'))
             }
             ctx[OpcodeContextField.pushCurrentFrameStack](arr)
         }
@@ -177,7 +177,7 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                     continue
                 }
 
-                rest[key] = from[key]
+                rest[key] = ctx[OpcodeContextField.admitValue](Reflect.get(from, key), `$.objectRest.${String(key)}`)
             }
 
             ctx[OpcodeContextField.pushCurrentFrameStack](rest)
@@ -196,11 +196,11 @@ export const handleValueOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): O
                     }
 
                     Reflect.defineProperty(target, key, {
-                        configurable: true,
-                        enumerable: true,
-                        writable: true,
-                        value: Reflect.get(from, key),
-                    })
+                    configurable: true,
+                    enumerable: true,
+                    writable: true,
+                    value: ctx[OpcodeContextField.admitValue](Reflect.get(from, key), `$.objectSpread.${String(key)}`),
+                })
                 }
             }
 

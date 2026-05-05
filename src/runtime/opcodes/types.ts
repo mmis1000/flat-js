@@ -29,6 +29,7 @@ export const enum OpcodeContextField {
     returnValue,
     stack,
     functionRedirects,
+    admitValue,
     read,
     peak,
     popCurrentFrameStack,
@@ -86,6 +87,7 @@ export interface RuntimeOpcodeContext {
     [OpcodeContextField.returnValue]: unknown
     readonly [OpcodeContextField.stack]: Stack
     readonly [OpcodeContextField.functionRedirects]: WeakMap<Function, Function>
+    [OpcodeContextField.admitValue]<T>(value: T, path: string): T
 
     [OpcodeContextField.read](): number
     [OpcodeContextField.peak]<T>(arr: T[], offset?: number): T
