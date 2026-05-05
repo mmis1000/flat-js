@@ -1,5 +1,6 @@
 export {
     createHostRegistry,
+    createSerializableHostObjectRedirects,
     parseExecutionSnapshot,
     restoreExecution,
     serializeExecutionSnapshot,

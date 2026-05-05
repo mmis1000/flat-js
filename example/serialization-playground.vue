@@ -93,6 +93,7 @@ import {
 } from '../src/runtime'
 import {
     createHostRegistry,
+    createSerializableHostObjectRedirects,
     parseExecutionSnapshot,
     restoreExecution,
     serializeExecutionSnapshot,
@@ -249,6 +250,7 @@ const hostRegistry = createHostRegistry([
     ['log', hostLog],
     ['input', hostInput],
 ])
+const functionRedirects = createSerializableHostObjectRedirects({ globalThis: vmGlobal })
 
 function withNonReactive<TData>(data: TData) {
     return <TNonReactive>() => data as TData & TNonReactive
@@ -630,7 +632,8 @@ export default defineComponent({
                     undefined,
                     [],
                     () => this.getDebugPauseCallback(),
-                    compile
+                    compile,
+                    functionRedirects
                 ))
                 this.continueExecution()
             } catch (error) {
@@ -673,6 +676,7 @@ export default defineComponent({
             const execution = restoreExecution(snapshot, {
                 hostRegistry,
                 compileFunction: compile,
+                functionRedirects,
                 getDebugFunction: () => this.getDebugPauseCallback(),
             })
             this.snapshotText = snapshotText
@@ -745,7 +749,7 @@ export default defineComponent({
                         undefined,
                         [],
                         compile,
-                        new WeakMap(),
+                        functionRedirects,
                         () => this.getDebugPauseCallback(),
                         variableEnvironmentScope
                     )

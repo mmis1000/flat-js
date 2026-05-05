@@ -5,6 +5,7 @@ import { Fields, getExecution } from '../runtime'
 import {
     UnsupportedSerializationError,
     createHostRegistry,
+    createSerializableHostObjectRedirects,
     parseExecutionSnapshot,
     restoreExecution,
     serializeExecutionSnapshot,
@@ -16,6 +17,7 @@ type Harness = {
     source: string
     logs: string[]
     hostRegistry: ReturnType<typeof createHostRegistry>
+    functionRedirects: WeakMap<Function, Function>
     continueToDone(): unknown
 }
 
@@ -50,7 +52,11 @@ const continueToDone = (execution: ReturnType<typeof getExecution>) => {
     return (result as any)[Fields.evalResult]
 }
 
-const createPausedHarness = (source: string, inputValue = ''): Harness => {
+const createPausedHarness = (
+    source: string,
+    inputValue = '',
+    functionRedirects = new WeakMap<Function, Function>()
+): Harness => {
     const [program] = compile(source, { range: true })
     const logs: string[] = []
     let nextInput = inputValue
@@ -72,7 +78,8 @@ const createPausedHarness = (source: string, inputValue = ''): Harness => {
         () => () => {
             paused = true
         },
-        compile
+        compile,
+        functionRedirects
     )
     const hostRegistry = createHostRegistry([
         ['globalThis', globalThis],
@@ -87,6 +94,7 @@ const createPausedHarness = (source: string, inputValue = ''): Harness => {
         source,
         logs,
         hostRegistry,
+        functionRedirects,
         continueToDone: () => continueToDone(execution),
     }
 }
@@ -98,6 +106,7 @@ const snapshotAndRestore = (harness: Harness) => {
     return restoreExecution(parseExecutionSnapshot(snapshotText), {
         hostRegistry: harness.hostRegistry,
         compileFunction: compile,
+        functionRedirects: harness.functionRedirects,
     })
 }
 
@@ -179,6 +188,39 @@ log(name + ':ok')
     continueToDone(restored)
 
     expect(harness.logs).toEqual(['Ada:ok'])
+})
+
+test('snapshot rejects untracked host-created ordinary objects', () => {
+    const harness = createPausedHarness(`
+const value = JSON.parse('{"nested":{"ok":true}}')
+debugger
+log(value.nested.ok)
+`)
+
+    expect(() => snapshotExecution(harness.execution, {
+        hostRegistry: harness.hostRegistry,
+    })).toThrow(UnsupportedSerializationError)
+})
+
+test('serializable host object redirects adopt safe builtin-created ordinary objects', () => {
+    const functionRedirects = createSerializableHostObjectRedirects()
+    const harness = createPausedHarness(`
+const parsed = JSON.parse('{"nested":{"count":2}}')
+const fromEntries = Object.fromEntries([['name', 'Ada']])
+const noProto = Object.create(null)
+noProto.value = 4
+const descriptors = Object.getOwnPropertyDescriptors({ parsed })
+debugger
+log(parsed.nested.count)
+log(fromEntries.name)
+log(Object.getPrototypeOf(noProto) === null)
+log(descriptors.parsed.value === parsed)
+`, '', functionRedirects)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['2', 'Ada', 'true', 'true'])
 })
 
 test.each([

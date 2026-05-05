@@ -100,6 +100,11 @@ type SnapshotOptions = {
     hostRegistry?: HostCapabilityRegistry
 }
 
+type SerializableHostObjectRedirectOptions = {
+    globalThis?: any
+    functionRedirects?: WeakMap<Function, Function>
+}
+
 type RestoreOptions = {
     hostRegistry?: HostCapabilityRegistry
     compileFunction?: typeof import('../compiler').compile
@@ -291,6 +296,84 @@ const unsupportedBrand = (value: object) => {
     return undefined
 }
 
+const serializableHostObjects = new WeakSet<object>()
+
+const isObjectLike = (value: unknown): value is object =>
+    (typeof value === 'object' && value !== null) || typeof value === 'function'
+
+const trackSerializableHostObject = <T>(value: T): T => {
+    if (isObjectLike(value) && typeof value !== 'function' && unsupportedBrand(value) === undefined) {
+        serializableHostObjects.add(value)
+    }
+    return value
+}
+
+const trackSerializableJsonGraph = <T>(value: T, seen = new WeakSet<object>()): T => {
+    if (!isObjectLike(value) || typeof value === 'function' || seen.has(value)) {
+        return value
+    }
+    seen.add(value)
+    trackSerializableHostObject(value)
+
+    for (const key of Reflect.ownKeys(value)) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(value, key)
+        if (descriptor && 'value' in descriptor) {
+            trackSerializableJsonGraph(descriptor.value, seen)
+        }
+    }
+    return value
+}
+
+const trackSerializableDescriptorObject = <T>(value: T): T => {
+    trackSerializableHostObject(value)
+    return value
+}
+
+const trackSerializableDescriptorsObject = <T>(value: T): T => {
+    trackSerializableHostObject(value)
+    if (!isObjectLike(value)) {
+        return value
+    }
+    for (const key of Reflect.ownKeys(value)) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(value, key)
+        if (descriptor && 'value' in descriptor) {
+            trackSerializableHostObject(descriptor.value)
+        }
+    }
+    return value
+}
+
+const redirectHostFactory = (
+    redirects: WeakMap<Function, Function>,
+    fn: unknown,
+    track: (value: unknown) => unknown
+) => {
+    if (typeof fn !== 'function') {
+        return
+    }
+    const target = redirects.get(fn) ?? fn
+    redirects.set(fn, function (this: unknown, ...args: unknown[]) {
+        return track(Reflect.apply(target, this, args))
+    })
+}
+
+export const createSerializableHostObjectRedirects = (
+    options: SerializableHostObjectRedirectOptions = {}
+): WeakMap<Function, Function> => {
+    const redirects = options.functionRedirects ?? new WeakMap<Function, Function>()
+    const globalObject = options.globalThis ?? globalThis
+    const objectCtor = globalObject?.Object ?? Object
+    const jsonObject = globalObject?.JSON ?? JSON
+
+    redirectHostFactory(redirects, jsonObject?.parse, trackSerializableJsonGraph)
+    redirectHostFactory(redirects, objectCtor?.create, trackSerializableHostObject)
+    redirectHostFactory(redirects, objectCtor?.fromEntries, trackSerializableHostObject)
+    redirectHostFactory(redirects, objectCtor?.getOwnPropertyDescriptor, trackSerializableDescriptorObject)
+    redirectHostFactory(redirects, objectCtor?.getOwnPropertyDescriptors, trackSerializableDescriptorsObject)
+
+    return redirects
+}
+
 class SnapshotWriter {
     private readonly ids = new Map<object, number>()
     private readonly records: SnapshotRecord[] = []
@@ -410,7 +493,12 @@ class SnapshotWriter {
             if (brandError) {
                 return this.unsupported(brandError, path)
             }
-            if (!Array.isArray(value) && !environments.has(value) && !vmOwnedObjects.has(value)) {
+            if (
+                !Array.isArray(value)
+                && !environments.has(value)
+                && !vmOwnedObjects.has(value)
+                && !serializableHostObjects.has(value)
+            ) {
                 return this.unsupported('Unregistered host/native object', path)
             }
             return this.object(value, environments.has(value) ? 'frame' : Array.isArray(value) ? 'array' : 'object', path)
