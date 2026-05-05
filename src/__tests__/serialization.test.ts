@@ -542,10 +542,106 @@ log(box instanceof Box)
     expect(harness.logs).toEqual(['13', '5', 'true'])
 })
 
+test('snapshot and restore preserve suspended generator state and method references', () => {
+    const harness = createPausedHarness(`
+function* counter() {
+    const first = yield 'a'
+    yield first + ':b'
+    return 'done'
+}
+const gen = counter()
+const next = gen.next
+log(next.call(gen).value)
+gen.next = function () { return { value: 'patched', done: false } }
+debugger
+log(next.call(gen, 'x').value)
+log(gen.next().value)
+const done = next.call(gen)
+log(done.value + ':' + done.done)
+log(next.call(gen).done)
+`)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['a', 'x:b', 'patched', 'done:true', 'true'])
+})
+
+test('snapshot and restore preserve generator return through finally', () => {
+    const harness = createPausedHarness(`
+function* worker() {
+    try {
+        yield 'open'
+        yield 'after'
+    } finally {
+        log('finally')
+    }
+}
+const gen = worker()
+log(gen.next().value)
+debugger
+const result = gen.return('closed')
+log(result.value + ':' + result.done)
+log(gen.next().done)
+`)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['open', 'finally', 'closed:true', 'true'])
+})
+
+test('snapshot and restore preserve active generator frames paused inside the generator', () => {
+    const harness = createPausedHarness(`
+function* worker() {
+    const first = yield 'open'
+    debugger
+    yield first + ':after'
+    return 'done'
+}
+const gen = worker()
+log(gen.next().value)
+log(gen.next('resume').value)
+const done = gen.next()
+log(done.value + ':' + done.done)
+`)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['open', 'resume:after', 'done:true'])
+})
+
+test('snapshot and restore preserve VM generator yield-star delegate state', () => {
+    const harness = createPausedHarness(`
+function* inner() {
+    yield 'inner1'
+    yield 'inner2'
+    return 'innerDone'
+}
+function* outer() {
+    yield 'outer'
+    const result = yield* inner()
+    yield result + ':after'
+}
+const gen = outer()
+log(gen.next().value)
+log(gen.next().value)
+debugger
+log(gen.next().value)
+log(gen.next().value)
+`)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['outer', 'inner1', 'inner2', 'innerDone:after'])
+})
+
 test.each([
     ['Date', `const value = new Date(); debugger`],
     ['Proxy', `const value = new Proxy({}, {}); debugger`],
-    ['generator', `function* g() { yield 1 } const value = g(); debugger`],
+    ['async generator', `async function* g() { yield 1 } const value = g(); debugger`],
     ['native iterator object', `const value = [1, 2][Symbol.iterator](); debugger`],
     ['unregistered host function', `const value = Math.max; debugger`],
     ['accessor closing over unsupported host state', `

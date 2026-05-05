@@ -14,6 +14,9 @@ import {
     FunctionDescriptor,
     formatFunctionName,
     GeneratorResumeKind,
+    generatorMethodKinds,
+    generatorObjectStates,
+    generatorSelfMethods,
     generatorStates,
     GeneratorState,
     getEmptyObject,
@@ -169,6 +172,11 @@ const getGeneratorFunctionIntrinsics = (
     }
     return asyncGenerator ? cached.asyncGenerator : cached.generator
 }
+
+export const getGeneratorFunctionIntrinsicsForSerialization = (
+    globalThis: any,
+    asyncGenerator = false
+) => getGeneratorFunctionIntrinsics(globalThis, asyncGenerator)
 
 const getGeneratorInstancePrototype = (
     globalThis: any,
@@ -873,6 +881,11 @@ export const getExecution = (
 
         state[Fields.gen] = gen
 
+        generatorObjectStates.set(gen, state)
+        generatorSelfMethods.set(gen[Symbol.iterator], state)
+        generatorMethodKinds.set(gen.next, GeneratorResumeKind.Next)
+        generatorMethodKinds.set(gen.throw, GeneratorResumeKind.Throw)
+        generatorMethodKinds.set(gen.return, GeneratorResumeKind.Return)
         generatorStates.set(gen.next, state)
         generatorStates.set(gen.throw, state)
         generatorStates.set(gen.return, state)
@@ -1127,6 +1140,8 @@ export const getExecution = (
         Object.setPrototypeOf(gen, getGeneratorInstancePrototype(gt, invokeData[Fields.function], true))
 
         state[Fields.gen] = gen
+
+        generatorObjectStates.set(gen, state)
 
         return gen
     }

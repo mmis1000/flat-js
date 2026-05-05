@@ -1,8 +1,8 @@
 # VM State Serialization Plan
 
-Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, and support `Map`, `Set`, `WeakMap`, and `WeakSet` records. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
+Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, and support `Map`, `Set`, `WeakMap`, `WeakSet`, and synchronous VM generator records. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
 
-Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The remaining work is to expand the supported state set without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
+Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The remaining work is strict checkpointable ingress and a future async/promise scheduler design, without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
 
 Goal: support pausing a Flat JS execution, serializing its observable state to a string-friendly snapshot, restoring it in another runtime instance, and continuing execution from the same VM point.
 
@@ -28,7 +28,7 @@ Recommended next sequence:
 5. Phase 3B: redirect selected built-in iterator factories to VM-owned iterator records. Implemented for VM-authored iterators and unpatched array iterators 2026-05-05.
 6. Phase 4A: add `Map` and `Set` records. Implemented 2026-05-05.
 7. Phase 4B: add `WeakMap` and `WeakSet` reachable-key probing. Implemented 2026-05-05.
-8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases. Class/homeObject and bound-function support implemented 2026-05-05; generators remain.
+8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases. Implemented for classes, bound functions, and synchronous VM generators 2026-05-05.
 9. Phase 6: add strict checkpointable ingress checks.
 10. Phase 7: revisit async/promise state only after a deterministic scheduler/host-promise boundary design exists.
 
@@ -37,10 +37,11 @@ Recommended next sequence:
 Current support:
 
 - Optional public API: `snapshotExecution`, `restoreExecution`, `serializeExecutionSnapshot`, `parseExecutionSnapshot`, `createHostRegistry`, `createSerializableHostObjectRedirects`, and `UnsupportedSerializationError`.
-- Snapshot roots: execution pointer, eval result, frame stack, frame scopes, value stacks, globals reachable through frames, program buffers, static scope internals, TDZ sentinel, and ordinary VM function descriptors.
+- Snapshot roots: execution pointer, eval result, frame stack, frame scopes, value stacks, globals reachable through frames, program buffers, static scope internals, TDZ sentinel, VM function descriptors, and active/suspended synchronous generator state.
 - Graph support: primitive tags, ordinary object/array/function/frame records, descriptors, prototypes, well-known/internal symbol keys, cycles, shared references, and embedded program source.
 - Host support: stable host refs by registry id; registered host descriptor additions/changes/deletions are serialized as overlays, while host prototype/extensibility overlays remain rejected. Selected safe host factory returns can be admitted by optional `functionRedirects` from `createSerializableHostObjectRedirects`.
 - Iterator/collection support: `for...in` uses VM-managed key/index records, VM-authored iterator records are VM-owned, unpatched array iterators use VM-owned index records, and `Map`/`Set`/`WeakMap`/`WeakSet` have brand-specific snapshot records.
+- Function-family support: classes, default constructors, method/accessor `homeObject`, bound VM functions, synchronous generator functions, generator method references, suspended generator stacks, active generator frames, and VM generator `yield*` delegate state round-trip.
 - Playground support: Monaco/debugger/scope inspection/REPL, `log`, modal `input`, save/load text snapshots, save/load snapshot URLs, and home-page example link.
 - Guardrails: serializer remains outside `src/index.ts`, `src/runtime.ts`, `src/runtime-inline.ts`, CLI self-contained loader output, and generated inline runtime.
 
@@ -68,9 +69,9 @@ Follow-up stages:
    - Keep `Date`, `RegExp`, `ArrayBuffer`, and typed arrays as separate opt-in additions with brand-specific records.
 
 5. **Function-family expansion**
-   - Decide whether ordinary classes without unsupported private/static metadata can be restored as VM function descriptors.
-   - Add bound VM function metadata restore after host-overlay rules are clear.
-   - Add generator state only after iterator support is settled; generators currently remain unsupported.
+   - Implemented class restore for explicit/default constructors, derived default constructors, methods, accessors, and `super` home-object metadata.
+   - Implemented bound VM function metadata restore after host-overlay rules were clear.
+   - Implemented synchronous generator state records, generator method side-table records, active generator frame links, and VM `yield*` delegate state.
 
 6. **Async/promise state**
    - Keep pending native `Promise` and async execution state unsupported for now.
@@ -291,7 +292,7 @@ Current supported built-ins are intentionally conservative:
 
 - primitives, including `undefined`, `NaN`, `Infinity`, `-0`, and `BigInt`
 - plain objects and arrays
-- ordinary VM functions without class/home-object metadata
+- VM functions, including classes, bound wrappers, and synchronous generator descriptors/state
 - selected host-created ordinary objects only when admitted by optional serialization redirects
 - `Map` and `Set` through brand-specific records
 - `WeakMap` and `WeakSet` through reachable-key probing
@@ -302,11 +303,11 @@ Future built-in additions should use brand-specific records:
 - `Date`
 - `RegExp`
 - `ArrayBuffer` and typed arrays
-- generators
 
 Current rejected built-ins:
 
 - `Promise` with pending native async state
+- async generators and other async/promise-backed execution state
 - unknown native iterators other than unpatched array iterators
 - `Proxy`
 - DOM nodes
@@ -456,11 +457,11 @@ Status: implemented for `Map`, `Set`, `WeakMap`, and `WeakSet`.
 
 ### Phase 5: Functions, Classes, And Generators
 
-Status: ordinary VM function descriptors, classes, default class constructors, method/accessor `homeObject` metadata, and bound VM function metadata are implemented; generators remain.
+Status: ordinary VM function descriptors, classes, default class constructors, method/accessor `homeObject` metadata, bound VM function metadata, and synchronous VM generator state are implemented.
 
 - Class support includes explicit constructors, default constructors, derived default constructors, methods, accessors, and `super` via restored `homeObject` metadata.
 - Bound function support includes apply and construct metadata using the runtime `bindInfo` side table.
-- Restore generator state only after choosing the snapshot shape for active generator stacks and generator method side-table records.
+- Generator support includes generator function descriptors, suspended stacks, active generator frame links, generator method references, patched generator object methods, `return`/`throw` pending-action metadata, and VM `yield*` delegate records.
 - Keep active async/promise state rejected unless explicitly supported.
 
 ### Phase 6: Strict Checkpointable Mode

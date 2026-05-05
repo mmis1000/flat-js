@@ -8,10 +8,20 @@ import {
     Execution,
     Fields,
     Frame,
+    FrameType,
     FunctionDescriptor,
     functionDescriptors,
+    GeneratorResumeKind,
+    GeneratorState,
+    generatorMethodKinds,
+    generatorObjectStates,
+    generatorSelfMethods,
     generatorStates,
     InvokeParam,
+    isGeneratorType,
+    isIteratorYieldDone,
+    isResultDone,
+    isResultYield,
     markVmOwned,
     Scope,
     Stack,
@@ -28,7 +38,7 @@ import {
     SUPER_REFERENCE_THIS,
     vmOwnedObjects,
 } from "./shared"
-import { getExecution } from "./execution"
+import { getExecution, getGeneratorFunctionIntrinsicsForSerialization } from "./execution"
 import type { DebugCallback } from "./opcodes/types"
 
 type PrimitiveSnapshotValue =
@@ -85,6 +95,27 @@ type SnapshotBoundFunction = {
     arguments: SnapshotValue[]
 }
 
+type SnapshotGeneratorPendingAction = {
+    type: GeneratorResumeKind.Throw | GeneratorResumeKind.Return
+    value: SnapshotValue
+}
+
+type SnapshotGeneratorState = {
+    stack: SnapshotValue
+    ptr: number
+    completed: boolean
+    started: boolean
+    pendingAction: SnapshotGeneratorPendingAction | null
+    baseFrame: SnapshotValue
+}
+
+type SnapshotGeneratorMethodName = 'next' | 'throw' | 'return' | 'iterator'
+
+type SnapshotGeneratorMethod = {
+    generator: SnapshotValue
+    method: SnapshotGeneratorMethodName
+}
+
 type SnapshotRecord = {
     id: number
     kind: 'object' | 'array' | 'function' | 'frame' | 'map' | 'set' | 'weakMap' | 'weakSet'
@@ -95,6 +126,9 @@ type SnapshotRecord = {
     functionDescriptor?: SnapshotFunctionDescriptor
     defaultClassConstructor?: SnapshotDefaultClassConstructor
     boundFunction?: SnapshotBoundFunction
+    generatorState?: SnapshotGeneratorState
+    generatorMethod?: SnapshotGeneratorMethod
+    frameGenerator?: SnapshotValue
     entries?: Array<[SnapshotValue, SnapshotValue]>
     values?: SnapshotValue[]
 }
@@ -313,6 +347,10 @@ type BuiltinRefId =
     | 'Promise.prototype'
     | 'Array.prototype[Symbol.iterator]'
     | 'String.prototype[Symbol.iterator]'
+    | 'GeneratorFunction'
+    | 'GeneratorFunction.prototype'
+    | 'Generator.prototype'
+    | 'GeneratorIterator.prototype'
 
 const internalSymbolToName = new Map<symbol, InternalSymbolName>([
     [SCOPE_FLAGS, 'SCOPE_FLAGS'],
@@ -344,6 +382,10 @@ const nameToWellKnownSymbol = new Map<WellKnownSymbolName, symbol>(
 )
 
 const builtinEntries = (): Array<[BuiltinRefId, unknown]> => [
+    ['GeneratorFunction', getGeneratorFunctionIntrinsicsForSerialization(globalThis, false).constructor],
+    ['GeneratorFunction.prototype', getGeneratorFunctionIntrinsicsForSerialization(globalThis, false).functionPrototype],
+    ['Generator.prototype', getGeneratorFunctionIntrinsicsForSerialization(globalThis, false).prototype],
+    ['GeneratorIterator.prototype', Object.getPrototypeOf(getGeneratorFunctionIntrinsicsForSerialization(globalThis, false).prototype)],
     ['Object.prototype', Object.prototype],
     ['Array.prototype', Array.prototype],
     ['Function.prototype', Function.prototype],
@@ -433,6 +475,9 @@ const isSupportedFunctionType = (type: FunctionTypes) => {
         case FunctionTypes.SetAccessor:
         case FunctionTypes.Constructor:
         case FunctionTypes.DerivedConstructor:
+        case FunctionTypes.GeneratorDeclaration:
+        case FunctionTypes.GeneratorExpression:
+        case FunctionTypes.GeneratorMethod:
             return true
         default:
             return false
@@ -455,6 +500,22 @@ const usesConstructibleRestoredWrapper = (record: SnapshotRecord) =>
 
 const usesArrowRestoredWrapper = (record: SnapshotRecord) =>
     record.functionDescriptor?.type === FunctionTypes.ArrowFunction
+
+const isAsyncGeneratorObject = (value: unknown) =>
+    value != null
+    && (typeof value === 'object' || typeof value === 'function')
+    && Object.prototype.hasOwnProperty.call(value, Symbol.asyncIterator)
+
+const resumeKindToGeneratorMethodName = (kind: GeneratorResumeKind): SnapshotGeneratorMethodName => {
+    switch (kind) {
+        case GeneratorResumeKind.Next:
+            return 'next'
+        case GeneratorResumeKind.Throw:
+            return 'throw'
+        case GeneratorResumeKind.Return:
+            return 'return'
+    }
+}
 
 const unsupportedBrand = (value: object) => {
     if (value instanceof Date) return 'Date is unsupported'
@@ -574,6 +635,58 @@ class SnapshotWriter {
 
     private unsupported(reason: string, path: string): never {
         throw new UnsupportedSerializationError(reason, path)
+    }
+
+    private assertSyncGeneratorState(state: GeneratorState, path: string) {
+        if (isAsyncGeneratorObject(state[Fields.gen]) || state[Fields.asyncYieldResumeAwaitReturn]) {
+            return this.unsupported('Async generators are unsupported', path)
+        }
+    }
+
+    private generatorStateObject(value: unknown): GeneratorState | undefined {
+        if (!isObjectLike(value)) {
+            return undefined
+        }
+        const state = generatorObjectStates.get((value as any)[Fields.gen])
+        return state === value ? state : undefined
+    }
+
+    private generatorObjectState(value: object): GeneratorState | undefined {
+        return generatorObjectStates.get(value as any)
+    }
+
+    private generatorMethod(value: Function): { state: GeneratorState, method: SnapshotGeneratorMethodName } | undefined {
+        const state = generatorStates.get(value)
+        if (state) {
+            const kind = generatorMethodKinds.get(value)
+            if (kind === undefined) {
+                return undefined
+            }
+            return { state, method: resumeKindToGeneratorMethodName(kind) }
+        }
+        const selfState = generatorSelfMethods.get(value)
+        if (!selfState) {
+            return undefined
+        }
+        return { state: selfState, method: 'iterator' }
+    }
+
+    private snapshotGeneratorState(state: GeneratorState, path: string): SnapshotGeneratorState {
+        this.assertSyncGeneratorState(state, path)
+        const pendingAction = state[Fields.pendingAction]
+        return {
+            stack: this.value(state[Fields.stack], `${path}.stack`),
+            ptr: state[Fields.ptr],
+            completed: state[Fields.completed],
+            started: state[Fields.started],
+            pendingAction: pendingAction === null
+                ? null
+                : {
+                    type: pendingAction[Fields.type],
+                    value: this.value(pendingAction[Fields.value], `${path}.pendingAction.value`),
+                },
+            baseFrame: this.value(state[Fields.baseFrame], `${path}.baseFrame`),
+        }
     }
 
     private key(key: PropertyKey, path: string): SnapshotKey {
@@ -724,14 +837,15 @@ class SnapshotWriter {
         }
 
         if (typeof value === 'function') {
-            if (generatorStates.has(value)) {
-                return this.unsupported('Generators are unsupported', path)
-            }
+            const generatorMethod = this.generatorMethod(value)
             const bound = bindInfo.get(value)
             const descriptor = functionDescriptors.get(value)
             const defaultClassConstructor = defaultClassConstructors.get(value)
-            if (!bound && !descriptor && !defaultClassConstructor) {
+            if (!generatorMethod && !bound && !descriptor && !defaultClassConstructor) {
                 return this.unsupported('Unregistered host/native function', path)
+            }
+            if (generatorMethod) {
+                this.assertSyncGeneratorState(generatorMethod.state, path)
             }
             if (descriptor) {
                 assertSupportedFunctionDescriptor(descriptor, path)
@@ -740,6 +854,13 @@ class SnapshotWriter {
         }
 
         if (typeof value === 'object') {
+            if (this.generatorStateObject(value)) {
+                return this.unsupported('Internal generator state is unsupported as a direct value', path)
+            }
+            const generatorState = this.generatorObjectState(value)
+            if (generatorState) {
+                this.assertSyncGeneratorState(generatorState, path)
+            }
             const brandError = unsupportedBrand(value)
             if (brandError) {
                 return this.unsupported(brandError, path)
@@ -795,23 +916,44 @@ class SnapshotWriter {
             }
         }
 
+        const generatorState = this.generatorObjectState(value)
+        if (generatorState) {
+            record.generatorState = this.snapshotGeneratorState(generatorState, `${path}.generatorState`)
+        }
+
         record.prototype = this.value(Object.getPrototypeOf(value), `${path}[[Prototype]]`)
 
         const descriptors = Object.getOwnPropertyDescriptors(value)
         for (const key of Reflect.ownKeys(descriptors)) {
+            const descriptor = (descriptors as Record<PropertyKey, PropertyDescriptor>)[key]
+            if (kind === 'frame' && key === String(Fields.generator) && 'value' in descriptor) {
+                const state = this.generatorStateObject(descriptor.value)
+                if (state) {
+                    this.assertSyncGeneratorState(state, `${path}.${String(key)}`)
+                    record.frameGenerator = this.value(state[Fields.gen], `${path}.generator`)
+                    continue
+                }
+            }
             record.descriptors.push(this.descriptor(
                 key,
-                (descriptors as Record<PropertyKey, PropertyDescriptor>)[key],
+                descriptor,
                 `${path}.${String(key)}`
             ))
         }
 
         if (typeof value === 'function') {
+            const generatorMethod = this.generatorMethod(value)
             const bound = bindInfo.get(value)
             const descriptor = functionDescriptors.get(value)
             const defaultClassConstructor = defaultClassConstructors.get(value)
-            if (!bound && !descriptor && !defaultClassConstructor) {
+            if (!generatorMethod && !bound && !descriptor && !defaultClassConstructor) {
                 return this.unsupported('Missing VM function descriptor', path)
+            }
+            if (generatorMethod) {
+                record.generatorMethod = {
+                    generator: this.value(generatorMethod.state[Fields.gen], `${path}.generatorMethod.generator`),
+                    method: generatorMethod.method,
+                }
             }
             if (bound) {
                 record.boundFunction = {
@@ -930,9 +1072,209 @@ const runRestoredFunction = (
 
 const holderFunction = new WeakMap<FunctionHolder, Function>()
 
+const runRestoredGeneratorUntilYieldOrDone = (execution: Execution) => {
+    let result
+    do {
+        result = execution[Fields.step]()
+        if (!result[Fields.done] && result[Fields.await]) {
+            throw new Error('Unhandled async suspension in restored generator')
+        }
+    } while (!result[Fields.done] && !result[Fields.yield])
+    return result
+}
+
+const createGeneratorExecution = (state: GeneratorState, options: RestoreOptions): Execution => {
+    const frame = state[Fields.stack][0] ?? state[Fields.baseFrame]
+    if (!frame) {
+        return undefined as unknown as Execution
+    }
+    const execution = getExecution(
+        frame[Fields.programSection],
+        state[Fields.ptr],
+        frame[Fields.globalThis],
+        [],
+        undefined,
+        [],
+        options.getDebugFunction ?? (() => null),
+        options.compileFunction,
+        options.functionRedirects ?? new WeakMap()
+    )
+    execution[Fields.stack].length = 0
+    return execution
+}
+
+const runRestoredGeneratorMethod = (
+    state: GeneratorState,
+    method: GeneratorResumeKind,
+    value: unknown,
+    options: RestoreOptions
+): IteratorResult<unknown> => {
+    if (state[Fields.completed]) {
+        if (method === GeneratorResumeKind.Throw) {
+            throw value
+        }
+        return {
+            value: method === GeneratorResumeKind.Return ? value : undefined,
+            done: true,
+        }
+    }
+
+    if (!state[Fields.started]) {
+        if (method === GeneratorResumeKind.Throw) {
+            state[Fields.completed] = true
+            state[Fields.stack] = []
+            throw value
+        }
+        if (method === GeneratorResumeKind.Return) {
+            state[Fields.completed] = true
+            state[Fields.stack] = []
+            return { value, done: true }
+        }
+    }
+
+    if (method === GeneratorResumeKind.Throw) {
+        state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Throw, [Fields.value]: value }
+    } else if (method === GeneratorResumeKind.Return) {
+        state[Fields.pendingAction] = { [Fields.type]: GeneratorResumeKind.Return, [Fields.value]: value }
+    } else {
+        state[Fields.pendingAction] = null
+    }
+
+    if (!state[Fields.execution]) {
+        state[Fields.execution] = createGeneratorExecution(state, options)
+    }
+    const execution = state[Fields.execution]
+    const stack = execution[Fields.stack]
+    stack.length = 0
+    stack.push(...state[Fields.stack])
+    execution[Fields.ptr] = state[Fields.ptr]
+
+    const wasStarted = state[Fields.started]
+    state[Fields.started] = true
+
+    if (wasStarted && method === GeneratorResumeKind.Next) {
+        execution[Fields.pushValue](value)
+    }
+
+    const result = runRestoredGeneratorUntilYieldOrDone(execution)
+    if (isResultYield(result)) {
+        if (result[Fields.delegate] !== undefined) {
+            return result[Fields.value] as IteratorResult<unknown>
+        }
+        return { value: result[Fields.value], done: false }
+    }
+    if (isResultDone(result)) {
+        state[Fields.completed] = true
+        state[Fields.stack] = []
+        const out = result[Fields.value]
+        if (isIteratorYieldDone(out)) {
+            return { value: out.value, done: out.done }
+        }
+        return { value: out, done: true }
+    }
+    return { value: undefined, done: true }
+}
+
+const createRestoredGeneratorObject = (
+    state: GeneratorState,
+    options: RestoreOptions
+): IterableIterator<unknown> & { return(value?: unknown): IteratorResult<unknown>; throw(error?: unknown): IteratorResult<unknown> } => {
+    const gen: any = markVmOwned({
+        next(value?: unknown): IteratorResult<unknown> {
+            return runRestoredGeneratorMethod(state, GeneratorResumeKind.Next, value, options)
+        },
+        throw(error?: unknown): IteratorResult<unknown> {
+            return runRestoredGeneratorMethod(state, GeneratorResumeKind.Throw, error, options)
+        },
+        return(value?: unknown): IteratorResult<unknown> {
+            return runRestoredGeneratorMethod(state, GeneratorResumeKind.Return, value, options)
+        },
+        [Symbol.iterator]() { return gen },
+    })
+    state[Fields.gen] = gen
+    generatorObjectStates.set(gen, state)
+    generatorSelfMethods.set(gen[Symbol.iterator], state)
+    generatorMethodKinds.set(gen.next, GeneratorResumeKind.Next)
+    generatorMethodKinds.set(gen.throw, GeneratorResumeKind.Throw)
+    generatorMethodKinds.set(gen.return, GeneratorResumeKind.Return)
+    generatorStates.set(gen.next, state)
+    generatorStates.set(gen.throw, state)
+    generatorStates.set(gen.return, state)
+    return gen
+}
+
+const createRestoredGeneratorFromDescriptor = (
+    holder: FunctionHolder,
+    self: unknown,
+    args: unknown[]
+) => {
+    const descriptor = holder.descriptor
+    if (!descriptor) {
+        throw new Error('Restored VM generator descriptor is not initialized')
+    }
+    const fn = holderFunction.get(holder)
+    const invokeData: InvokeParam = {
+        [Fields.type]: InvokeType.Apply,
+        [Fields.function]: fn,
+        [Fields.name]: descriptor[Fields.name],
+        [Fields.self]: self,
+    }
+    const scratchExecution = getExecution(
+        descriptor[Fields.programSection],
+        descriptor[Fields.offset],
+        descriptor[Fields.globalThis],
+        [...descriptor[Fields.scopes]],
+        invokeData,
+        args,
+        holder.options.getDebugFunction ?? (() => null),
+        holder.options.compileFunction,
+        holder.options.functionRedirects ?? new WeakMap()
+    )
+    const hasNestedFunctionFrame = () => scratchExecution[Fields.stack].some(
+        (frame, index) => index > 0 && frame[Fields.type] === FrameType.Function
+    )
+    while (
+        scratchExecution[Fields.stack].length > 0
+        && (
+            hasNestedFunctionFrame()
+            || scratchExecution[Fields.ptr] !== descriptor[Fields.bodyOffset]
+        )
+    ) {
+        const result = scratchExecution[Fields.step]()
+        if (result[Fields.done] || result[Fields.yield] || result[Fields.await]) {
+            throw new Error('generator prologue suspended unexpectedly')
+        }
+    }
+
+    const stack: Stack = markVmOwned(scratchExecution[Fields.stack].slice())
+    const state: GeneratorState = markVmOwned({
+        [Fields.stack]: stack,
+        [Fields.ptr]: descriptor[Fields.bodyOffset],
+        [Fields.completed]: false,
+        [Fields.started]: false,
+        [Fields.pendingAction]: null,
+        [Fields.baseFrame]: stack[0] ?? null,
+        [Fields.gen]: null,
+        [Fields.execution]: scratchExecution,
+    })
+    for (const frame of stack) {
+        frame[Fields.generator] = state
+    }
+    const gen = createRestoredGeneratorObject(state, holder.options)
+    const ownPrototype = fn == null ? undefined : Reflect.get(fn, 'prototype')
+    Object.setPrototypeOf(
+        gen,
+        isObjectLike(ownPrototype)
+            ? ownPrototype
+            : getGeneratorFunctionIntrinsicsForSerialization(descriptor[Fields.globalThis], false).prototype
+    )
+    return gen
+}
+
 class SnapshotReader {
     private readonly refs = new Map<number, any>()
     private readonly holders = new Map<number, FunctionHolder>()
+    private readonly generatorStatesByObject = new WeakMap<object, GeneratorState>()
 
     constructor(
         private readonly snapshot: ExecutionSnapshot,
@@ -953,6 +1295,8 @@ class SnapshotReader {
         for (const record of this.snapshot.records) {
             this.fill(record)
         }
+        this.restoreGeneratorStates()
+        this.restoreGeneratorSideTables()
         this.applyHostOverlays()
 
         const stack = this.value(this.snapshot.stack) as Stack
@@ -997,7 +1341,27 @@ class SnapshotReader {
         } else if (record.kind === 'function') {
             const holder: FunctionHolder = { options: this.options }
             const reader = this
-            if (record.boundFunction) {
+            if (record.generatorMethod) {
+                if (record.generatorMethod.method === 'iterator') {
+                    value = markVmOwned(function () {
+                        return reader.value(record.generatorMethod!.generator)
+                    })
+                } else {
+                    const method = record.generatorMethod.method === 'next'
+                        ? GeneratorResumeKind.Next
+                        : record.generatorMethod.method === 'throw'
+                            ? GeneratorResumeKind.Throw
+                            : GeneratorResumeKind.Return
+                    value = markVmOwned(function (value?: unknown) {
+                        return runRestoredGeneratorMethod(
+                            reader.generatorStateForGenerator(record.generatorMethod!.generator),
+                            method,
+                            value,
+                            reader.options
+                        )
+                    })
+                }
+            } else if (record.boundFunction) {
                 const boundTarget = markVmOwned(function (this: unknown, ...args: unknown[]) {
                     const target = reader.value(record.boundFunction!.function) as Function
                     const self = reader.value(record.boundFunction!.self)
@@ -1020,6 +1384,13 @@ class SnapshotReader {
                         )
                     }
                 })
+            } else if (record.functionDescriptor && isGeneratorType(record.functionDescriptor.type)) {
+                const name = record.functionDescriptor.name || 'restored'
+                value = markVmOwned({
+                    [name](this: unknown, ...args: unknown[]) {
+                        return createRestoredGeneratorFromDescriptor(holder, this, args)
+                    },
+                }[name])
             } else if (usesConstructibleRestoredWrapper(record)) {
                 value = markVmOwned(function (this: unknown, ...args: unknown[]) {
                     return runRestoredFunction(holder, this, args, new.target)
@@ -1076,6 +1447,89 @@ class SnapshotReader {
             enumerable: descriptor.enumerable,
             get: descriptor.get === undefined ? undefined : this.value(descriptor.get) as (() => any),
             set: descriptor.set === undefined ? undefined : this.value(descriptor.set) as ((v: any) => void),
+        }
+    }
+
+    private generatorStateForGenerator(generator: SnapshotValue): GeneratorState {
+        const gen = this.value(generator)
+        if (!isObjectLike(gen)) {
+            throw new Error('Invalid generator snapshot reference')
+        }
+        const state = this.generatorStatesByObject.get(gen as object)
+        if (!state) {
+            throw new Error('Missing restored generator state')
+        }
+        return state
+    }
+
+    private restoreGeneratorStates() {
+        for (const record of this.snapshot.records) {
+            if (!record.generatorState) {
+                continue
+            }
+            const target = this.refs.get(record.id)
+            const stack = this.value(record.generatorState.stack) as Stack
+            const baseFrame = this.value(record.generatorState.baseFrame) as Frame | null
+            const pendingAction = record.generatorState.pendingAction === null
+                ? null
+                : {
+                    [Fields.type]: record.generatorState.pendingAction.type,
+                    [Fields.value]: this.value(record.generatorState.pendingAction.value),
+                }
+            const state: GeneratorState = markVmOwned({
+                [Fields.stack]: stack,
+                [Fields.ptr]: record.generatorState.ptr,
+                [Fields.completed]: record.generatorState.completed,
+                [Fields.started]: record.generatorState.started,
+                [Fields.pendingAction]: pendingAction,
+                [Fields.baseFrame]: baseFrame,
+                [Fields.gen]: target,
+                [Fields.execution]: createGeneratorExecution(
+                    {
+                        [Fields.stack]: stack,
+                        [Fields.ptr]: record.generatorState.ptr,
+                        [Fields.completed]: record.generatorState.completed,
+                        [Fields.started]: record.generatorState.started,
+                        [Fields.pendingAction]: pendingAction,
+                        [Fields.baseFrame]: baseFrame,
+                        [Fields.gen]: target,
+                        [Fields.execution]: undefined as unknown as Execution,
+                    },
+                    this.options
+                ),
+            })
+            this.generatorStatesByObject.set(target, state)
+            generatorObjectStates.set(target, state)
+            for (const frame of stack) {
+                frame[Fields.generator] = state
+            }
+        }
+    }
+
+    private restoreGeneratorSideTables() {
+        for (const record of this.snapshot.records) {
+            if (record.generatorMethod) {
+                const target = this.refs.get(record.id)
+                const state = this.generatorStateForGenerator(record.generatorMethod.generator)
+                if (record.generatorMethod.method === 'iterator') {
+                    generatorSelfMethods.set(target, state)
+                } else {
+                    generatorMethodKinds.set(
+                        target,
+                        record.generatorMethod.method === 'next'
+                            ? GeneratorResumeKind.Next
+                            : record.generatorMethod.method === 'throw'
+                                ? GeneratorResumeKind.Throw
+                                : GeneratorResumeKind.Return
+                    )
+                    generatorStates.set(target, state)
+                }
+            }
+
+            if (record.frameGenerator) {
+                const target = this.refs.get(record.id)
+                target[Fields.generator] = this.generatorStateForGenerator(record.frameGenerator)
+            }
         }
     }
 
@@ -1149,6 +1603,15 @@ class SnapshotReader {
             for (const value of record.values ?? []) {
                 set.add(this.value(value) as object)
             }
+        }
+
+        if (record.frameGenerator && !Object.prototype.hasOwnProperty.call(target, Fields.generator)) {
+            Object.defineProperty(target, Fields.generator, {
+                configurable: true,
+                enumerable: true,
+                writable: true,
+                value: undefined,
+            })
         }
 
         if (record.programSource !== undefined) {

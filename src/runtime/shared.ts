@@ -619,7 +619,10 @@ type GeneratorState = {
     [Fields.execution]: Execution
     [Fields.asyncYieldResumeAwaitReturn]?: boolean,
 }
+const generatorObjectStates = new WeakMap<any, GeneratorState>()
+const generatorMethodKinds = new WeakMap<any, GeneratorResumeKind>()
 const generatorStates = new WeakMap<any, GeneratorState>()
+const generatorSelfMethods = new WeakMap<any, GeneratorState>()
 
 
 type InvokeParamApply = {
@@ -651,6 +654,9 @@ export {
     functionDescriptors,
     formatFunctionName,
     formatFunctionNameKey,
+    generatorMethodKinds,
+    generatorObjectStates,
+    generatorSelfMethods,
     generatorStates,
     getEmptyObject,
     getAsyncIteratorRecord,

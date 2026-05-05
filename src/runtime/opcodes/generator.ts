@@ -8,6 +8,7 @@ import {
     assertIteratorResult,
     generatorStates,
     iteratorComplete,
+    markVmOwned,
 } from "../shared"
 import { BREAK_COMMAND, OpcodeContextField, type OpcodeHandlerResult, type RuntimeOpcodeContext } from "./types"
 
@@ -290,7 +291,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                     const iterable = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
                     const iteratorRecord = getAsyncIterator(iterable)
                     iter = iteratorRecord.iterator
-                    delegate = { [Fields.delegateIterator]: iter, [Fields.delegatePhase]: 0 }
+                    delegate = markVmOwned({ [Fields.delegateIterator]: iter, [Fields.delegatePhase]: 0 })
                     delegate[Fields.delegateNextMethod] = iteratorRecord.next
                     if (iteratorRecord.asyncFromSync) {
                         delegate[Fields.delegateAsyncFromSync] = true
@@ -369,7 +370,7 @@ export const handleGeneratorOpcode = (command: OpCode, ctx: RuntimeOpcodeContext
                 const iterable = ctx[OpcodeContextField.popCurrentFrameStack]<any>()
                 const iteratorRecord = getSyncIteratorRecord(iterable)
                 iter = iteratorRecord.iterator
-                delegate = { [Fields.delegateIterator]: iter, [Fields.delegatePhase]: 0 }
+                delegate = markVmOwned({ [Fields.delegateIterator]: iter, [Fields.delegatePhase]: 0 })
                 delegate[Fields.delegateNextMethod] = iteratorRecord.next
                 frame[Fields.delegate] = delegate
                 sentVal = undefined
