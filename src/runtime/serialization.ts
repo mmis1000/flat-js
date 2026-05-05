@@ -79,6 +79,12 @@ type SnapshotDefaultClassConstructor = {
     superClass?: SnapshotValue
 }
 
+type SnapshotBoundFunction = {
+    function: SnapshotValue
+    self: SnapshotValue
+    arguments: SnapshotValue[]
+}
+
 type SnapshotRecord = {
     id: number
     kind: 'object' | 'array' | 'function' | 'frame' | 'map' | 'set' | 'weakMap' | 'weakSet'
@@ -88,6 +94,7 @@ type SnapshotRecord = {
     programSource?: string
     functionDescriptor?: SnapshotFunctionDescriptor
     defaultClassConstructor?: SnapshotDefaultClassConstructor
+    boundFunction?: SnapshotBoundFunction
     entries?: Array<[SnapshotValue, SnapshotValue]>
     values?: SnapshotValue[]
 }
@@ -717,15 +724,13 @@ class SnapshotWriter {
         }
 
         if (typeof value === 'function') {
-            if (bindInfo.has(value)) {
-                return this.unsupported('Bound VM functions are unsupported', path)
-            }
             if (generatorStates.has(value)) {
                 return this.unsupported('Generators are unsupported', path)
             }
+            const bound = bindInfo.get(value)
             const descriptor = functionDescriptors.get(value)
             const defaultClassConstructor = defaultClassConstructors.get(value)
-            if (!descriptor && !defaultClassConstructor) {
+            if (!bound && !descriptor && !defaultClassConstructor) {
                 return this.unsupported('Unregistered host/native function', path)
             }
             if (descriptor) {
@@ -802,10 +807,20 @@ class SnapshotWriter {
         }
 
         if (typeof value === 'function') {
+            const bound = bindInfo.get(value)
             const descriptor = functionDescriptors.get(value)
             const defaultClassConstructor = defaultClassConstructors.get(value)
-            if (!descriptor && !defaultClassConstructor) {
+            if (!bound && !descriptor && !defaultClassConstructor) {
                 return this.unsupported('Missing VM function descriptor', path)
+            }
+            if (bound) {
+                record.boundFunction = {
+                    function: this.value(bound[Fields.function], `${path}.bound.function`),
+                    self: this.value(bound[Fields.self], `${path}.bound.self`),
+                    arguments: bound[Fields.arguments].map((arg, index) =>
+                        this.value(arg, `${path}.bound.arguments[${index}]`)
+                    ),
+                }
             }
             if (descriptor) {
                 record.functionDescriptor = {
@@ -982,7 +997,17 @@ class SnapshotReader {
         } else if (record.kind === 'function') {
             const holder: FunctionHolder = { options: this.options }
             const reader = this
-            if (record.defaultClassConstructor) {
+            if (record.boundFunction) {
+                const boundTarget = markVmOwned(function (this: unknown, ...args: unknown[]) {
+                    const target = reader.value(record.boundFunction!.function) as Function
+                    const self = reader.value(record.boundFunction!.self)
+                    const boundArgs = record.boundFunction!.arguments.map(arg => reader.value(arg))
+                    return new.target
+                        ? Reflect.construct(target, [...boundArgs, ...args], new.target)
+                        : Reflect.apply(target, self, [...boundArgs, ...args])
+                })
+                value = markVmOwned(Reflect.apply(Function.prototype.bind, boundTarget, [undefined]))
+            } else if (record.defaultClassConstructor) {
                 value = markVmOwned(function (this: unknown, ...args: unknown[]) {
                     if (!new.target) {
                         throw new TypeError('Class constructor cannot be invoked without new')
@@ -1094,6 +1119,14 @@ class SnapshotReader {
                     : { superClass: this.value(record.defaultClassConstructor.superClass) }),
             }
             defaultClassConstructors.set(target, info)
+        }
+
+        if (record.boundFunction) {
+            bindInfo.set(target, {
+                [Fields.function]: this.value(record.boundFunction.function),
+                [Fields.self]: this.value(record.boundFunction.self),
+                [Fields.arguments]: record.boundFunction.arguments.map(arg => this.value(arg)),
+            })
         }
 
         if (record.kind === 'map') {

@@ -519,10 +519,32 @@ try {
     expect(harness.logs).toEqual(['1', '7', 'true', 'true', 'true', 'true'])
 })
 
+test('snapshot and restore preserve bound VM function apply and construct metadata', () => {
+    const harness = createPausedHarness(`
+function add(a, b) {
+    return this.base + a + b
+}
+function Box(a, b) {
+    this.sum = a + b
+}
+const boundAdd = add.bind({ base: 10 }, 1)
+const BoundBox = Box.bind({ ignored: true }, 2)
+debugger
+const box = new BoundBox(3)
+log(boundAdd(2))
+log(box.sum)
+log(box instanceof Box)
+`)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['13', '5', 'true'])
+})
+
 test.each([
     ['Date', `const value = new Date(); debugger`],
     ['Proxy', `const value = new Proxy({}, {}); debugger`],
-    ['bound function', `function f() { return 1 } const value = f.bind(null); debugger`],
     ['generator', `function* g() { yield 1 } const value = g(); debugger`],
     ['native iterator object', `const value = [1, 2][Symbol.iterator](); debugger`],
     ['unregistered host function', `const value = Math.max; debugger`],
