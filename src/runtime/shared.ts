@@ -524,6 +524,11 @@ type IteratorRecord = {
     index?: number
 }
 
+type DefaultClassConstructorInfo = {
+    name: string
+    superClass?: unknown
+}
+
 export type ScopeDebugEntry = [string, unknown, boolean]
 
 type Execution = {
@@ -587,6 +592,7 @@ const functionDescriptors = new WeakMap<any, FunctionDescriptor>()
 const environments = new WeakSet() as unknown as RefinedEnvSet
 
 const bindInfo = new WeakMap<any, { [Fields.function]: any, [Fields.self]: any, [Fields.arguments]: any[] }>()
+const defaultClassConstructors = new WeakMap<Function, DefaultClassConstructorInfo>()
 
 type PendingAction = {
     [Fields.type]: GeneratorResumeKind.Throw | GeneratorResumeKind.Return,
@@ -640,6 +646,7 @@ export {
     bindInfo,
     CALL,
     decodeLiteralFromProgram,
+    defaultClassConstructors,
     environments,
     functionDescriptors,
     formatFunctionName,
@@ -688,6 +695,7 @@ export {
 export type {
     BaseFrame,
     Context,
+    DefaultClassConstructorInfo,
     Execution,
     FunctionDescriptor,
     GeneratorDelegateState,

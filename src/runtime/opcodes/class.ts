@@ -1,5 +1,5 @@
 import { FunctionTypes, OpCode } from "../../compiler"
-import { bindInfo, Fields, formatFunctionName, functionDescriptors, markVmOwned } from "../shared"
+import { bindInfo, defaultClassConstructors, Fields, formatFunctionName, functionDescriptors, markVmOwned } from "../shared"
 import { OpcodeContextField, type RuntimeOpcodeContext } from "./types"
 
 const isClassVmConstructible = (fn: any) => {
@@ -68,6 +68,10 @@ export const handleClassOpcode = (command: OpCode, ctx: RuntimeOpcodeContext): v
                 }
                 Object.defineProperty(classFn, 'name', { value: className, configurable: true })
                 markVmOwned(classFn)
+                defaultClassConstructors.set(classFn, {
+                    name: className,
+                    ...(hasHeritage ? { superClass } : {}),
+                })
             } else {
                 classFn = ctorFn
             }

@@ -2,6 +2,8 @@ import { FunctionTypes, InvokeType } from "../compiler"
 import { getProgramSource, setProgramSource } from "../compiler/shared"
 import {
     bindInfo,
+    defaultClassConstructors,
+    DefaultClassConstructorInfo,
     environments,
     Execution,
     Fields,
@@ -72,6 +74,11 @@ type SnapshotFunctionDescriptor = {
     homeObject?: SnapshotValue
 }
 
+type SnapshotDefaultClassConstructor = {
+    name: string
+    superClass?: SnapshotValue
+}
+
 type SnapshotRecord = {
     id: number
     kind: 'object' | 'array' | 'function' | 'frame' | 'map' | 'set' | 'weakMap' | 'weakSet'
@@ -80,6 +87,7 @@ type SnapshotRecord = {
     descriptors: SnapshotDescriptor[]
     programSource?: string
     functionDescriptor?: SnapshotFunctionDescriptor
+    defaultClassConstructor?: SnapshotDefaultClassConstructor
     entries?: Array<[SnapshotValue, SnapshotValue]>
     values?: SnapshotValue[]
 }
@@ -413,6 +421,11 @@ const isSupportedFunctionType = (type: FunctionTypes) => {
         case FunctionTypes.FunctionDeclaration:
         case FunctionTypes.FunctionExpression:
         case FunctionTypes.ArrowFunction:
+        case FunctionTypes.MethodDeclaration:
+        case FunctionTypes.GetAccessor:
+        case FunctionTypes.SetAccessor:
+        case FunctionTypes.Constructor:
+        case FunctionTypes.DerivedConstructor:
             return true
         default:
             return false
@@ -423,10 +436,18 @@ const assertSupportedFunctionDescriptor = (descriptor: FunctionDescriptor, path:
     if (!isSupportedFunctionType(descriptor[Fields.type])) {
         throw new UnsupportedSerializationError('Unsupported VM function type', path)
     }
-    if (descriptor[Fields.homeObject] !== undefined) {
-        throw new UnsupportedSerializationError('VM methods/classes with home object are unsupported', path)
-    }
 }
+
+const usesConstructibleRestoredWrapper = (record: SnapshotRecord) =>
+    record.defaultClassConstructor !== undefined
+    || hasOwnPrototype(record)
+    || record.functionDescriptor?.type === FunctionTypes.FunctionDeclaration
+    || record.functionDescriptor?.type === FunctionTypes.FunctionExpression
+    || record.functionDescriptor?.type === FunctionTypes.Constructor
+    || record.functionDescriptor?.type === FunctionTypes.DerivedConstructor
+
+const usesArrowRestoredWrapper = (record: SnapshotRecord) =>
+    record.functionDescriptor?.type === FunctionTypes.ArrowFunction
 
 const unsupportedBrand = (value: object) => {
     if (value instanceof Date) return 'Date is unsupported'
@@ -703,10 +724,13 @@ class SnapshotWriter {
                 return this.unsupported('Generators are unsupported', path)
             }
             const descriptor = functionDescriptors.get(value)
-            if (!descriptor) {
+            const defaultClassConstructor = defaultClassConstructors.get(value)
+            if (!descriptor && !defaultClassConstructor) {
                 return this.unsupported('Unregistered host/native function', path)
             }
-            assertSupportedFunctionDescriptor(descriptor, path)
+            if (descriptor) {
+                assertSupportedFunctionDescriptor(descriptor, path)
+            }
             return this.object(value, 'function', path)
         }
 
@@ -779,20 +803,31 @@ class SnapshotWriter {
 
         if (typeof value === 'function') {
             const descriptor = functionDescriptors.get(value)
-            if (!descriptor) {
+            const defaultClassConstructor = defaultClassConstructors.get(value)
+            if (!descriptor && !defaultClassConstructor) {
                 return this.unsupported('Missing VM function descriptor', path)
             }
-            record.functionDescriptor = {
-                name: descriptor[Fields.name],
-                type: descriptor[Fields.type],
-                offset: descriptor[Fields.offset],
-                bodyOffset: descriptor[Fields.bodyOffset],
-                scopes: this.value(descriptor[Fields.scopes], `${path}.descriptor.scopes`),
-                programSection: this.value(descriptor[Fields.programSection], `${path}.descriptor.programSection`),
-                globalThis: this.value(descriptor[Fields.globalThis], `${path}.descriptor.globalThis`),
-                homeObject: descriptor[Fields.homeObject] === undefined
-                    ? undefined
-                    : this.value(descriptor[Fields.homeObject], `${path}.descriptor.homeObject`),
+            if (descriptor) {
+                record.functionDescriptor = {
+                    name: descriptor[Fields.name],
+                    type: descriptor[Fields.type],
+                    offset: descriptor[Fields.offset],
+                    bodyOffset: descriptor[Fields.bodyOffset],
+                    scopes: this.value(descriptor[Fields.scopes], `${path}.descriptor.scopes`),
+                    programSection: this.value(descriptor[Fields.programSection], `${path}.descriptor.programSection`),
+                    globalThis: this.value(descriptor[Fields.globalThis], `${path}.descriptor.globalThis`),
+                    homeObject: descriptor[Fields.homeObject] === undefined
+                        ? undefined
+                        : this.value(descriptor[Fields.homeObject], `${path}.descriptor.homeObject`),
+                }
+            }
+            if (defaultClassConstructor) {
+                record.defaultClassConstructor = {
+                    name: defaultClassConstructor.name,
+                    superClass: defaultClassConstructor.superClass === undefined
+                        ? undefined
+                        : this.value(defaultClassConstructor.superClass, `${path}.defaultClassConstructor.superClass`),
+                }
             }
         }
 
@@ -946,11 +981,34 @@ class SnapshotReader {
             value = markVmOwned(new WeakSet())
         } else if (record.kind === 'function') {
             const holder: FunctionHolder = { options: this.options }
-            value = hasOwnPrototype(record)
-                ? markVmOwned(function (this: unknown, ...args: unknown[]) {
+            const reader = this
+            if (record.defaultClassConstructor) {
+                value = markVmOwned(function (this: unknown, ...args: unknown[]) {
+                    if (!new.target) {
+                        throw new TypeError('Class constructor cannot be invoked without new')
+                    }
+                    if (record.defaultClassConstructor!.superClass !== undefined) {
+                        return Reflect.construct(
+                            reader.value(record.defaultClassConstructor!.superClass) as Function,
+                            args,
+                            new.target
+                        )
+                    }
+                })
+            } else if (usesConstructibleRestoredWrapper(record)) {
+                value = markVmOwned(function (this: unknown, ...args: unknown[]) {
                     return runRestoredFunction(holder, this, args, new.target)
                 })
-                : markVmOwned((...args: unknown[]) => runRestoredFunction(holder, undefined, args, undefined))
+            } else if (usesArrowRestoredWrapper(record)) {
+                value = markVmOwned((...args: unknown[]) => runRestoredFunction(holder, undefined, args, undefined))
+            } else {
+                const name = record.functionDescriptor?.name || 'restored'
+                value = markVmOwned({
+                    [name](this: unknown, ...args: unknown[]) {
+                        return runRestoredFunction(holder, this, args, undefined)
+                    },
+                }[name])
+            }
             holderFunction.set(holder, value)
             this.holders.set(record.id, holder)
         } else {
@@ -1026,6 +1084,16 @@ class SnapshotReader {
             }
             this.holders.get(record.id)!.descriptor = descriptor
             functionDescriptors.set(target, descriptor)
+        }
+
+        if (record.defaultClassConstructor) {
+            const info: DefaultClassConstructorInfo = {
+                name: record.defaultClassConstructor.name,
+                ...(record.defaultClassConstructor.superClass === undefined
+                    ? {}
+                    : { superClass: this.value(record.defaultClassConstructor.superClass) }),
+            }
+            defaultClassConstructors.set(target, info)
         }
 
         if (record.kind === 'map') {

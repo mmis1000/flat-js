@@ -28,7 +28,7 @@ Recommended next sequence:
 5. Phase 3B: redirect selected built-in iterator factories to VM-owned iterator records. Implemented for VM-authored iterators and unpatched array iterators 2026-05-05.
 6. Phase 4A: add `Map` and `Set` records. Implemented 2026-05-05.
 7. Phase 4B: add `WeakMap` and `WeakSet` reachable-key probing. Implemented 2026-05-05.
-8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases. Blocked on support-policy decision.
+8. Phase 5: expand class, bound-function, and generator support after their prerequisite phases. Class/homeObject support implemented 2026-05-05; bound functions and generators remain.
 9. Phase 6: add strict checkpointable ingress checks.
 10. Phase 7: revisit async/promise state only after a deterministic scheduler/host-promise boundary design exists.
 
@@ -302,7 +302,7 @@ Future built-in additions should use brand-specific records:
 - `Date`
 - `RegExp`
 - `ArrayBuffer` and typed arrays
-- VM classes, bound functions, and generators
+- bound functions and generators
 
 Current rejected built-ins:
 
@@ -456,10 +456,9 @@ Status: implemented for `Map`, `Set`, `WeakMap`, and `WeakSet`.
 
 ### Phase 5: Functions, Classes, And Generators
 
-Status: ordinary VM function descriptors are implemented; classes, bound functions, and generators are still rejected pending support-policy decisions.
+Status: ordinary VM function descriptors, classes, default class constructors, and method/accessor `homeObject` metadata are implemented; bound functions and generators remain.
 
-- Decide whether to support only explicit-constructor classes first or to require default-constructor class records in the same phase.
-- Decide whether method/accessor `homeObject` restore should be included with class support, since class and object methods need `this`/`super`-aware wrappers rather than the current arrow-style non-constructible restore path.
+- Class support includes explicit constructors, default constructors, derived default constructors, methods, accessors, and `super` via restored `homeObject` metadata.
 - Decide whether bound wrapper metadata should include construct behavior in the first bound-function phase or only apply-call behavior.
 - Restore generator state only after choosing the snapshot shape for active generator stacks and generator method side-table records.
 - Keep active async/promise state rejected unless explicitly supported.

@@ -450,12 +450,80 @@ log(weakSet.has(first.hiddenKey))
     expect(harness.logs).toEqual(['true', 'hidden', 'true', 'true'])
 })
 
+test('snapshot and restore preserve classes, methods, accessors, and super home objects', () => {
+    const harness = createPausedHarness(`
+class Base {
+    constructor(seed) { this.seed = seed }
+    inc(value) { return this.seed + value }
+    get value() { return this.seed }
+    set value(value) { this.seed = value }
+}
+class Derived extends Base {
+    constructor(seed) { super(seed + 1) }
+    inc(value) { return super.inc(value) + 10 }
+    get value() { return super.value + 20 }
+    set value(value) { super.value = value - 20 }
+}
+const baseObject = { probe() { return 3 } }
+const objectMethod = {
+    __proto__: baseObject,
+    probe() { return super.probe() + 4 },
+}
+debugger
+const derived = new Derived(2)
+log(derived.inc(5))
+log(derived.value)
+derived.value = 50
+log(derived.value)
+log(objectMethod.probe())
+try {
+    Derived()
+} catch (error) {
+    log(error instanceof TypeError)
+}
+`)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['18', '23', '50', '7', 'true'])
+})
+
+test('snapshot and restore preserve default class constructors', () => {
+    const harness = createPausedHarness(`
+class Plain {
+    method() { return 1 }
+}
+class Parent {
+    constructor(value) { this.value = value }
+}
+class Child extends Parent {}
+debugger
+const plain = new Plain()
+const child = new Child(7)
+log(plain.method())
+log(child.value)
+log(plain instanceof Plain)
+log(child instanceof Child)
+log(child instanceof Parent)
+try {
+    Plain()
+} catch (error) {
+    log(error instanceof TypeError)
+}
+`)
+
+    const restored = snapshotAndRestore(harness)
+    continueToDone(restored)
+
+    expect(harness.logs).toEqual(['1', '7', 'true', 'true', 'true', 'true'])
+})
+
 test.each([
     ['Date', `const value = new Date(); debugger`],
     ['Proxy', `const value = new Proxy({}, {}); debugger`],
     ['bound function', `function f() { return 1 } const value = f.bind(null); debugger`],
     ['generator', `function* g() { yield 1 } const value = g(); debugger`],
-    ['class', `class A {} debugger`],
     ['native iterator object', `const value = [1, 2][Symbol.iterator](); debugger`],
     ['unregistered host function', `const value = Math.max; debugger`],
     ['accessor closing over unsupported host state', `
