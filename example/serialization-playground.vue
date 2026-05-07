@@ -79,6 +79,31 @@
                 <div class="pane-title">Snapshot</div>
                 <textarea v-model="snapshotText" class="snapshot" spellcheck="false"></textarea>
 
+                <div class="pane-title history-pane-title">History</div>
+                <div class="history-controls">
+                    <input
+                        v-model="checkpointLabel"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="Checkpoint label"
+                        :disabled="state === 'running'"
+                    >
+                    <button type="button" :disabled="state !== 'paused'" @click="saveCheckpoint">Checkpoint</button>
+                    <button type="button" :disabled="!selectedCheckpointId || state === 'running'" @click="loadSelectedCheckpoint">Load Checkpoint</button>
+                    <button type="button" :disabled="!selectedCheckpointId || state === 'running'" @click="renameSelectedCheckpoint">Rename</button>
+                    <button type="button" :disabled="!selectedCheckpointId || state === 'running'" @click="deleteSelectedCheckpoint">Delete Branch</button>
+                </div>
+                <select v-model="selectedCheckpointId" class="history-list" size="8" :disabled="historyCheckpointItems.length === 0" @change="syncCheckpointLabelFromSelection">
+                    <option
+                        v-for="checkpoint in historyCheckpointItems"
+                        :key="checkpoint.id"
+                        :value="checkpoint.id"
+                    >
+                        {{ `${'  '.repeat(checkpoint.depth)}${checkpoint.summary}${checkpoint.id === snapshotHistory?.headId ? ' • head' : ''}` }}
+                    </option>
+                </select>
+
                 <div class="pane-title">URL</div>
                 <textarea v-model="snapshotUrl" class="snapshot-url" readonly spellcheck="false"></textarea>
             </section>
@@ -101,17 +126,23 @@ import {
     type Stack,
 } from '../src/runtime'
 import {
+    appendExecutionSnapshotCheckpoint,
+    appendVmAsyncSessionSnapshotCheckpoint,
     createVmAsyncSession,
     createHostRegistry,
     createSerializableHostObjectRedirects,
-    parseExecutionSnapshot,
-    parseVmAsyncSessionSnapshot,
+    createSnapshotHistory,
     restoreExecution,
+    restoreExecutionCheckpoint,
     restoreVmAsyncSession,
+    restoreVmAsyncSessionCheckpoint,
     serializeExecutionSnapshot,
+    serializeSnapshotHistory,
     serializeVmAsyncSessionSnapshot,
     snapshotExecution,
     snapshotVmAsyncSession,
+    type SnapshotCheckpoint,
+    type SnapshotHistory,
     type VmAsyncSession,
 } from '../src/serialization'
 import {
@@ -119,7 +150,12 @@ import {
     getSelectedDebugFrameSourcePointers,
     resolveDebugFrameIndex,
 } from '../web/debug-stack'
-import { continueVmAsyncSession } from '../src/serialization-playground'
+import {
+    continueVmAsyncSession,
+    deleteSnapshotCheckpointBranch,
+    parsePlaygroundSnapshotDocument,
+    relabelSnapshotCheckpoint,
+} from '../src/serialization-playground'
 
 type VmStatus = 'idle' | 'running' | 'paused' | 'done' | 'error'
 
@@ -228,26 +264,56 @@ async function fetchSnapshotTextFromRelativePath(pathText: string) {
     return await response.text()
 }
 
-function isVmAsyncSessionSnapshotText(text: string) {
-    try {
-        const parsed = JSON.parse(text)
-        return parsed != null
-            && typeof parsed === 'object'
-            && Array.isArray((parsed as { executions?: unknown }).executions)
-            && Array.isArray((parsed as { promises?: unknown }).promises)
-    } catch {
-        return false
-    }
-}
-
 function shouldUseAsyncSession(source: string) {
     return /\basync\b|\bvmSleep\b/.test(source)
+}
+
+type HistoryCheckpointListItem = SnapshotCheckpoint & {
+    depth: number
+    summary: string
 }
 
 function createSnapshotUrl(text: string) {
     const url = new URL(window.location.href)
     url.hash = `snapshot=${encodeSnapshotForUrl(text)}`
     return url.toString()
+}
+
+function buildCheckpointChildrenMap(history: SnapshotHistory) {
+    const children = new Map<string, SnapshotCheckpoint[]>()
+    for (const checkpoint of history.checkpoints) {
+        if (!checkpoint.parentId) continue
+        const siblings = children.get(checkpoint.parentId)
+        if (siblings) {
+            siblings.push(checkpoint)
+        } else {
+            children.set(checkpoint.parentId, [checkpoint])
+        }
+    }
+    return children
+}
+
+function buildHistoryCheckpointList(history: SnapshotHistory): HistoryCheckpointListItem[] {
+    const byId = new Map(history.checkpoints.map(checkpoint => [checkpoint.id, checkpoint]))
+    const children = buildCheckpointChildrenMap(history)
+    const ordered: HistoryCheckpointListItem[] = []
+    const visit = (checkpoint: SnapshotCheckpoint, depth: number) => {
+        ordered.push({
+            ...checkpoint,
+            depth,
+            summary: checkpoint.label ?? checkpoint.id,
+        })
+        for (const child of children.get(checkpoint.id) ?? []) {
+            visit(child, depth + 1)
+        }
+    }
+    for (const rootId of history.rootIds) {
+        const root = byId.get(rootId)
+        if (root) {
+            visit(root, 0)
+        }
+    }
+    return ordered
 }
 
 function makeGlobalThis() {
@@ -333,6 +399,10 @@ export default defineComponent({
             replOutput: '',
             snapshotText: '',
             snapshotUrl: '',
+            snapshotHistory: null as SnapshotHistory | null,
+            historyRuntimeDirty: false,
+            selectedCheckpointId: '',
+            checkpointLabel: '',
             state: 'idle' as VmStatus,
             statusText: 'Idle',
             execution: null as VmExecution | null,
@@ -351,6 +421,12 @@ export default defineComponent({
     computed: {
         selectableDebugProgramSections(): ReadonlySet<number[]> {
             return this.program.length === 0 ? new Set() : new Set([this.program])
+        },
+        historyCheckpointItems(): HistoryCheckpointListItem[] {
+            return this.snapshotHistory ? buildHistoryCheckpointList(this.snapshotHistory) : []
+        },
+        selectedHistoryCheckpoint(): HistoryCheckpointListItem | null {
+            return this.historyCheckpointItems.find(checkpoint => checkpoint.id === this.selectedCheckpointId) ?? null
         },
     },
     mounted() {
@@ -375,6 +451,24 @@ export default defineComponent({
             this.snapshotUrl = window.location.hash.startsWith(SNAPSHOT_HASH_PREFIX)
                 ? window.location.href
                 : ''
+        },
+        setSnapshotHistory(history: SnapshotHistory | null) {
+            this.snapshotHistory = history
+            this.historyRuntimeDirty = false
+            if (!history || history.checkpoints.length === 0) {
+                this.selectedCheckpointId = ''
+                this.checkpointLabel = ''
+                return
+            }
+            const nextSelectedId = history.checkpoints.some(checkpoint => checkpoint.id === this.selectedCheckpointId)
+                ? this.selectedCheckpointId
+                : history.headId ?? history.checkpoints[history.checkpoints.length - 1]?.id ?? ''
+            this.selectedCheckpointId = nextSelectedId
+            const selected = history.checkpoints.find(checkpoint => checkpoint.id === nextSelectedId)
+            this.checkpointLabel = selected?.label ?? ''
+        },
+        syncCheckpointLabelFromSelection() {
+            this.checkpointLabel = this.selectedHistoryCheckpoint?.label ?? ''
         },
         async loadInitialSnapshotUrl() {
             const snapshotText = readSnapshotTextFromHash()
@@ -607,7 +701,9 @@ export default defineComponent({
         continueExecution() {
             const execution = this.execution
             if (!execution) return
-
+            if (this.snapshotHistory) {
+                this.historyRuntimeDirty = true
+            }
             this.debugPausePtr = null
             this.state = 'running'
             this.statusText = 'Running'
@@ -723,8 +819,11 @@ export default defineComponent({
         },
         start() {
             this.logs = []
+            this.replText = ''
             this.replOutput = ''
             this.snapshotText = ''
+            this.snapshotUrl = ''
+            this.setSnapshotHistory(null)
             this.resetDebugState()
             this.state = 'running'
             this.statusText = 'Compiling'
@@ -767,12 +866,16 @@ export default defineComponent({
         save() {
             try {
                 this.snapshotText = this.createSnapshotText()
-                this.statusText = 'Snapshot saved'
+                const savedHistory = this.snapshotHistory && !this.historyRuntimeDirty
+                this.statusText = savedHistory ? 'Snapshot history saved' : 'Snapshot saved'
             } catch (error) {
                 this.setError(error)
             }
         },
         createSnapshotText() {
+            if (this.snapshotHistory && !this.historyRuntimeDirty) {
+                return serializeSnapshotHistory(this.snapshotHistory)
+            }
             if (this.asyncSession && this.state === 'paused') {
                 const snapshot = snapshotVmAsyncSession(this.asyncSession, { hostRegistry })
                 return serializeVmAsyncSessionSnapshot(snapshot)
@@ -786,14 +889,42 @@ export default defineComponent({
             if (text) {
                 return text
             }
-            throw new Error('No paused execution or snapshot text to serialize')
+            throw new Error('No paused execution, snapshot history, or snapshot text to serialize')
+        },
+        saveCheckpoint() {
+            try {
+                if (this.state !== 'paused') {
+                    throw new Error('Pause execution before creating a checkpoint')
+                }
+                const trimmedLabel = this.checkpointLabel.trim()
+                const parentId = this.selectedCheckpointId || this.snapshotHistory?.headId
+                const checkpointOptions = {
+                    ...(parentId ? { parentId } : {}),
+                    ...(trimmedLabel ? { label: trimmedLabel } : {}),
+                }
+                const history = this.snapshotHistory ?? createSnapshotHistory()
+                const updatedHistory = this.asyncSession
+                    ? appendVmAsyncSessionSnapshotCheckpoint(history, this.asyncSession, { hostRegistry }, checkpointOptions)
+                    : this.execution
+                        ? appendExecutionSnapshotCheckpoint(history, this.execution, { hostRegistry }, checkpointOptions)
+                        : null
+                if (!updatedHistory) {
+                    throw new Error('No paused execution available for checkpointing')
+                }
+                this.snapshotText = serializeSnapshotHistory(updatedHistory)
+                this.setSnapshotHistory(updatedHistory)
+                this.statusText = `Checkpoint saved: ${updatedHistory.headId}`
+            } catch (error) {
+                this.setError(error)
+            }
         },
         saveUrl() {
             try {
                 this.snapshotText = this.createSnapshotText()
                 this.snapshotUrl = createSnapshotUrl(this.snapshotText)
                 window.history.replaceState(null, '', this.snapshotUrl)
-                this.statusText = 'Snapshot URL saved'
+                const savedHistory = this.snapshotHistory && !this.historyRuntimeDirty
+                this.statusText = savedHistory ? 'Snapshot history URL saved' : 'Snapshot URL saved'
             } catch (error) {
                 this.setError(error)
             }
@@ -804,11 +935,12 @@ export default defineComponent({
                 const blob = new Blob([this.snapshotText], { type: 'application/json' })
                 const objectUrl = URL.createObjectURL(blob)
                 const anchor = document.createElement('a')
+                const savedHistory = this.snapshotHistory && !this.historyRuntimeDirty
                 anchor.href = objectUrl
-                anchor.download = 'flat-js-snapshot.json'
+                anchor.download = savedHistory ? 'flat-js-snapshot-history.json' : 'flat-js-snapshot.json'
                 anchor.click()
                 URL.revokeObjectURL(objectUrl)
-                this.statusText = 'Snapshot JSON exported'
+                this.statusText = savedHistory ? 'Snapshot history JSON exported' : 'Snapshot JSON exported'
             } catch (error) {
                 this.setError(error)
             }
@@ -833,7 +965,7 @@ export default defineComponent({
             }
             try {
                 const snapshotText = await file.text()
-                this.loadSnapshotText(snapshotText, `Snapshot JSON imported: ${file.name}`)
+                this.loadSnapshotText(snapshotText, `Snapshot document imported: ${file.name}`)
             } catch (error) {
                 this.setError(error)
             } finally {
@@ -843,8 +975,22 @@ export default defineComponent({
             }
         },
         loadSnapshotText(snapshotText: string, statusText = 'Snapshot loaded') {
-            if (isVmAsyncSessionSnapshotText(snapshotText)) {
-                const snapshot = parseVmAsyncSessionSnapshot(snapshotText)
+            const document = parsePlaygroundSnapshotDocument(snapshotText)
+            if (document.kind === 'history') {
+                this.snapshotText = snapshotText
+                this.setSnapshotHistory(document.history)
+                if (!this.snapshotHistory?.headId) {
+                    this.resetDebugState()
+                    this.state = 'idle'
+                    this.statusText = statusText
+                    return
+                }
+                this.loadSelectedCheckpoint(statusText)
+                return
+            }
+            this.setSnapshotHistory(null)
+            if (document.kind === 'vmAsyncSession') {
+                const snapshot = document.snapshot
                 const [, debugInfo] = compile(snapshot.source, { range: true })
                 const session = markRaw(restoreVmAsyncSession(snapshot, {
                     hostRegistry,
@@ -867,7 +1013,7 @@ export default defineComponent({
                 this.revealDebugHighlight()
                 return
             }
-            const snapshot = parseExecutionSnapshot(snapshotText)
+            const snapshot = document.snapshot
             const [, debugInfo] = compile(snapshot.source, { range: true })
             const execution = restoreExecution(snapshot, {
                 hostRegistry,
@@ -886,6 +1032,102 @@ export default defineComponent({
             this.debugPausePtr = this.getNextVisibleSourcePtr(execution)
             this.flushDebugHighlightSync()
             this.revealDebugHighlight()
+        },
+        loadSelectedCheckpoint(statusText = 'Snapshot checkpoint loaded') {
+            try {
+                const history = this.snapshotHistory
+                const checkpointId = this.selectedCheckpointId
+                if (!history || !checkpointId) {
+                    throw new Error('No snapshot checkpoint selected')
+                }
+                const checkpoint = history.checkpoints.find(entry => entry.id === checkpointId)
+                if (!checkpoint) {
+                    throw new Error(`Unknown snapshot checkpoint '${checkpointId}'`)
+                }
+                const serializedHistory = serializeSnapshotHistory(history)
+                if (checkpoint.kind === 'vmAsyncSession') {
+                    const session = markRaw(restoreVmAsyncSessionCheckpoint(history, checkpointId, {
+                        hostRegistry,
+                        compileFunction: compile,
+                        functionRedirects,
+                        onPause: ({ ptr }) => {
+                            this.pause(typeof ptr === 'number' ? ptr : null)
+                        },
+                    }))
+                    const source = checkpoint.snapshot.source
+                    const [, debugInfo] = compile(source, { range: true })
+                    this.snapshotText = serializedHistory
+                    this.text = source
+                    this.asyncSession = session
+                    this.execution = markRaw(session.mainExecution)
+                    this.program = markRaw(session.debugExecution[Fields.stack][0]?.[Fields.programSection] ?? [])
+                    this.debugInfo = markRaw(debugInfo)
+                    this.state = 'paused'
+                    this.statusText = statusText
+                    this.historyRuntimeDirty = checkpointId !== history.headId
+                    this.debugPausePtr = this.getNextVisibleSourcePtr(session.debugExecution)
+                    this.flushDebugHighlightSync()
+                    this.revealDebugHighlight()
+                    this.syncCheckpointLabelFromSelection()
+                    return
+                }
+                const execution = restoreExecutionCheckpoint(history, checkpointId, {
+                    hostRegistry,
+                    compileFunction: compile,
+                    functionRedirects,
+                    getDebugFunction: () => this.getDebugPauseCallback(),
+                })
+                const source = checkpoint.snapshot.source
+                const [, debugInfo] = compile(source, { range: true })
+                this.snapshotText = serializedHistory
+                this.text = source
+                this.asyncSession = null
+                this.execution = markRaw(execution)
+                this.program = markRaw(execution[Fields.stack][0]?.[Fields.programSection] ?? [])
+                this.debugInfo = markRaw(debugInfo)
+                this.state = 'paused'
+                this.statusText = statusText
+                this.historyRuntimeDirty = checkpointId !== history.headId
+                this.debugPausePtr = this.getNextVisibleSourcePtr(execution)
+                this.flushDebugHighlightSync()
+                this.revealDebugHighlight()
+                this.syncCheckpointLabelFromSelection()
+            } catch (error) {
+                this.setError(error)
+            }
+        },
+        renameSelectedCheckpoint() {
+            try {
+                if (!this.snapshotHistory || !this.selectedCheckpointId) {
+                    throw new Error('No snapshot checkpoint selected')
+                }
+                const updatedHistory = relabelSnapshotCheckpoint(this.snapshotHistory, this.selectedCheckpointId, this.checkpointLabel)
+                this.snapshotText = serializeSnapshotHistory(updatedHistory)
+                this.setSnapshotHistory(updatedHistory)
+                this.statusText = `Checkpoint renamed: ${this.selectedCheckpointId}`
+            } catch (error) {
+                this.setError(error)
+            }
+        },
+        deleteSelectedCheckpoint() {
+            try {
+                if (!this.snapshotHistory || !this.selectedCheckpointId) {
+                    throw new Error('No snapshot checkpoint selected')
+                }
+                const deletedCheckpointId = this.selectedCheckpointId
+                const updatedHistory = deleteSnapshotCheckpointBranch(this.snapshotHistory, deletedCheckpointId)
+                this.snapshotText = updatedHistory.checkpoints.length > 0 ? serializeSnapshotHistory(updatedHistory) : ''
+                this.setSnapshotHistory(updatedHistory.checkpoints.length > 0 ? updatedHistory : null)
+                if (this.snapshotHistory?.headId) {
+                    this.loadSelectedCheckpoint(`Checkpoint branch deleted: ${deletedCheckpointId}`)
+                } else {
+                    this.resetDebugState()
+                    this.state = 'idle'
+                    this.statusText = `Checkpoint branch deleted: ${deletedCheckpointId}`
+                }
+            } catch (error) {
+                this.setError(error)
+            }
         },
         load() {
             try {
@@ -911,6 +1153,8 @@ export default defineComponent({
             this.replText = ''
             this.replOutput = ''
             this.snapshotText = ''
+            this.snapshotUrl = ''
+            this.setSnapshotHistory(null)
             this.refreshSnapshotUrl()
             this.state = 'idle'
             this.statusText = 'Idle'
@@ -922,6 +1166,9 @@ export default defineComponent({
             const text = this.replText
             this.replText = ''
             if (!text.trim()) return
+            if (this.snapshotHistory) {
+                this.historyRuntimeDirty = true
+            }
 
             this.replOutput += `> ${text}\n`
 
@@ -1118,6 +1365,35 @@ button:disabled {
     resize: none;
     outline: 0;
     color: var(--ink);
+    font: 12px/1.42 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+.history-pane-title {
+    border-top: 1px solid #dbe4ee;
+}
+.history-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    border-bottom: 1px solid #dbe4ee;
+}
+.history-controls input {
+    flex: 1 1 180px;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 9px;
+    color: var(--ink);
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+.history-list {
+    min-width: 0;
+    min-height: 132px;
+    max-height: 220px;
+    border: 0;
+    padding: 8px 10px;
+    color: var(--ink);
+    background: #fff;
     font: 12px/1.42 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 .snapshot-url {
