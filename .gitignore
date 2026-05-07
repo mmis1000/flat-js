@@ -124,6 +124,7 @@ src/runtime-inline.ts
 lib/
 dist-web/
 example/*.json
+!example/serialization-playground-snapshot.json
 example/*.bin
 example/*.bin.gz
 example/*.js

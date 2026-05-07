@@ -168,6 +168,7 @@ function sameSourceMapPos(
 }
 
 const SNAPSHOT_HASH_PREFIX = '#snapshot='
+const SNAPSHOT_FILE_QUERY_KEYS = ['snapshotFile', 'snapshot-file'] as const
 
 function encodeSnapshotForUrl(text: string) {
     const bytes = new TextEncoder().encode(text)
@@ -197,6 +198,33 @@ function readSnapshotTextFromHash() {
     }
     const encoded = window.location.hash.slice(SNAPSHOT_HASH_PREFIX.length)
     return encoded ? decodeSnapshotFromUrl(encoded) : ''
+}
+
+function readSnapshotFilePathFromQuery() {
+    const url = new URL(window.location.href)
+    for (const key of SNAPSHOT_FILE_QUERY_KEYS) {
+        const value = url.searchParams.get(key)
+        if (value) {
+            return value
+        }
+    }
+    return ''
+}
+
+function resolveSnapshotFileUrl(pathText: string) {
+    const resolved = new URL(pathText, window.location.href)
+    if (resolved.origin !== window.location.origin) {
+        throw new Error('Snapshot file must resolve to the current origin')
+    }
+    return resolved
+}
+
+async function fetchSnapshotTextFromRelativePath(pathText: string) {
+    const response = await fetch(resolveSnapshotFileUrl(pathText).toString())
+    if (!response.ok) {
+        throw new Error(`Snapshot file request failed (${response.status} ${response.statusText})`)
+    }
+    return await response.text()
 }
 
 function isVmAsyncSessionSnapshotText(text: string) {
@@ -328,7 +356,9 @@ export default defineComponent({
         activeApp = this
         this.highlightRafId = 0
         this.refreshSnapshotUrl()
-        this.loadInitialSnapshotUrl()
+        void this.loadInitialSnapshotUrl().catch(error => {
+            this.setError(error)
+        })
         window.addEventListener('hashchange', this.onHashChange)
         this.flushDebugHighlightSync()
     },
@@ -345,18 +375,30 @@ export default defineComponent({
                 ? window.location.href
                 : ''
         },
-        loadInitialSnapshotUrl() {
+        async loadInitialSnapshotUrl() {
             const snapshotText = readSnapshotTextFromHash()
             if (snapshotText) {
                 this.loadSnapshotText(snapshotText, 'Snapshot URL loaded')
+                return
             }
+            const snapshotFilePath = readSnapshotFilePathFromQuery()
+            if (!snapshotFilePath) {
+                return
+            }
+            const snapshotFileUrl = resolveSnapshotFileUrl(snapshotFilePath)
+            const loadedSnapshotText = await fetchSnapshotTextFromRelativePath(snapshotFilePath)
+            this.loadSnapshotText(loadedSnapshotText, `Snapshot file loaded: ${snapshotFileUrl.pathname}`)
         },
-        onHashChange() {
+        async onHashChange() {
             this.refreshSnapshotUrl()
             if (this.state === 'running') {
                 return
             }
-            this.loadInitialSnapshotUrl()
+            try {
+                await this.loadInitialSnapshotUrl()
+            } catch (error) {
+                this.setError(error)
+            }
         },
         appendLog(value: unknown) {
             this.logs.push(String(value))
@@ -936,7 +978,7 @@ export default defineComponent({
     grid-template-rows: auto auto minmax(0, 1fr);
     gap: 12px;
     width: 100%;
-    height: 100%;
+    min-height: 100dvh;
     padding: 18px;
     box-sizing: border-box;
     color: var(--ink);
@@ -1091,9 +1133,8 @@ button:disabled {
 }
 @media (max-width: 1120px) {
     .serialization-app {
-        overflow: auto;
-        height: auto;
-        min-height: 100%;
+        min-height: 100dvh;
+        padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
     }
     .topbar {
         flex-direction: column;
@@ -1103,21 +1144,52 @@ button:disabled {
     }
     .workspace {
         grid-template-columns: minmax(0, 1fr);
-        grid-auto-rows: minmax(320px, 58vh);
+        grid-auto-rows: auto;
+    }
+    .code-pane,
+    .debug-pane {
+        min-height: min(420px, 58dvh);
+    }
+    .io-pane {
+        min-height: 0;
+    }
+    .snapshot {
+        min-height: 220px;
     }
 }
 @media (max-width: 640px) {
     .serialization-app {
         padding: 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     }
     .title-group {
         flex-direction: column;
         gap: 6px;
     }
+    nav {
+        flex-wrap: wrap;
+        white-space: normal;
+    }
     .toolbar {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         width: 100%;
+    }
+    button {
+        min-height: 48px;
+    }
+    .pane-body-small {
+        max-height: none;
+        min-height: 120px;
+    }
+    .repl-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .snapshot {
+        min-height: 260px;
+    }
+    .snapshot-url {
+        min-height: 96px;
     }
 }
 </style>
