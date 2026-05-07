@@ -536,6 +536,11 @@ export type SnapshotHistory = {
     checkpoints: SnapshotCheckpoint[]
 }
 
+export type SnapshotHistoryRetentionPolicy = {
+    maxCheckpoints: number
+    preserveHeadLineage?: boolean
+}
+
 type CompactSnapshotHistoryCheckpoint = {
     id: string
     parentId?: string
@@ -1211,6 +1216,90 @@ const getSnapshotCheckpoint = (history: SnapshotHistory, checkpointId: string): 
     return checkpoint
 }
 
+const collectSnapshotCheckpointLineage = (history: SnapshotHistory, checkpointId: string, keptIds: Set<string>) => {
+    let currentId: string | undefined = checkpointId
+    while (currentId) {
+        if (keptIds.has(currentId)) {
+            return
+        }
+        keptIds.add(currentId)
+        currentId = history.checkpoints.find(checkpoint => checkpoint.id === currentId)?.parentId
+    }
+}
+
+const isAutoSnapshotCheckpoint = (checkpoint: SnapshotCheckpoint) => checkpoint.label == null || checkpoint.label === ''
+
+const getNearestRetainedSnapshotCheckpointParentId = (
+    checkpointsById: ReadonlyMap<string, SnapshotCheckpoint>,
+    checkpoint: SnapshotCheckpoint,
+    keptIds: ReadonlySet<string>
+) => {
+    let parentId = checkpoint.parentId
+    while (parentId) {
+        if (keptIds.has(parentId)) {
+            return parentId
+        }
+        parentId = checkpointsById.get(parentId)?.parentId
+    }
+    return undefined
+}
+
+export const applySnapshotHistoryRetentionPolicy = (
+    history: SnapshotHistory,
+    policy: SnapshotHistoryRetentionPolicy
+): SnapshotHistory => {
+    const maxCheckpoints = Math.max(0, Math.floor(policy.maxCheckpoints))
+    if (history.checkpoints.length === 0) {
+        return createSnapshotHistory()
+    }
+
+    const checkpointsById = new Map(history.checkpoints.map(checkpoint => [checkpoint.id, checkpoint]))
+    const keptIds = new Set<string>()
+    if (history.headId) {
+        if (policy.preserveHeadLineage) {
+            collectSnapshotCheckpointLineage(history, history.headId, keptIds)
+        } else {
+            keptIds.add(history.headId)
+        }
+    }
+    for (const checkpoint of history.checkpoints) {
+        if (checkpoint.label) {
+            keptIds.add(checkpoint.id)
+        }
+    }
+
+    let autoCheckpointCount = 0
+    for (let index = history.checkpoints.length - 1; index >= 0 && autoCheckpointCount < maxCheckpoints; index--) {
+        const checkpoint = history.checkpoints[index]
+        if (keptIds.has(checkpoint.id) || !isAutoSnapshotCheckpoint(checkpoint)) {
+            continue
+        }
+        keptIds.add(checkpoint.id)
+        autoCheckpointCount += 1
+    }
+
+    const checkpoints = history.checkpoints
+        .filter(checkpoint => keptIds.has(checkpoint.id))
+        .map(checkpoint => {
+            const parentId = getNearestRetainedSnapshotCheckpointParentId(checkpointsById, checkpoint, keptIds)
+            return {
+                ...checkpoint,
+                ...(parentId ? { parentId } : {}),
+                ...(parentId ? {} : { parentId: undefined }),
+            }
+        })
+    const rootIds = checkpoints.filter(checkpoint => checkpoint.parentId === undefined).map(checkpoint => checkpoint.id)
+    const headId = history.headId && keptIds.has(history.headId)
+        ? history.headId
+        : checkpoints[checkpoints.length - 1]?.id
+
+    return {
+        version: SNAPSHOT_HISTORY_VERSION,
+        rootIds,
+        ...(headId ? { headId } : {}),
+        checkpoints,
+    }
+}
 
 const unsupportedMessage = (reason: string, path: string) => `${reason} at ${path}`
 

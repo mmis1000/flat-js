@@ -11,6 +11,7 @@ export {
 export {
     appendExecutionSnapshotCheckpoint,
     appendVmAsyncSessionSnapshotCheckpoint,
+    applySnapshotHistoryRetentionPolicy,
     createHostRegistry,
     createCheckpointableAdmission,
     createSerializableHostObjectRedirects,
@@ -35,6 +36,7 @@ export {
     type SnapshotCheckpoint,
     type SnapshotCheckpointKind,
     type SnapshotHistory,
+    type SnapshotHistoryRetentionPolicy,
     type VmAsyncSessionRestoreOptions,
     type VmAsyncSessionSnapshot,
     type VmAsyncSessionSnapshotCheckpoint,
