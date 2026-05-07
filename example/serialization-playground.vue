@@ -119,6 +119,7 @@ import {
     getSelectedDebugFrameSourcePointers,
     resolveDebugFrameIndex,
 } from '../web/debug-stack'
+import { continueVmAsyncSession } from '../src/serialization-playground'
 
 type VmStatus = 'idle' | 'running' | 'paused' | 'done' | 'error'
 
@@ -617,7 +618,7 @@ export default defineComponent({
                 let guard = 0
                 while (this.state === 'running') {
                     if (session) {
-                        const result = session.runUntilIdleOrPause()
+                        const result = continueVmAsyncSession(session)
                         if (result.paused) {
                             return
                         }
