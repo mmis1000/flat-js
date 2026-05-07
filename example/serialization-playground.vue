@@ -15,9 +15,18 @@
                 <button type="button" :disabled="state !== 'paused'" @click="stepExecution(true)">Step In</button>
                 <button type="button" :disabled="state !== 'paused'" @click="save">Save</button>
                 <button type="button" :disabled="state === 'running' || (state !== 'paused' && !snapshotText.trim())" @click="saveUrl">Save URL</button>
+                <button type="button" :disabled="state === 'running' || (state !== 'paused' && !snapshotText.trim())" @click="exportJson">Export JSON</button>
+                <button type="button" :disabled="state === 'running'" @click="openJsonImport">Import JSON</button>
                 <button type="button" :disabled="state === 'running' || !snapshotText.trim()" @click="load">Load</button>
                 <button type="button" :disabled="state === 'running' || !snapshotUrl" @click="loadUrl">Load URL</button>
                 <button type="button" :disabled="state === 'running'" @click="reset">Reset</button>
+                <input
+                    ref="jsonImport"
+                    class="hidden-file-input"
+                    type="file"
+                    accept="application/json,.json"
+                    @change="importJson"
+                >
             </div>
         </header>
 
@@ -746,6 +755,50 @@ export default defineComponent({
                 this.setError(error)
             }
         },
+        exportJson() {
+            try {
+                this.snapshotText = this.createSnapshotText()
+                const blob = new Blob([this.snapshotText], { type: 'application/json' })
+                const objectUrl = URL.createObjectURL(blob)
+                const anchor = document.createElement('a')
+                anchor.href = objectUrl
+                anchor.download = 'flat-js-snapshot.json'
+                anchor.click()
+                URL.revokeObjectURL(objectUrl)
+                this.statusText = 'Snapshot JSON exported'
+            } catch (error) {
+                this.setError(error)
+            }
+        },
+        openJsonImport() {
+            try {
+                const input = this.$refs.jsonImport as HTMLInputElement | undefined
+                if (!input) {
+                    throw new Error('Import control unavailable')
+                }
+                input.value = ''
+                input.click()
+            } catch (error) {
+                this.setError(error)
+            }
+        },
+        async importJson(event: Event) {
+            const input = event.target as HTMLInputElement | null
+            const file = input?.files?.[0]
+            if (!file) {
+                return
+            }
+            try {
+                const snapshotText = await file.text()
+                this.loadSnapshotText(snapshotText, `Snapshot JSON imported: ${file.name}`)
+            } catch (error) {
+                this.setError(error)
+            } finally {
+                if (input) {
+                    input.value = ''
+                }
+            }
+        },
         loadSnapshotText(snapshotText: string, statusText = 'Snapshot loaded') {
             if (isVmAsyncSessionSnapshotText(snapshotText)) {
                 const snapshot = parseVmAsyncSessionSnapshot(snapshotText)
@@ -935,6 +988,9 @@ button:disabled {
     color: #7b8796;
     background: #eef3f8;
     cursor: default;
+}
+.hidden-file-input {
+    display: none;
 }
 .status {
     min-height: 34px;
