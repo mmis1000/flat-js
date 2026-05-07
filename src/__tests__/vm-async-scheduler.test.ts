@@ -3,10 +3,15 @@ import { getLogicalDebugFrames } from '../../web/debug-stack'
 import { Fields } from '../runtime'
 import { continueVmAsyncSession } from '../serialization-playground'
 import {
+    appendVmAsyncSessionSnapshotCheckpoint,
     createHostRegistry,
+    createSnapshotHistory,
     createVmAsyncSession,
+    parseSnapshotHistory,
     parseVmAsyncSessionSnapshot,
     restoreVmAsyncSession,
+    restoreVmAsyncSessionCheckpoint,
+    serializeSnapshotHistory,
     serializeVmAsyncSessionSnapshot,
     snapshotVmAsyncSession,
     UnsupportedSerializationError,
@@ -274,6 +279,135 @@ main()
     expect(restored.advanceTime(1).settledTimers).toBe(1)
     expect(continueVmAsyncSession(restored).paused).toBe(false)
     expect(logs).toEqual(['first', 'later'])
+})
+
+
+test('vm async session snapshots serialize compactly while remaining legacy-compatible on parse', () => {
+    const [program] = compile(`
+async function main() {
+    const values = []
+    for (let i = 0; i < 80; i++) {
+        values.push(i)
+    }
+    await vmSleep(1)
+    debugger
+    log(values.length)
+}
+main()
+`, { range: true })
+    const logs: string[] = []
+    const log = (value: unknown) => logs.push(String(value))
+    const session = createVmAsyncSession(program, {
+        globalThis: Object.create(globalThis),
+        scopes: [{ log, __proto__: null }],
+        compileFunction: compile,
+    })
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['log', log],
+    ])
+
+    session.runUntilIdleOrPause()
+    session.advanceTime(1)
+    expect(session.runUntilIdleOrPause().paused).toBe(true)
+
+    const snapshot = snapshotVmAsyncSession(session, { hostRegistry })
+    const compactText = serializeVmAsyncSessionSnapshot(snapshot)
+    const legacyText = JSON.stringify(snapshot)
+    expect(compactText.length).toBeLessThan(legacyText.length)
+
+    const restoredCompact = restoreVmAsyncSession(parseVmAsyncSessionSnapshot(compactText), {
+        hostRegistry,
+        compileFunction: compile,
+    })
+    expect(continueVmAsyncSession(restoredCompact).paused).toBe(false)
+    expect(logs).toEqual(['80'])
+
+    const restoredLegacy = restoreVmAsyncSession(parseVmAsyncSessionSnapshot(legacyText), {
+        hostRegistry,
+        compileFunction: compile,
+    })
+    expect(continueVmAsyncSession(restoredLegacy).paused).toBe(false)
+    expect(logs).toEqual(['80', '80'])
+})
+
+test('vm async session snapshot history supports branching serialize/parse and restore by checkpoint id', () => {
+    const [program] = compile(`
+async function main() {
+    const values = ['root']
+    await vmSleep(1)
+    debugger
+    log(values.join(','))
+}
+main()
+`, { range: true })
+    const logs: string[] = []
+    const log = (value: unknown) => logs.push(String(value))
+    const hostRegistry = createHostRegistry([
+        ['globalThis', globalThis],
+        ['log', log],
+    ])
+    const createPausedSession = (initialValues: string[]) => {
+        const listLiteral = initialValues.map(value => JSON.stringify(value)).join(', ')
+        const [sessionProgram] = compile(`
+async function main() {
+    const values = [${listLiteral}]
+    await vmSleep(1)
+    debugger
+    log(values.join(','))
+}
+main()
+`, { range: true })
+        const session = createVmAsyncSession(sessionProgram, {
+            globalThis: Object.create(globalThis),
+            scopes: [{ log, __proto__: null }],
+            compileFunction: compile,
+        })
+        session.runUntilIdleOrPause()
+        session.advanceTime(1)
+        expect(session.runUntilIdleOrPause().paused).toBe(true)
+        return session
+    }
+
+    let history = appendVmAsyncSessionSnapshotCheckpoint(
+        createSnapshotHistory(),
+        createPausedSession(['root']),
+        { hostRegistry },
+        { id: 'root', label: 'root checkpoint' }
+    )
+    expect(history.rootIds).toEqual(['root'])
+
+    history = appendVmAsyncSessionSnapshotCheckpoint(
+        history,
+        createPausedSession(['root', 'branch-a']),
+        { hostRegistry },
+        { id: 'branch-a', parentId: 'root', label: 'branch a' }
+    )
+
+    history = appendVmAsyncSessionSnapshotCheckpoint(
+        history,
+        createPausedSession(['root', 'branch-b']),
+        { hostRegistry },
+        { id: 'branch-b', parentId: 'root', label: 'branch b' }
+    )
+
+    expect(history.headId).toBe('branch-b')
+    expect(history.checkpoints.map((checkpoint: { id: string }) => checkpoint.id)).toEqual(['root', 'branch-a', 'branch-b'])
+
+    const parsedHistory = parseSnapshotHistory(serializeSnapshotHistory(history))
+    const restoredBranchA = restoreVmAsyncSessionCheckpoint(parsedHistory, 'branch-a', {
+        hostRegistry,
+        compileFunction: compile,
+    })
+    expect(continueVmAsyncSession(restoredBranchA).paused).toBe(false)
+
+    const restoredBranchB = restoreVmAsyncSessionCheckpoint(parsedHistory, 'branch-b', {
+        hostRegistry,
+        compileFunction: compile,
+    })
+    expect(continueVmAsyncSession(restoredBranchB).paused).toBe(false)
+
+    expect(logs).toEqual(['root,branch-a', 'root,branch-b'])
 })
 
 test('session snapshots reject native Promise.resolve().then results', () => {

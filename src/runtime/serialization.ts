@@ -294,6 +294,924 @@ type RestoreOptions = {
 
 const SNAPSHOT_VERSION = 1
 
+const COMPACT_EXECUTION_SNAPSHOT_FORMAT = 'flat-js/execution-snapshot'
+const COMPACT_VM_ASYNC_SESSION_SNAPSHOT_FORMAT = 'flat-js/vm-async-session-snapshot'
+const COMPACT_SNAPSHOT_VERSION = 2
+const SNAPSHOT_HISTORY_FORMAT = 'flat-js/snapshot-history'
+const SNAPSHOT_HISTORY_VERSION = 1
+const COMPACT_ARRAY_HOLE = 0 as const
+
+type CompactSnapshotValue =
+    | ['u']
+    | ['n']
+    | ['b', boolean]
+    | ['s', string]
+    | ['d', number | 'NaN' | 'Infinity' | '-Infinity' | '-0']
+    | ['i', string]
+    | ['z']
+    | ['y', WellKnownSymbolName]
+    | ['r', number]
+    | ['h', string]
+    | ['B', BuiltinRefId]
+    | ['A', VmAsyncSessionBuiltinId]
+
+type CompactSnapshotKey = string | ['i', InternalSymbolName] | ['s', WellKnownSymbolName]
+
+type CompactSnapshotDescriptor =
+    | [CompactSnapshotKey, CompactSnapshotValue]
+    | [CompactSnapshotKey, CompactSnapshotValue, string]
+    | [CompactSnapshotKey, CompactSnapshotValue | null, CompactSnapshotValue | null, string]
+
+type CompactSnapshotArrayItem = CompactSnapshotValue | typeof COMPACT_ARRAY_HOLE
+
+type CompactSnapshotArrayLayout = {
+    length: number
+    items?: CompactSnapshotArrayItem[]
+    sparse?: Array<[number, CompactSnapshotValue]>
+    lengthWritable?: false
+}
+
+type CompactSnapshotFunctionDescriptor = {
+    name: string
+    type: FunctionTypes
+    offset: number
+    bodyOffset: number
+    scopes: CompactSnapshotValue
+    programSection: CompactSnapshotValue
+    globalThis: CompactSnapshotValue
+    homeObject?: CompactSnapshotValue
+}
+
+type CompactSnapshotDefaultClassConstructor = {
+    name: string
+    superClass?: CompactSnapshotValue
+}
+
+type CompactSnapshotBoundFunction = {
+    function: CompactSnapshotValue
+    self: CompactSnapshotValue
+    arguments: CompactSnapshotValue[]
+}
+
+type CompactSnapshotGeneratorPendingAction = {
+    type: GeneratorResumeKind.Throw | GeneratorResumeKind.Return
+    value: CompactSnapshotValue
+}
+
+type CompactSnapshotGeneratorState = {
+    stack: CompactSnapshotValue
+    ptr: number
+    completed: boolean
+    started: boolean
+    pendingAction: CompactSnapshotGeneratorPendingAction | null
+    baseFrame: CompactSnapshotValue
+}
+
+type CompactSnapshotGeneratorMethod = {
+    generator: CompactSnapshotValue
+    method: SnapshotGeneratorMethodName
+}
+
+type CompactSnapshotRecord = {
+    id: number
+    kind: SnapshotRecord['kind']
+    extensible?: false
+    prototype: CompactSnapshotValue
+    descriptors?: CompactSnapshotDescriptor[]
+    array?: CompactSnapshotArrayLayout
+    programSource?: string
+    functionDescriptor?: CompactSnapshotFunctionDescriptor
+    defaultClassConstructor?: CompactSnapshotDefaultClassConstructor
+    boundFunction?: CompactSnapshotBoundFunction
+    generatorState?: CompactSnapshotGeneratorState
+    generatorMethod?: CompactSnapshotGeneratorMethod
+    frameGenerator?: CompactSnapshotValue
+    entries?: Array<[CompactSnapshotValue, CompactSnapshotValue]>
+    values?: CompactSnapshotValue[]
+}
+
+type CompactSnapshotHostOverlay = {
+    id: string
+    descriptors?: CompactSnapshotDescriptor[]
+    deleted?: CompactSnapshotKey[]
+}
+
+type CompactExecutionSnapshotEnvelope = {
+    format: typeof COMPACT_EXECUTION_SNAPSHOT_FORMAT
+    version: typeof COMPACT_SNAPSHOT_VERSION
+    source: string
+    ptr: number
+    evalResult: CompactSnapshotValue
+    stack: CompactSnapshotValue
+    records: CompactSnapshotRecord[]
+    hostOverlays?: CompactSnapshotHostOverlay[]
+}
+
+type CompactSnapshotExecutionState = {
+    ptr: number
+    evalResult: CompactSnapshotValue
+    stack: CompactSnapshotValue
+}
+
+type CompactSnapshotVmPromiseReaction =
+    | {
+        type: 'then'
+        kind: 'fulfilled' | 'rejected'
+        handler: CompactSnapshotValue
+        result: number
+    }
+    | {
+        type: 'await'
+        kind: 'fulfilled' | 'rejected'
+        task: number
+    }
+
+type CompactSnapshotVmPromiseRecord = {
+    id: number
+    promise: CompactSnapshotValue
+    state: VmPromiseState
+    value: CompactSnapshotValue
+    fulfillReactions: CompactSnapshotVmPromiseReaction[]
+    rejectReactions: CompactSnapshotVmPromiseReaction[]
+}
+
+type CompactSnapshotVmJob =
+    | {
+        id: number
+        type: 'then'
+        reaction: CompactSnapshotVmPromiseReaction & { type: 'then' }
+        argument: CompactSnapshotValue
+        execution?: number
+    }
+    | {
+        id: number
+        type: 'asyncContinuation'
+        task: number
+        kind: 'fulfilled' | 'rejected'
+        argument: CompactSnapshotValue
+    }
+    | {
+        id: number
+        type: 'asyncStart'
+        task: number
+    }
+
+type CompactSnapshotVmAsyncTask = {
+    id: number
+    execution: number
+    promise: number
+}
+
+type CompactSnapshotVmTimerRecord = {
+    id: number
+    dueTick: number
+    promise: number
+    value: CompactSnapshotValue
+}
+
+type CompactSnapshotVmExecutionRecord = {
+    id: number
+    state: CompactSnapshotExecutionState
+}
+
+type CompactVmAsyncSessionSnapshotEnvelope = {
+    format: typeof COMPACT_VM_ASYNC_SESSION_SNAPSHOT_FORMAT
+    version: typeof COMPACT_SNAPSHOT_VERSION
+    source: string
+    program: CompactSnapshotValue
+    globalThis: CompactSnapshotValue
+    mainExecution: number
+    executions: CompactSnapshotVmExecutionRecord[]
+    promises: CompactSnapshotVmPromiseRecord[]
+    asyncTasks: CompactSnapshotVmAsyncTask[]
+    jobs: CompactSnapshotVmJob[]
+    timers: CompactSnapshotVmTimerRecord[]
+    activeJob: CompactSnapshotVmJob | null
+    currentTick: number
+    nextPromiseId: number
+    nextJobId: number
+    nextTimerId: number
+    nextAsyncTaskId: number
+    mainDone: boolean
+    paused: boolean
+    pausedPtr?: number
+    pausedExecution?: number
+    records: CompactSnapshotRecord[]
+    hostOverlays?: CompactSnapshotHostOverlay[]
+}
+
+export type SnapshotCheckpointKind = 'execution' | 'vmAsyncSession'
+
+type SnapshotCheckpointOptions = {
+    id?: string
+    parentId?: string
+    label?: string
+    createdAt?: string
+}
+
+export type ExecutionSnapshotCheckpoint = {
+    id: string
+    parentId?: string
+    label?: string
+    createdAt?: string
+    kind: 'execution'
+    snapshot: ExecutionSnapshot
+}
+
+export type VmAsyncSessionSnapshotCheckpoint = {
+    id: string
+    parentId?: string
+    label?: string
+    createdAt?: string
+    kind: 'vmAsyncSession'
+    snapshot: VmAsyncSessionSnapshot
+}
+
+export type SnapshotCheckpoint = ExecutionSnapshotCheckpoint | VmAsyncSessionSnapshotCheckpoint
+
+export type SnapshotHistory = {
+    version: typeof SNAPSHOT_HISTORY_VERSION
+    rootIds: string[]
+    headId?: string
+    checkpoints: SnapshotCheckpoint[]
+}
+
+type CompactSnapshotHistoryCheckpoint = {
+    id: string
+    parentId?: string
+    label?: string
+    createdAt?: string
+    kind: SnapshotCheckpointKind
+    snapshot: CompactExecutionSnapshotEnvelope | CompactVmAsyncSessionSnapshotEnvelope
+}
+
+type CompactSnapshotHistoryDocument = {
+    format: typeof SNAPSHOT_HISTORY_FORMAT
+    version: typeof SNAPSHOT_HISTORY_VERSION
+    rootIds: string[]
+    headId?: string
+    checkpoints: CompactSnapshotHistoryCheckpoint[]
+}
+
+const isCanonicalArrayIndexKey = (key: string) => {
+    if (key === '') {
+        return false
+    }
+    const index = Number(key)
+    return Number.isInteger(index) && index >= 0 && index < 4294967295 && String(index) === key
+}
+
+const encodeCompactValue = (value: SnapshotValue): CompactSnapshotValue => {
+    switch (value.t) {
+        case 'undefined':
+            return ['u']
+        case 'null':
+            return ['n']
+        case 'boolean':
+            return ['b', value.v]
+        case 'string':
+            return ['s', value.v]
+        case 'number':
+            return ['d', value.v]
+        case 'bigint':
+            return ['i', value.v]
+        case 'tdz':
+            return ['z']
+        case 'symbol':
+            return ['y', value.v]
+        case 'ref':
+            return ['r', value.id]
+        case 'host':
+            return ['h', value.id]
+        case 'builtin':
+            return ['B', value.id]
+        case 'vmAsyncBuiltin':
+            return ['A', value.id]
+    }
+}
+
+const decodeCompactValue = (value: CompactSnapshotValue): SnapshotValue => {
+    switch (value[0]) {
+        case 'u':
+            return { t: 'undefined' }
+        case 'n':
+            return { t: 'null' }
+        case 'b':
+            return { t: 'boolean', v: value[1] }
+        case 's':
+            return { t: 'string', v: value[1] }
+        case 'd':
+            return { t: 'number', v: value[1] }
+        case 'i':
+            return { t: 'bigint', v: value[1] }
+        case 'z':
+            return { t: 'tdz' }
+        case 'y':
+            return { t: 'symbol', v: value[1] }
+        case 'r':
+            return { t: 'ref', id: value[1] }
+        case 'h':
+            return { t: 'host', id: value[1] }
+        case 'B':
+            return { t: 'builtin', id: value[1] }
+        case 'A':
+            return { t: 'vmAsyncBuiltin', id: value[1] }
+    }
+}
+
+const encodeCompactKey = (key: SnapshotKey): CompactSnapshotKey => {
+    switch (key.t) {
+        case 'string':
+            return key.v
+        case 'internal':
+            return ['i', key.v]
+        case 'symbol':
+            return ['s', key.v]
+    }
+}
+
+const decodeCompactKey = (key: CompactSnapshotKey): SnapshotKey => {
+    if (typeof key === 'string') {
+        return { t: 'string', v: key }
+    }
+    if (key[0] === 'i') {
+        return { t: 'internal', v: key[1] }
+    }
+    return { t: 'symbol', v: key[1] }
+}
+
+const encodeCompactDescriptor = (descriptor: SnapshotDescriptor): CompactSnapshotDescriptor => {
+    const key = encodeCompactKey(descriptor.key)
+    if (descriptor.kind === 'data') {
+        const flags = [
+            descriptor.configurable === false ? 'c' : '',
+            descriptor.enumerable === false ? 'e' : '',
+            descriptor.writable === false ? 'w' : '',
+        ].join('')
+        return flags.length === 0
+            ? [key, encodeCompactValue(descriptor.value)]
+            : [key, encodeCompactValue(descriptor.value), flags]
+    }
+    return [
+        key,
+        descriptor.get === undefined ? null : encodeCompactValue(descriptor.get),
+        descriptor.set === undefined ? null : encodeCompactValue(descriptor.set),
+        `a${[
+            descriptor.configurable === false ? 'c' : '',
+            descriptor.enumerable === false ? 'e' : '',
+        ].join('')}`,
+    ]
+}
+
+const decodeCompactDescriptor = (descriptor: CompactSnapshotDescriptor): SnapshotDescriptor => {
+    if (descriptor.length === 4) {
+        const flags = descriptor[3].slice(1)
+        return {
+            key: decodeCompactKey(descriptor[0]),
+            kind: 'accessor',
+            configurable: !flags.includes('c'),
+            enumerable: !flags.includes('e'),
+            get: descriptor[1] === null ? undefined : decodeCompactValue(descriptor[1]),
+            set: descriptor[2] === null ? undefined : decodeCompactValue(descriptor[2]),
+        }
+    }
+    const flags = descriptor.length === 3 ? descriptor[2] : ''
+    return {
+        key: decodeCompactKey(descriptor[0]),
+        kind: 'data',
+        configurable: !flags.includes('c'),
+        enumerable: !flags.includes('e'),
+        writable: !flags.includes('w'),
+        value: decodeCompactValue(descriptor[1]),
+    }
+}
+
+const snapshotArrayLength = (descriptor: SnapshotDescriptor) =>
+    descriptor.kind === 'data'
+    && descriptor.key.t === 'string'
+    && descriptor.key.v === 'length'
+    && descriptor.value.t === 'number'
+    && typeof descriptor.value.v === 'number'
+    && Number.isInteger(descriptor.value.v)
+    && descriptor.value.v >= 0
+        ? descriptor.value.v
+        : undefined
+
+const isCompactArrayIndexDescriptor = (descriptor: SnapshotDescriptor) =>
+    descriptor.kind === 'data'
+    && descriptor.key.t === 'string'
+    && isCanonicalArrayIndexKey(descriptor.key.v)
+    && descriptor.configurable === true
+    && descriptor.enumerable === true
+    && descriptor.writable === true
+
+const encodeCompactArrayLayout = (record: SnapshotRecord): { array?: CompactSnapshotArrayLayout, descriptors?: CompactSnapshotDescriptor[] } => {
+    const extras: CompactSnapshotDescriptor[] = []
+    const sparse: Array<[number, CompactSnapshotValue]> = []
+    let length: number | undefined
+    let lengthWritable = true
+    for (const descriptor of record.descriptors) {
+        const maybeLength = snapshotArrayLength(descriptor)
+        if (maybeLength !== undefined) {
+            length = maybeLength
+            lengthWritable = descriptor.kind === 'data' && descriptor.writable !== false
+            continue
+        }
+        if (descriptor.kind === 'data' && isCompactArrayIndexDescriptor(descriptor)) {
+            sparse.push([Number(descriptor.key.v), encodeCompactValue(descriptor.value)])
+            continue
+        }
+        extras.push(encodeCompactDescriptor(descriptor))
+    }
+    if (length === undefined) {
+        return {
+            descriptors: record.descriptors.map(encodeCompactDescriptor),
+        }
+    }
+    sparse.sort((left, right) => left[0] - right[0])
+    const maxIndex = sparse.length === 0 ? -1 : sparse[sparse.length - 1][0]
+    const dense = sparse.length > 0 && maxIndex + 1 <= sparse.length * 2
+    const array: CompactSnapshotArrayLayout = {
+        length,
+        ...(lengthWritable ? {} : { lengthWritable: false }),
+    }
+    if (dense) {
+        const items = Array.from({ length: maxIndex + 1 }, () => COMPACT_ARRAY_HOLE as CompactSnapshotArrayItem)
+        for (const [index, value] of sparse) {
+            items[index] = value
+        }
+        array.items = items
+    } else if (sparse.length > 0) {
+        array.sparse = sparse
+    }
+    return extras.length === 0 ? { array } : { array, descriptors: extras }
+}
+
+const decodeCompactArrayLayout = (
+    layout: CompactSnapshotArrayLayout | undefined,
+    descriptors: CompactSnapshotDescriptor[] | undefined
+): SnapshotDescriptor[] => {
+    const restored = descriptors === undefined ? [] : descriptors.map(decodeCompactDescriptor)
+    if (!layout) {
+        return restored
+    }
+    if (layout.items) {
+        for (let index = 0; index < layout.items.length; index++) {
+            const value = layout.items[index]
+            if (value === COMPACT_ARRAY_HOLE) {
+                continue
+            }
+            restored.push({
+                key: { t: 'string', v: String(index) },
+                kind: 'data',
+                configurable: true,
+                enumerable: true,
+                writable: true,
+                value: decodeCompactValue(value),
+            })
+        }
+    }
+    for (const [index, value] of layout.sparse ?? []) {
+        restored.push({
+            key: { t: 'string', v: String(index) },
+            kind: 'data',
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: decodeCompactValue(value),
+        })
+    }
+    restored.push({
+        key: { t: 'string', v: 'length' },
+        kind: 'data',
+        configurable: false,
+        enumerable: false,
+        writable: layout.lengthWritable !== false,
+        value: { t: 'number', v: layout.length },
+    })
+    return restored
+}
+
+const encodeCompactFunctionDescriptor = (descriptor: SnapshotFunctionDescriptor): CompactSnapshotFunctionDescriptor => ({
+    name: descriptor.name,
+    type: descriptor.type,
+    offset: descriptor.offset,
+    bodyOffset: descriptor.bodyOffset,
+    scopes: encodeCompactValue(descriptor.scopes),
+    programSection: encodeCompactValue(descriptor.programSection),
+    globalThis: encodeCompactValue(descriptor.globalThis),
+    ...(descriptor.homeObject === undefined ? {} : { homeObject: encodeCompactValue(descriptor.homeObject) }),
+})
+
+const decodeCompactFunctionDescriptor = (descriptor: CompactSnapshotFunctionDescriptor): SnapshotFunctionDescriptor => ({
+    name: descriptor.name,
+    type: descriptor.type,
+    offset: descriptor.offset,
+    bodyOffset: descriptor.bodyOffset,
+    scopes: decodeCompactValue(descriptor.scopes),
+    programSection: decodeCompactValue(descriptor.programSection),
+    globalThis: decodeCompactValue(descriptor.globalThis),
+    ...(descriptor.homeObject === undefined ? {} : { homeObject: decodeCompactValue(descriptor.homeObject) }),
+})
+
+const encodeCompactRecord = (record: SnapshotRecord): CompactSnapshotRecord => {
+    const compact: CompactSnapshotRecord = {
+        id: record.id,
+        kind: record.kind,
+        ...(record.extensible ? {} : { extensible: false }),
+        prototype: encodeCompactValue(record.prototype),
+    }
+    if (record.kind === 'array') {
+        const encodedArray = encodeCompactArrayLayout(record)
+        if (encodedArray.array) {
+            compact.array = encodedArray.array
+        }
+        if (encodedArray.descriptors && encodedArray.descriptors.length > 0) {
+            compact.descriptors = encodedArray.descriptors
+        }
+    } else if (record.descriptors.length > 0) {
+        compact.descriptors = record.descriptors.map(encodeCompactDescriptor)
+    }
+    if (record.programSource !== undefined) {
+        compact.programSource = record.programSource
+    }
+    if (record.functionDescriptor) {
+        compact.functionDescriptor = encodeCompactFunctionDescriptor(record.functionDescriptor)
+    }
+    if (record.defaultClassConstructor) {
+        compact.defaultClassConstructor = {
+            name: record.defaultClassConstructor.name,
+            ...(record.defaultClassConstructor.superClass === undefined
+                ? {}
+                : { superClass: encodeCompactValue(record.defaultClassConstructor.superClass) }),
+        }
+    }
+    if (record.boundFunction) {
+        compact.boundFunction = {
+            function: encodeCompactValue(record.boundFunction.function),
+            self: encodeCompactValue(record.boundFunction.self),
+            arguments: record.boundFunction.arguments.map(encodeCompactValue),
+        }
+    }
+    if (record.generatorState) {
+        compact.generatorState = {
+            stack: encodeCompactValue(record.generatorState.stack),
+            ptr: record.generatorState.ptr,
+            completed: record.generatorState.completed,
+            started: record.generatorState.started,
+            pendingAction: record.generatorState.pendingAction === null
+                ? null
+                : {
+                    type: record.generatorState.pendingAction.type,
+                    value: encodeCompactValue(record.generatorState.pendingAction.value),
+                },
+            baseFrame: encodeCompactValue(record.generatorState.baseFrame),
+        }
+    }
+    if (record.generatorMethod) {
+        compact.generatorMethod = {
+            generator: encodeCompactValue(record.generatorMethod.generator),
+            method: record.generatorMethod.method,
+        }
+    }
+    if (record.frameGenerator !== undefined) {
+        compact.frameGenerator = encodeCompactValue(record.frameGenerator)
+    }
+    if (record.entries) {
+        compact.entries = record.entries.map(([key, value]) => [encodeCompactValue(key), encodeCompactValue(value)])
+    }
+    if (record.values) {
+        compact.values = record.values.map(encodeCompactValue)
+    }
+    return compact
+}
+
+const decodeCompactRecord = (record: CompactSnapshotRecord): SnapshotRecord => ({
+    id: record.id,
+    kind: record.kind,
+    extensible: record.extensible !== false,
+    prototype: decodeCompactValue(record.prototype),
+    descriptors: record.kind === 'array'
+        ? decodeCompactArrayLayout(record.array, record.descriptors)
+        : (record.descriptors ?? []).map(decodeCompactDescriptor),
+    ...(record.programSource === undefined ? {} : { programSource: record.programSource }),
+    ...(record.functionDescriptor === undefined ? {} : { functionDescriptor: decodeCompactFunctionDescriptor(record.functionDescriptor) }),
+    ...(record.defaultClassConstructor === undefined
+        ? {}
+        : {
+            defaultClassConstructor: {
+                name: record.defaultClassConstructor.name,
+                ...(record.defaultClassConstructor.superClass === undefined
+                    ? {}
+                    : { superClass: decodeCompactValue(record.defaultClassConstructor.superClass) }),
+            },
+        }),
+    ...(record.boundFunction === undefined
+        ? {}
+        : {
+            boundFunction: {
+                function: decodeCompactValue(record.boundFunction.function),
+                self: decodeCompactValue(record.boundFunction.self),
+                arguments: record.boundFunction.arguments.map(decodeCompactValue),
+            },
+        }),
+    ...(record.generatorState === undefined
+        ? {}
+        : {
+            generatorState: {
+                stack: decodeCompactValue(record.generatorState.stack),
+                ptr: record.generatorState.ptr,
+                completed: record.generatorState.completed,
+                started: record.generatorState.started,
+                pendingAction: record.generatorState.pendingAction === null
+                    ? null
+                    : {
+                        type: record.generatorState.pendingAction.type,
+                        value: decodeCompactValue(record.generatorState.pendingAction.value),
+                    },
+                baseFrame: decodeCompactValue(record.generatorState.baseFrame),
+            },
+        }),
+    ...(record.generatorMethod === undefined
+        ? {}
+        : {
+            generatorMethod: {
+                generator: decodeCompactValue(record.generatorMethod.generator),
+                method: record.generatorMethod.method,
+            },
+        }),
+    ...(record.frameGenerator === undefined ? {} : { frameGenerator: decodeCompactValue(record.frameGenerator) }),
+    ...(record.entries === undefined ? {} : { entries: record.entries.map(([key, value]) => [decodeCompactValue(key), decodeCompactValue(value)] as [SnapshotValue, SnapshotValue]) }),
+    ...(record.values === undefined ? {} : { values: record.values.map(decodeCompactValue) }),
+})
+
+const encodeCompactHostOverlay = (overlay: SnapshotHostOverlay): CompactSnapshotHostOverlay => ({
+    id: overlay.id,
+    ...(overlay.descriptors.length === 0 ? {} : { descriptors: overlay.descriptors.map(encodeCompactDescriptor) }),
+    ...(overlay.deleted.length === 0 ? {} : { deleted: overlay.deleted.map(encodeCompactKey) }),
+})
+
+const decodeCompactHostOverlay = (overlay: CompactSnapshotHostOverlay): SnapshotHostOverlay => ({
+    id: overlay.id,
+    descriptors: (overlay.descriptors ?? []).map(decodeCompactDescriptor),
+    deleted: (overlay.deleted ?? []).map(decodeCompactKey),
+})
+
+const encodeCompactExecutionSnapshot = (snapshot: ExecutionSnapshot): CompactExecutionSnapshotEnvelope => ({
+    format: COMPACT_EXECUTION_SNAPSHOT_FORMAT,
+    version: COMPACT_SNAPSHOT_VERSION,
+    source: snapshot.source,
+    ptr: snapshot.ptr,
+    evalResult: encodeCompactValue(snapshot.evalResult),
+    stack: encodeCompactValue(snapshot.stack),
+    records: snapshot.records.map(encodeCompactRecord),
+    ...(snapshot.hostOverlays && snapshot.hostOverlays.length > 0
+        ? { hostOverlays: snapshot.hostOverlays.map(encodeCompactHostOverlay) }
+        : {}),
+})
+
+const decodeCompactExecutionSnapshot = (snapshot: CompactExecutionSnapshotEnvelope): ExecutionSnapshot => ({
+    version: SNAPSHOT_VERSION,
+    source: snapshot.source,
+    ptr: snapshot.ptr,
+    evalResult: decodeCompactValue(snapshot.evalResult),
+    stack: decodeCompactValue(snapshot.stack),
+    records: snapshot.records.map(decodeCompactRecord),
+    ...(snapshot.hostOverlays === undefined ? {} : { hostOverlays: snapshot.hostOverlays.map(decodeCompactHostOverlay) }),
+})
+
+const encodeCompactExecutionState = (state: SnapshotExecutionState): CompactSnapshotExecutionState => ({
+    ptr: state.ptr,
+    evalResult: encodeCompactValue(state.evalResult),
+    stack: encodeCompactValue(state.stack),
+})
+
+const decodeCompactExecutionState = (state: CompactSnapshotExecutionState): SnapshotExecutionState => ({
+    ptr: state.ptr,
+    evalResult: decodeCompactValue(state.evalResult),
+    stack: decodeCompactValue(state.stack),
+})
+
+const encodeCompactVmPromiseReaction = (reaction: SnapshotVmPromiseReaction): CompactSnapshotVmPromiseReaction =>
+    reaction.type === 'then'
+        ? {
+            type: 'then',
+            kind: reaction.kind,
+            handler: encodeCompactValue(reaction.handler),
+            result: reaction.result,
+        }
+        : {
+            type: 'await',
+            kind: reaction.kind,
+            task: reaction.task,
+        }
+
+const decodeCompactVmPromiseReaction = (reaction: CompactSnapshotVmPromiseReaction): SnapshotVmPromiseReaction =>
+    reaction.type === 'then'
+        ? {
+            type: 'then',
+            kind: reaction.kind,
+            handler: decodeCompactValue(reaction.handler),
+            result: reaction.result,
+        }
+        : {
+            type: 'await',
+            kind: reaction.kind,
+            task: reaction.task,
+        }
+
+const encodeCompactVmJob = (job: SnapshotVmJob): CompactSnapshotVmJob => {
+    if (job.type === 'then') {
+        return {
+            id: job.id,
+            type: 'then',
+            reaction: encodeCompactVmPromiseReaction(job.reaction) as CompactSnapshotVmPromiseReaction & { type: 'then' },
+            argument: encodeCompactValue(job.argument),
+            ...(job.execution === undefined ? {} : { execution: job.execution }),
+        }
+    }
+    if (job.type === 'asyncContinuation') {
+        return {
+            id: job.id,
+            type: 'asyncContinuation',
+            task: job.task,
+            kind: job.kind,
+            argument: encodeCompactValue(job.argument),
+        }
+    }
+    return {
+        id: job.id,
+        type: 'asyncStart',
+        task: job.task,
+    }
+}
+
+const decodeCompactVmJob = (job: CompactSnapshotVmJob): SnapshotVmJob => {
+    if (job.type === 'then') {
+        return {
+            id: job.id,
+            type: 'then',
+            reaction: decodeCompactVmPromiseReaction(job.reaction) as SnapshotVmPromiseReaction & { type: 'then' },
+            argument: decodeCompactValue(job.argument),
+            ...(job.execution === undefined ? {} : { execution: job.execution }),
+        }
+    }
+    if (job.type === 'asyncContinuation') {
+        return {
+            id: job.id,
+            type: 'asyncContinuation',
+            task: job.task,
+            kind: job.kind,
+            argument: decodeCompactValue(job.argument),
+        }
+    }
+    return {
+        id: job.id,
+        type: 'asyncStart',
+        task: job.task,
+    }
+}
+
+const encodeCompactVmAsyncSessionSnapshot = (snapshot: VmAsyncSessionSnapshot): CompactVmAsyncSessionSnapshotEnvelope => ({
+    format: COMPACT_VM_ASYNC_SESSION_SNAPSHOT_FORMAT,
+    version: COMPACT_SNAPSHOT_VERSION,
+    source: snapshot.source,
+    program: encodeCompactValue(snapshot.program),
+    globalThis: encodeCompactValue(snapshot.globalThis),
+    mainExecution: snapshot.mainExecution,
+    executions: snapshot.executions.map(entry => ({
+        id: entry.id,
+        state: encodeCompactExecutionState(entry.state),
+    })),
+    promises: snapshot.promises.map(promise => ({
+        id: promise.id,
+        promise: encodeCompactValue(promise.promise),
+        state: promise.state,
+        value: encodeCompactValue(promise.value),
+        fulfillReactions: promise.fulfillReactions.map(encodeCompactVmPromiseReaction),
+        rejectReactions: promise.rejectReactions.map(encodeCompactVmPromiseReaction),
+    })),
+    asyncTasks: snapshot.asyncTasks.map(task => ({
+        id: task.id,
+        execution: task.execution,
+        promise: task.promise,
+    })),
+    jobs: snapshot.jobs.map(encodeCompactVmJob),
+    timers: snapshot.timers.map(timer => ({
+        id: timer.id,
+        dueTick: timer.dueTick,
+        promise: timer.promise,
+        value: encodeCompactValue(timer.value),
+    })),
+    activeJob: snapshot.activeJob === null ? null : encodeCompactVmJob(snapshot.activeJob),
+    currentTick: snapshot.currentTick,
+    nextPromiseId: snapshot.nextPromiseId,
+    nextJobId: snapshot.nextJobId,
+    nextTimerId: snapshot.nextTimerId,
+    nextAsyncTaskId: snapshot.nextAsyncTaskId,
+    mainDone: snapshot.mainDone,
+    paused: snapshot.paused,
+    ...(snapshot.pausedPtr === undefined ? {} : { pausedPtr: snapshot.pausedPtr }),
+    ...(snapshot.pausedExecution === undefined ? {} : { pausedExecution: snapshot.pausedExecution }),
+    records: snapshot.records.map(encodeCompactRecord),
+    ...(snapshot.hostOverlays && snapshot.hostOverlays.length > 0
+        ? { hostOverlays: snapshot.hostOverlays.map(encodeCompactHostOverlay) }
+        : {}),
+})
+
+const decodeCompactVmAsyncSessionSnapshot = (snapshot: CompactVmAsyncSessionSnapshotEnvelope): VmAsyncSessionSnapshot => ({
+    version: SNAPSHOT_VERSION,
+    source: snapshot.source,
+    program: decodeCompactValue(snapshot.program),
+    globalThis: decodeCompactValue(snapshot.globalThis),
+    mainExecution: snapshot.mainExecution,
+    executions: snapshot.executions.map(entry => ({
+        id: entry.id,
+        state: decodeCompactExecutionState(entry.state),
+    })),
+    promises: snapshot.promises.map(promise => ({
+        id: promise.id,
+        promise: decodeCompactValue(promise.promise),
+        state: promise.state,
+        value: decodeCompactValue(promise.value),
+        fulfillReactions: promise.fulfillReactions.map(decodeCompactVmPromiseReaction),
+        rejectReactions: promise.rejectReactions.map(decodeCompactVmPromiseReaction),
+    })),
+    asyncTasks: snapshot.asyncTasks.map(task => ({
+        id: task.id,
+        execution: task.execution,
+        promise: task.promise,
+    })),
+    jobs: snapshot.jobs.map(decodeCompactVmJob),
+    timers: snapshot.timers.map(timer => ({
+        id: timer.id,
+        dueTick: timer.dueTick,
+        promise: timer.promise,
+        value: decodeCompactValue(timer.value),
+    })),
+    activeJob: snapshot.activeJob === null ? null : decodeCompactVmJob(snapshot.activeJob),
+    currentTick: snapshot.currentTick,
+    nextPromiseId: snapshot.nextPromiseId,
+    nextJobId: snapshot.nextJobId,
+    nextTimerId: snapshot.nextTimerId,
+    nextAsyncTaskId: snapshot.nextAsyncTaskId,
+    mainDone: snapshot.mainDone,
+    paused: snapshot.paused,
+    ...(snapshot.pausedPtr === undefined ? {} : { pausedPtr: snapshot.pausedPtr }),
+    ...(snapshot.pausedExecution === undefined ? {} : { pausedExecution: snapshot.pausedExecution }),
+    records: snapshot.records.map(decodeCompactRecord),
+    ...(snapshot.hostOverlays === undefined ? {} : { hostOverlays: snapshot.hostOverlays.map(decodeCompactHostOverlay) }),
+})
+
+const validateExecutionSnapshot = (parsed: unknown): ExecutionSnapshot => {
+    if (parsed == null || typeof parsed !== 'object' || (parsed as ExecutionSnapshot).version !== SNAPSHOT_VERSION) {
+        throw new Error('Unsupported execution snapshot version')
+    }
+    if (typeof (parsed as ExecutionSnapshot).source !== 'string') {
+        throw new Error('Execution snapshot is missing JS source')
+    }
+    return parsed as ExecutionSnapshot
+}
+
+const validateVmAsyncSessionSnapshot = (parsed: unknown): VmAsyncSessionSnapshot => {
+    if (parsed == null || typeof parsed !== 'object' || (parsed as VmAsyncSessionSnapshot).version !== SNAPSHOT_VERSION) {
+        throw new Error('Unsupported VM async session snapshot version')
+    }
+    if (typeof (parsed as VmAsyncSessionSnapshot).source !== 'string') {
+        throw new Error('VM async session snapshot is missing JS source')
+    }
+    return parsed as VmAsyncSessionSnapshot
+}
+
+const buildSnapshotCheckpoint = <T extends SnapshotCheckpoint>(
+    history: SnapshotHistory,
+    checkpoint: T
+): SnapshotHistory => {
+    if (history.checkpoints.some(existing => existing.id === checkpoint.id)) {
+        throw new Error(`Duplicate snapshot checkpoint id '${checkpoint.id}'`)
+    }
+    if (checkpoint.parentId !== undefined && !history.checkpoints.some(existing => existing.id === checkpoint.parentId)) {
+        throw new Error(`Unknown snapshot checkpoint parent '${checkpoint.parentId}'`)
+    }
+    return {
+        version: SNAPSHOT_HISTORY_VERSION,
+        rootIds: checkpoint.parentId === undefined ? [...history.rootIds, checkpoint.id] : [...history.rootIds],
+        headId: checkpoint.id,
+        checkpoints: [...history.checkpoints, checkpoint],
+    }
+}
+
+const nextSnapshotCheckpointId = (history: SnapshotHistory) => `checkpoint-${history.checkpoints.length + 1}`
+
+const getSnapshotCheckpoint = (history: SnapshotHistory, checkpointId: string): SnapshotCheckpoint => {
+    const checkpoint = history.checkpoints.find(entry => entry.id === checkpointId)
+    if (!checkpoint) {
+        throw new Error(`Unknown snapshot checkpoint '${checkpointId}'`)
+    }
+    return checkpoint
+}
+
+
 const unsupportedMessage = (reason: string, path: string) => `${reason} at ${path}`
 
 const isObjectLike = (value: unknown): value is object =>
@@ -417,31 +1335,37 @@ export function createHostRegistry(entries: Iterable<[string, unknown]> | Record
 }
 
 export const serializeExecutionSnapshot = (snapshot: ExecutionSnapshot): string =>
-    JSON.stringify(snapshot)
+    JSON.stringify(encodeCompactExecutionSnapshot(snapshot))
 
 export const parseExecutionSnapshot = (text: string): ExecutionSnapshot => {
-    const parsed = JSON.parse(text)
-    if (parsed == null || typeof parsed !== 'object' || parsed.version !== SNAPSHOT_VERSION) {
-        throw new Error('Unsupported execution snapshot version')
+    const parsed = JSON.parse(text) as ExecutionSnapshot | CompactExecutionSnapshotEnvelope
+    if (
+        parsed != null
+        && typeof parsed === 'object'
+        && 'format' in parsed
+        && parsed.format === COMPACT_EXECUTION_SNAPSHOT_FORMAT
+        && parsed.version === COMPACT_SNAPSHOT_VERSION
+    ) {
+        return validateExecutionSnapshot(decodeCompactExecutionSnapshot(parsed))
     }
-    if (typeof parsed.source !== 'string') {
-        throw new Error('Execution snapshot is missing JS source')
-    }
-    return parsed as ExecutionSnapshot
+    return validateExecutionSnapshot(parsed)
 }
 
 export const serializeVmAsyncSessionSnapshot = (snapshot: VmAsyncSessionSnapshot): string =>
-    JSON.stringify(snapshot)
+    JSON.stringify(encodeCompactVmAsyncSessionSnapshot(snapshot))
 
 export const parseVmAsyncSessionSnapshot = (text: string): VmAsyncSessionSnapshot => {
-    const parsed = JSON.parse(text)
-    if (parsed == null || typeof parsed !== 'object' || parsed.version !== SNAPSHOT_VERSION) {
-        throw new Error('Unsupported VM async session snapshot version')
+    const parsed = JSON.parse(text) as VmAsyncSessionSnapshot | CompactVmAsyncSessionSnapshotEnvelope
+    if (
+        parsed != null
+        && typeof parsed === 'object'
+        && 'format' in parsed
+        && parsed.format === COMPACT_VM_ASYNC_SESSION_SNAPSHOT_FORMAT
+        && parsed.version === COMPACT_SNAPSHOT_VERSION
+    ) {
+        return validateVmAsyncSessionSnapshot(decodeCompactVmAsyncSessionSnapshot(parsed))
     }
-    if (typeof parsed.source !== 'string') {
-        throw new Error('VM async session snapshot is missing JS source')
-    }
-    return parsed as VmAsyncSessionSnapshot
+    return validateVmAsyncSessionSnapshot(parsed)
 }
 
 type InternalSymbolName =
@@ -2064,6 +2988,119 @@ class SnapshotReader {
                 return this.options.vmAsyncSession.getSerializationBuiltinValue(value.id)
         }
     }
+}
+
+export const createSnapshotHistory = (): SnapshotHistory => ({
+    version: SNAPSHOT_HISTORY_VERSION,
+    rootIds: [],
+    checkpoints: [],
+})
+
+export const appendExecutionSnapshotCheckpoint = (
+    history: SnapshotHistory,
+    execution: Execution,
+    options: SnapshotOptions = {},
+    checkpoint: SnapshotCheckpointOptions = {}
+): SnapshotHistory => buildSnapshotCheckpoint(history, {
+    id: checkpoint.id ?? nextSnapshotCheckpointId(history),
+    ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
+    ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
+    ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+    kind: 'execution',
+    snapshot: snapshotExecution(execution, options),
+})
+
+export const appendVmAsyncSessionSnapshotCheckpoint = (
+    history: SnapshotHistory,
+    session: VmAsyncSession,
+    options: VmAsyncSessionSnapshotOptions = {},
+    checkpoint: SnapshotCheckpointOptions = {}
+): SnapshotHistory => buildSnapshotCheckpoint(history, {
+    id: checkpoint.id ?? nextSnapshotCheckpointId(history),
+    ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
+    ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
+    ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+    kind: 'vmAsyncSession',
+    snapshot: snapshotVmAsyncSession(session, options),
+})
+
+export const serializeSnapshotHistory = (history: SnapshotHistory): string =>
+    JSON.stringify({
+        format: SNAPSHOT_HISTORY_FORMAT,
+        version: SNAPSHOT_HISTORY_VERSION,
+        rootIds: history.rootIds,
+        ...(history.headId === undefined ? {} : { headId: history.headId }),
+        checkpoints: history.checkpoints.map(checkpoint => ({
+            id: checkpoint.id,
+            ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
+            ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
+            ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+            kind: checkpoint.kind,
+            snapshot: checkpoint.kind === 'execution'
+                ? encodeCompactExecutionSnapshot(checkpoint.snapshot)
+                : encodeCompactVmAsyncSessionSnapshot(checkpoint.snapshot),
+        })),
+    } satisfies CompactSnapshotHistoryDocument)
+
+export const parseSnapshotHistory = (text: string): SnapshotHistory => {
+    const parsed = JSON.parse(text) as CompactSnapshotHistoryDocument
+    if (
+        parsed == null
+        || typeof parsed !== 'object'
+        || parsed.format !== SNAPSHOT_HISTORY_FORMAT
+        || parsed.version !== SNAPSHOT_HISTORY_VERSION
+        || !Array.isArray(parsed.rootIds)
+        || !Array.isArray(parsed.checkpoints)
+    ) {
+        throw new Error('Unsupported snapshot history version')
+    }
+    return {
+        version: SNAPSHOT_HISTORY_VERSION,
+        rootIds: [...parsed.rootIds],
+        ...(parsed.headId === undefined ? {} : { headId: parsed.headId }),
+        checkpoints: parsed.checkpoints.map(checkpoint => checkpoint.kind === 'execution'
+            ? {
+                id: checkpoint.id,
+                ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
+                ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
+                ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+                kind: 'execution',
+                snapshot: decodeCompactExecutionSnapshot(checkpoint.snapshot as CompactExecutionSnapshotEnvelope),
+            }
+            : {
+                id: checkpoint.id,
+                ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
+                ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
+                ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+                kind: 'vmAsyncSession',
+                snapshot: decodeCompactVmAsyncSessionSnapshot(checkpoint.snapshot as CompactVmAsyncSessionSnapshotEnvelope),
+            }
+        ),
+    }
+}
+
+export const restoreExecutionCheckpoint = (
+    history: SnapshotHistory,
+    checkpointId: string,
+    options: RestoreOptions = {}
+): Execution => {
+    const checkpoint = getSnapshotCheckpoint(history, checkpointId)
+    if (checkpoint.kind !== 'execution') {
+        throw new Error(`Snapshot checkpoint '${checkpointId}' is not an execution checkpoint`)
+    }
+    return restoreExecution(checkpoint.snapshot, options)
+}
+
+export const restoreVmAsyncSessionCheckpoint = (
+    history: SnapshotHistory,
+    checkpointId: string,
+    options: VmAsyncSessionRestoreOptions = {}
+): VmAsyncSession => {
+    const checkpoint = getSnapshotCheckpoint(history, checkpointId)
+    if (checkpoint.kind !== 'vmAsyncSession') {
+        throw new Error(`Snapshot checkpoint '${checkpointId}' is not a VM async session checkpoint`)
+    }
+    return restoreVmAsyncSession(checkpoint.snapshot, options)
 }
 
 export const snapshotExecution = (

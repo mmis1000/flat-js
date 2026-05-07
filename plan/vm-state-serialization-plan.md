@@ -1,6 +1,6 @@
 # VM State Serialization Plan
 
-Status (updated 2026-05-05): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, support `Map`, `Set`, `WeakMap`, `WeakSet`, and synchronous VM generator records, and can opt into strict checkpointable admission checks. Phase 7 VM-owned async scheduling, async/await integration, playground debugger integration, session snapshot/restore, and host-boundary guardrails are implemented; host/native pending promises remain rejected. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
+Status (updated 2026-05-07): optional serialization exists behind `src/serialization.ts` and `src/runtime/serialization.ts`; it is not exported from the default runtime, inline runtime, or loader output. Snapshots pause synchronous executions at `Fields.step()` boundaries, embed the source/program buffers, preserve ordinary object/array/function identity, restore runnable `Execution` objects, serialize registered host descriptor overlays, preserve VM-managed iterator state, support `Map`, `Set`, `WeakMap`, `WeakSet`, and synchronous VM generator records, and can opt into strict checkpointable admission checks. Phase 7 VM-owned async scheduling, async/await integration, playground debugger integration, session snapshot/restore, host-boundary guardrails, compact snapshot text encoding, and parent-linked full checkpoint history trees are implemented; host/native pending promises remain rejected and delta checkpoints are still future work. The browser proof-of-concept lives in `example/serialization-playground.vue` and is built by CI through `npm run build-example:serialization-playground`.
 
 Current assumption check (2026-05-05): the overall direction below still matches the runtime shape. The serializer now lives inside `src/runtime` and uses narrow runtime internals for side-table reconstruction. The next work is a deterministic VM-owned async scheduler/session, without pulling serialization into the default loader or turning normal runtime execution into a full host membrane.
 
@@ -87,6 +87,11 @@ Follow-up stages:
    - Add a Playwright smoke test for save URL -> reset/load -> continue in the serialization playground.
    - Keep the runtime-inline/loader-size guard in tests and CI.
    - Update README status once the current V1/V1.1 API has settled enough to document as a supported optional extension.
+
+8. **Compact text and checkpoint history**
+   - Implemented 2026-05-07: `serializeExecutionSnapshot` / `serializeVmAsyncSessionSnapshot` now emit compact JSON envelopes while parsers remain backward-compatible with legacy raw snapshot JSON.
+   - Implemented 2026-05-07: `createSnapshotHistory`, checkpoint append helpers, history serialization/parsing, and restore-by-checkpoint-id APIs support parent-linked branching trees of full checkpoints for execution and VM async session snapshots.
+   - Remaining work: delta checkpoints, compaction policies, and serialization-playground UI for browsing/editing checkpoint trees.
 
 ## 1. Product Contract
 

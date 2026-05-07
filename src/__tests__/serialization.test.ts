@@ -4,12 +4,17 @@ import { compile } from '../compiler'
 import { Fields, getExecution, materializeScopeStaticBindings, run } from '../runtime'
 import {
     UnsupportedSerializationError,
+    appendExecutionSnapshotCheckpoint,
     createCheckpointableAdmission,
     createHostRegistry,
     createSerializableHostObjectRedirects,
+    createSnapshotHistory,
     parseExecutionSnapshot,
+    parseSnapshotHistory,
     restoreExecution,
+    restoreExecutionCheckpoint,
     serializeExecutionSnapshot,
+    serializeSnapshotHistory,
     snapshotExecution,
 } from '../serialization'
 
@@ -863,6 +868,118 @@ log(host.extra.value + ':' + host.changed.value + ':' + ('gone' in host))
     expect((restoredHost as any).extra.value).toBe(1)
     expect((restoredHost as any).changed.value).toBe(2)
     expect('gone' in restoredHost).toBe(false)
+})
+
+
+test('execution snapshots serialize to a compact format while remaining legacy-compatible on parse', () => {
+    const harness = createPausedHarness(`
+const values = []
+for (let i = 0; i < 120; i++) {
+    values.push(i)
+}
+debugger
+log(values.length)
+`)
+
+    const snapshot = snapshotExecution(harness.execution, {
+        hostRegistry: harness.hostRegistry,
+    })
+    const compactText = serializeExecutionSnapshot(snapshot)
+    const legacyText = JSON.stringify(snapshot)
+
+    expect(compactText.length).toBeLessThan(legacyText.length)
+
+    const restoredCompact = restoreExecution(parseExecutionSnapshot(compactText), {
+        hostRegistry: harness.hostRegistry,
+        compileFunction: compile,
+    })
+    continueToDone(restoredCompact)
+    expect(harness.logs).toEqual(['120'])
+
+    const restoredLegacy = restoreExecution(parseExecutionSnapshot(legacyText), {
+        hostRegistry: harness.hostRegistry,
+        compileFunction: compile,
+    })
+    continueToDone(restoredLegacy)
+    expect(harness.logs).toEqual(['120', '120'])
+})
+
+test('execution snapshot history supports branching serialize/parse and restore by checkpoint id', () => {
+    const rootHarness = createPausedHarness(`
+const values = []
+values.push('root')
+debugger
+log(values.join(','))
+`)
+    const rootSnapshot = snapshotExecution(rootHarness.execution, {
+        hostRegistry: rootHarness.hostRegistry,
+    })
+
+    let history = appendExecutionSnapshotCheckpoint(
+        createSnapshotHistory(),
+        rootHarness.execution,
+        { hostRegistry: rootHarness.hostRegistry },
+        { id: 'root', label: 'root checkpoint' }
+    )
+    expect(history.rootIds).toEqual(['root'])
+    expect(history.headId).toBe('root')
+
+    const rootRestored = restoreExecutionCheckpoint(history, 'root', {
+        hostRegistry: rootHarness.hostRegistry,
+        compileFunction: compile,
+    })
+    continueToDone(rootRestored)
+    expect(rootHarness.logs).toEqual(['root'])
+
+    const branchA = restoreExecution(rootSnapshot, {
+        hostRegistry: rootHarness.hostRegistry,
+        compileFunction: compile,
+    })
+    runReplOnPausedExecution({
+        ...rootHarness,
+        execution: branchA,
+        continueToDone: () => continueToDone(branchA),
+    }, `values.push('branch-a')`)
+    history = appendExecutionSnapshotCheckpoint(
+        history,
+        branchA,
+        { hostRegistry: rootHarness.hostRegistry },
+        { id: 'branch-a', parentId: 'root', label: 'branch a' }
+    )
+
+    const branchB = restoreExecution(rootSnapshot, {
+        hostRegistry: rootHarness.hostRegistry,
+        compileFunction: compile,
+    })
+    runReplOnPausedExecution({
+        ...rootHarness,
+        execution: branchB,
+        continueToDone: () => continueToDone(branchB),
+    }, `values.push('branch-b')`)
+    history = appendExecutionSnapshotCheckpoint(
+        history,
+        branchB,
+        { hostRegistry: rootHarness.hostRegistry },
+        { id: 'branch-b', parentId: 'root', label: 'branch b' }
+    )
+
+    expect(history.headId).toBe('branch-b')
+    expect(history.checkpoints.map((checkpoint: { id: string }) => checkpoint.id)).toEqual(['root', 'branch-a', 'branch-b'])
+
+    const parsedHistory = parseSnapshotHistory(serializeSnapshotHistory(history))
+    const restoredBranchA = restoreExecutionCheckpoint(parsedHistory, 'branch-a', {
+        hostRegistry: rootHarness.hostRegistry,
+        compileFunction: compile,
+    })
+    continueToDone(restoredBranchA)
+
+    const restoredBranchB = restoreExecutionCheckpoint(parsedHistory, 'branch-b', {
+        hostRegistry: rootHarness.hostRegistry,
+        compileFunction: compile,
+    })
+    continueToDone(restoredBranchB)
+
+    expect(rootHarness.logs).toEqual(['root', 'root,branch-a', 'root,branch-b'])
 })
 
 test('runtime-inline does not include optional serializer API when generated', () => {
