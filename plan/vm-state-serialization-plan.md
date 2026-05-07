@@ -84,14 +84,17 @@ Follow-up stages:
    - Route all async boundary decisions through a narrow host-promise policy hook so future rejected-on-restore or host-resume policies do not require a scheduler rewrite.
 
 7. **Tooling and CI**
-   - Add a Playwright smoke test for save URL -> reset/load -> continue in the serialization playground.
+   - Manual Playwright smoke validation was run on 2026-05-08 against the local static serialization-playground build (`python3 -m http.server` + `playwright-cli`): Start -> Checkpoint -> Save URL -> Reset -> Load URL -> Continue, with no browser console errors.
+   - Add an automated Playwright smoke test for save URL -> reset/load -> continue in the serialization playground.
    - Keep the runtime-inline/loader-size guard in tests and CI.
    - Update README status once the current V1/V1.1 API has settled enough to document as a supported optional extension.
 
 8. **Compact text and checkpoint history**
    - Implemented 2026-05-07: `serializeExecutionSnapshot` / `serializeVmAsyncSessionSnapshot` now emit compact JSON envelopes while parsers remain backward-compatible with legacy raw snapshot JSON.
    - Implemented 2026-05-07: `createSnapshotHistory`, checkpoint append helpers, history serialization/parsing, and restore-by-checkpoint-id APIs support parent-linked branching trees of full checkpoints for execution and VM async session snapshots.
-   - Remaining work: delta checkpoints, compaction policies, and serialization-playground UI for browsing/editing checkpoint trees.
+   - Implemented 2026-05-08: the serialization playground now supports browsing, loading, renaming, deleting, saving, and exporting checkpoint-history trees, including regressions for document classification and non-head save/export behavior.
+   - Implemented 2026-05-08: snapshot-history retention/compaction helpers preserve labeled checkpoints, count only unlabeled/auto checkpoints against `maxCheckpoints`, and repair parent/root links after pruning.
+   - Implemented 2026-05-08: snapshot-history text serialization now supports parent-relative delta checkpoints for both `execution` and `vmAsyncSession` histories when the delta form is shorter, while parse restores full snapshots transparently.
 
 ## 1. Product Contract
 

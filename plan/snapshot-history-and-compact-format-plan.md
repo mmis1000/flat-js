@@ -1,5 +1,7 @@
 # Snapshot History And Compact Format Implementation Plan
 
+Status (updated 2026-05-08): the compact text/history plan is complete. The original patch landed compact envelopes plus full-checkpoint history trees on 2026-05-07, and follow-up work on 2026-05-08 added serialization-playground checkpoint-history controls, retention/compaction helpers, and delta checkpoint storage/restore.
+
 > **For Hermes:** Execute this plan with strict TDD. Write failing tests first, run them to confirm failure, then implement the smallest runtime/public API changes that pass.
 
 **Goal:** Add a versioned compact snapshot text format that materially shrinks array/object-heavy snapshots, and add a reusable checkpoint history tree API for both synchronous execution snapshots and VM async session snapshots.
@@ -179,7 +181,10 @@ Use a conventional commit message describing compact snapshot encoding and check
 
 ## Remaining Deliberate Non-Goals For This Patch
 
-- No delta checkpoint storage yet; this patch adds a checkpoint tree of full snapshots.
-- No browser UI tree editor in the serialization playground yet.
-- No binary gzip/brotli payload format yet; this patch focuses on semantic compaction in plain JSON.
-- No cross-version compatibility promise beyond parser support for legacy raw JSON and the new compact envelopes in this codebase.
+The original 2026-05-07 patch intentionally stopped at compact envelopes plus full-snapshot history trees. Those follow-up items are now complete as of 2026-05-08:
+
+- delta checkpoint storage/restore is implemented for parent-linked history checkpoints when the compact delta document is smaller than the full checkpoint document.
+- the serialization playground now has checkpoint-history controls for browsing/editing/loading history trees.
+- snapshot-history retention/compaction helpers are implemented.
+- binary gzip/brotli payload formats are still out of scope; the compact text format remains plain JSON.
+- no cross-version compatibility promise exists beyond parser support for legacy raw JSON and the current compact/history formats in this codebase.
