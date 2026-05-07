@@ -57,6 +57,7 @@ import {
 } from "./shared"
 import { getExecution, getGeneratorFunctionIntrinsicsForSerialization } from "./execution"
 import type { DebugCallback } from "./opcodes/types"
+import { applyCompactJsonDelta, createCompactJsonDelta, type CompactJsonDelta, type CompactJsonValue } from "./snapshot-history-delta"
 
 type PrimitiveSnapshotValue =
     | { t: 'undefined' }
@@ -541,14 +542,26 @@ export type SnapshotHistoryRetentionPolicy = {
     preserveHeadLineage?: boolean
 }
 
-type CompactSnapshotHistoryCheckpoint = {
+type CompactSnapshotCheckpointEnvelope = CompactExecutionSnapshotEnvelope | CompactVmAsyncSessionSnapshotEnvelope
+
+type CompactSnapshotHistoryCheckpointBase = {
     id: string
     parentId?: string
     label?: string
     createdAt?: string
     kind: SnapshotCheckpointKind
-    snapshot: CompactExecutionSnapshotEnvelope | CompactVmAsyncSessionSnapshotEnvelope
 }
+
+type CompactSnapshotHistoryFullCheckpoint = CompactSnapshotHistoryCheckpointBase & {
+    snapshot: CompactSnapshotCheckpointEnvelope
+}
+
+type CompactSnapshotHistoryDeltaCheckpoint = CompactSnapshotHistoryCheckpointBase & {
+    deltaFrom: string
+    snapshotDelta: CompactJsonDelta
+}
+
+type CompactSnapshotHistoryCheckpoint = CompactSnapshotHistoryFullCheckpoint | CompactSnapshotHistoryDeltaCheckpoint
 
 type CompactSnapshotHistoryDocument = {
     format: typeof SNAPSHOT_HISTORY_FORMAT
@@ -3113,23 +3126,102 @@ export const appendVmAsyncSessionSnapshotCheckpoint = (
     snapshot: snapshotVmAsyncSession(session, options),
 })
 
-export const serializeSnapshotHistory = (history: SnapshotHistory): string =>
-    JSON.stringify({
-        format: SNAPSHOT_HISTORY_FORMAT,
-        version: SNAPSHOT_HISTORY_VERSION,
-        rootIds: history.rootIds,
-        ...(history.headId === undefined ? {} : { headId: history.headId }),
-        checkpoints: history.checkpoints.map(checkpoint => ({
+const encodeCompactSnapshotCheckpoint = (
+    history: SnapshotHistory,
+    checkpoint: SnapshotCheckpoint,
+    encodedSnapshots: ReadonlyMap<string, CompactSnapshotCheckpointEnvelope>
+): CompactSnapshotHistoryCheckpoint => {
+    const snapshot = checkpoint.kind === 'execution'
+        ? encodeCompactExecutionSnapshot(checkpoint.snapshot)
+        : encodeCompactVmAsyncSessionSnapshot(checkpoint.snapshot)
+    const baseCheckpoint = checkpoint.parentId === undefined
+        ? undefined
+        : history.checkpoints.find(entry => entry.id === checkpoint.parentId)
+    const baseSnapshot = checkpoint.parentId === undefined
+        ? undefined
+        : encodedSnapshots.get(checkpoint.parentId)
+    const baseDocument = {
+        id: checkpoint.id,
+        ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
+        ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
+        ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+        kind: checkpoint.kind,
+    } satisfies CompactSnapshotHistoryCheckpointBase
+
+    if (baseCheckpoint && baseSnapshot && baseCheckpoint.kind === checkpoint.kind) {
+        const snapshotDelta = createCompactJsonDelta(baseSnapshot as CompactJsonValue, snapshot as CompactJsonValue)
+        const deltaDocument = {
+            ...baseDocument,
+            deltaFrom: checkpoint.parentId!,
+            snapshotDelta,
+        } satisfies CompactSnapshotHistoryDeltaCheckpoint
+        if (JSON.stringify(deltaDocument).length < JSON.stringify({ ...baseDocument, snapshot }).length) {
+            return deltaDocument
+        }
+    }
+
+    return {
+        ...baseDocument,
+        snapshot,
+    }
+}
+
+const decodeCompactSnapshotCheckpoint = (
+    checkpoints: CompactSnapshotHistoryCheckpoint[],
+    checkpoint: CompactSnapshotHistoryCheckpoint,
+    compactSnapshotsById: Map<string, CompactSnapshotCheckpointEnvelope>
+): SnapshotCheckpoint => {
+    const compactSnapshot: CompactSnapshotCheckpointEnvelope = 'snapshot' in checkpoint
+        ? checkpoint.snapshot
+        : (() => {
+            const baseSnapshot = compactSnapshotsById.get(checkpoint.deltaFrom)
+            if (!baseSnapshot) {
+                throw new Error(`Unknown delta base checkpoint '${checkpoint.deltaFrom}'`)
+            }
+            const baseCheckpoint = checkpoints.find(entry => entry.id === checkpoint.deltaFrom)
+            if (!baseCheckpoint || baseCheckpoint.kind !== checkpoint.kind) {
+                throw new Error(`Snapshot delta base '${checkpoint.deltaFrom}' does not match checkpoint kind`)
+            }
+            return applyCompactJsonDelta(baseSnapshot as CompactJsonValue, checkpoint.snapshotDelta) as CompactSnapshotCheckpointEnvelope
+        })()
+    compactSnapshotsById.set(checkpoint.id, compactSnapshot)
+    return checkpoint.kind === 'execution'
+        ? {
             id: checkpoint.id,
             ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
             ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
             ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
-            kind: checkpoint.kind,
-            snapshot: checkpoint.kind === 'execution'
-                ? encodeCompactExecutionSnapshot(checkpoint.snapshot)
-                : encodeCompactVmAsyncSessionSnapshot(checkpoint.snapshot),
-        })),
+            kind: 'execution',
+            snapshot: decodeCompactExecutionSnapshot(compactSnapshot as CompactExecutionSnapshotEnvelope),
+        }
+        : {
+            id: checkpoint.id,
+            ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
+            ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
+            ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+            kind: 'vmAsyncSession',
+            snapshot: decodeCompactVmAsyncSessionSnapshot(compactSnapshot as CompactVmAsyncSessionSnapshotEnvelope),
+        }
+}
+
+export const serializeSnapshotHistory = (history: SnapshotHistory): string => {
+    const encodedSnapshots = new Map<string, CompactSnapshotCheckpointEnvelope>()
+    const checkpoints = history.checkpoints.map(checkpoint => {
+        const encoded = encodeCompactSnapshotCheckpoint(history, checkpoint, encodedSnapshots)
+        const compactSnapshot = 'snapshot' in encoded
+            ? encoded.snapshot
+            : applyCompactJsonDelta(encodedSnapshots.get(encoded.deltaFrom)! as CompactJsonValue, encoded.snapshotDelta) as CompactSnapshotCheckpointEnvelope
+        encodedSnapshots.set(checkpoint.id, compactSnapshot)
+        return encoded
+    })
+    return JSON.stringify({
+        format: SNAPSHOT_HISTORY_FORMAT,
+        version: SNAPSHOT_HISTORY_VERSION,
+        rootIds: history.rootIds,
+        ...(history.headId === undefined ? {} : { headId: history.headId }),
+        checkpoints,
     } satisfies CompactSnapshotHistoryDocument)
+}
 
 export const parseSnapshotHistory = (text: string): SnapshotHistory => {
     const parsed = JSON.parse(text) as CompactSnapshotHistoryDocument
@@ -3143,27 +3235,13 @@ export const parseSnapshotHistory = (text: string): SnapshotHistory => {
     ) {
         throw new Error('Unsupported snapshot history version')
     }
+    const compactSnapshotsById = new Map<string, CompactSnapshotCheckpointEnvelope>()
     return {
         version: SNAPSHOT_HISTORY_VERSION,
         rootIds: [...parsed.rootIds],
         ...(parsed.headId === undefined ? {} : { headId: parsed.headId }),
-        checkpoints: parsed.checkpoints.map(checkpoint => checkpoint.kind === 'execution'
-            ? {
-                id: checkpoint.id,
-                ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
-                ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
-                ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
-                kind: 'execution',
-                snapshot: decodeCompactExecutionSnapshot(checkpoint.snapshot as CompactExecutionSnapshotEnvelope),
-            }
-            : {
-                id: checkpoint.id,
-                ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
-                ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
-                ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
-                kind: 'vmAsyncSession',
-                snapshot: decodeCompactVmAsyncSessionSnapshot(checkpoint.snapshot as CompactVmAsyncSessionSnapshotEnvelope),
-            }
+        checkpoints: parsed.checkpoints.map(checkpoint =>
+            decodeCompactSnapshotCheckpoint(parsed.checkpoints, checkpoint, compactSnapshotsById)
         ),
     }
 }
