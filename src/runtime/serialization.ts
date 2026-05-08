@@ -508,6 +508,7 @@ type SnapshotCheckpointOptions = {
     parentId?: string
     label?: string
     createdAt?: string
+    debugPausePtr?: number
 }
 
 export type ExecutionSnapshotCheckpoint = {
@@ -515,6 +516,7 @@ export type ExecutionSnapshotCheckpoint = {
     parentId?: string
     label?: string
     createdAt?: string
+    debugPausePtr?: number
     kind: 'execution'
     snapshot: ExecutionSnapshot
 }
@@ -524,6 +526,7 @@ export type VmAsyncSessionSnapshotCheckpoint = {
     parentId?: string
     label?: string
     createdAt?: string
+    debugPausePtr?: number
     kind: 'vmAsyncSession'
     snapshot: VmAsyncSessionSnapshot
 }
@@ -549,6 +552,7 @@ type CompactSnapshotHistoryCheckpointBase = {
     parentId?: string
     label?: string
     createdAt?: string
+    debugPausePtr?: number
     kind: SnapshotCheckpointKind
 }
 
@@ -3108,6 +3112,7 @@ export const appendExecutionSnapshotCheckpoint = (
     ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
     ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
     ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+    ...(checkpoint.debugPausePtr === undefined ? {} : { debugPausePtr: checkpoint.debugPausePtr }),
     kind: 'execution',
     snapshot: snapshotExecution(execution, options),
 })
@@ -3122,6 +3127,7 @@ export const appendVmAsyncSessionSnapshotCheckpoint = (
     ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
     ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
     ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+    ...(checkpoint.debugPausePtr === undefined ? {} : { debugPausePtr: checkpoint.debugPausePtr }),
     kind: 'vmAsyncSession',
     snapshot: snapshotVmAsyncSession(session, options),
 })
@@ -3145,6 +3151,7 @@ const encodeCompactSnapshotCheckpoint = (
         ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
         ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
         ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+        ...(checkpoint.debugPausePtr === undefined ? {} : { debugPausePtr: checkpoint.debugPausePtr }),
         kind: checkpoint.kind,
     } satisfies CompactSnapshotHistoryCheckpointBase
 
@@ -3191,6 +3198,7 @@ const decodeCompactSnapshotCheckpoint = (
             ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
             ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
             ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+            ...(checkpoint.debugPausePtr === undefined ? {} : { debugPausePtr: checkpoint.debugPausePtr }),
             kind: 'execution',
             snapshot: decodeCompactExecutionSnapshot(compactSnapshot as CompactExecutionSnapshotEnvelope),
         }
@@ -3199,6 +3207,7 @@ const decodeCompactSnapshotCheckpoint = (
             ...(checkpoint.parentId === undefined ? {} : { parentId: checkpoint.parentId }),
             ...(checkpoint.label === undefined ? {} : { label: checkpoint.label }),
             ...(checkpoint.createdAt === undefined ? {} : { createdAt: checkpoint.createdAt }),
+            ...(checkpoint.debugPausePtr === undefined ? {} : { debugPausePtr: checkpoint.debugPausePtr }),
             kind: 'vmAsyncSession',
             snapshot: decodeCompactVmAsyncSessionSnapshot(compactSnapshot as CompactVmAsyncSessionSnapshotEnvelope),
         }

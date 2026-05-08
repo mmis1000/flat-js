@@ -11,11 +11,29 @@ import {
 
 export type PlaygroundSnapshotDocument =
     | { kind: 'history'; history: SnapshotHistory }
-    | { kind: 'vmAsyncSession'; snapshot: VmAsyncSessionSnapshot }
-    | { kind: 'execution'; snapshot: ExecutionSnapshot }
+    | { kind: 'vmAsyncSession'; snapshot: VmAsyncSessionSnapshot, debugPausePtr?: number }
+    | { kind: 'execution'; snapshot: ExecutionSnapshot, debugPausePtr?: number }
+
+const PLAYGROUND_SNAPSHOT_DOCUMENT_FORMAT = 'flat-js-playground-snapshot'
+
+type SerializedPlaygroundSnapshotDocument = {
+    format: typeof PLAYGROUND_SNAPSHOT_DOCUMENT_FORMAT
+    kind: 'vmAsyncSession' | 'execution'
+    snapshot: VmAsyncSessionSnapshot | ExecutionSnapshot
+    debugPausePtr?: number
+}
 
 export function continueVmAsyncSession(session: VmAsyncSession): VmAsyncSessionRunResult {
     return session.paused ? session.resume() : session.runUntilIdleOrPause()
+}
+
+export function serializePlaygroundSnapshotDocument(document: Exclude<PlaygroundSnapshotDocument, { kind: 'history' }>): string {
+    return JSON.stringify({
+        format: PLAYGROUND_SNAPSHOT_DOCUMENT_FORMAT,
+        kind: document.kind,
+        snapshot: document.snapshot,
+        ...(document.debugPausePtr === undefined ? {} : { debugPausePtr: document.debugPausePtr }),
+    } satisfies SerializedPlaygroundSnapshotDocument)
 }
 
 export function parsePlaygroundSnapshotDocument(text: string): PlaygroundSnapshotDocument {
@@ -28,6 +46,25 @@ export function parsePlaygroundSnapshotDocument(text: string): PlaygroundSnapsho
     if (parsed != null && typeof parsed === 'object') {
         if (Array.isArray(parsed.checkpoints) && Array.isArray(parsed.rootIds)) {
             return { kind: 'history', history: parseSnapshotHistory(trimmed) }
+        }
+        if (
+            parsed.format === PLAYGROUND_SNAPSHOT_DOCUMENT_FORMAT
+            && (parsed.kind === 'execution' || parsed.kind === 'vmAsyncSession')
+            && parsed.snapshot != null
+            && typeof parsed.snapshot === 'object'
+        ) {
+            const snapshotText = JSON.stringify(parsed.snapshot)
+            return parsed.kind === 'vmAsyncSession'
+                ? {
+                    kind: 'vmAsyncSession',
+                    snapshot: parseVmAsyncSessionSnapshot(snapshotText),
+                    ...(typeof parsed.debugPausePtr === 'number' ? { debugPausePtr: parsed.debugPausePtr } : {}),
+                }
+                : {
+                    kind: 'execution',
+                    snapshot: parseExecutionSnapshot(snapshotText),
+                    ...(typeof parsed.debugPausePtr === 'number' ? { debugPausePtr: parsed.debugPausePtr } : {}),
+                }
         }
         if (
             Array.isArray(parsed.executions)

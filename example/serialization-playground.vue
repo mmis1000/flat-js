@@ -155,6 +155,7 @@ import {
     deleteSnapshotCheckpointBranch,
     parsePlaygroundSnapshotDocument,
     relabelSnapshotCheckpoint,
+    serializePlaygroundSnapshotDocument,
 } from '../src/serialization-playground'
 
 type VmStatus = 'idle' | 'running' | 'paused' | 'done' | 'error'
@@ -878,12 +879,20 @@ export default defineComponent({
             }
             if (this.asyncSession && this.state === 'paused') {
                 const snapshot = snapshotVmAsyncSession(this.asyncSession, { hostRegistry })
-                return serializeVmAsyncSessionSnapshot(snapshot)
+                return serializePlaygroundSnapshotDocument({
+                    kind: 'vmAsyncSession',
+                    snapshot,
+                    ...(this.debugPausePtr == null ? {} : { debugPausePtr: this.debugPausePtr }),
+                })
             }
             const execution = this.execution
             if (this.state === 'paused' && execution) {
                 const snapshot = snapshotExecution(execution, { hostRegistry })
-                return serializeExecutionSnapshot(snapshot)
+                return serializePlaygroundSnapshotDocument({
+                    kind: 'execution',
+                    snapshot,
+                    ...(this.debugPausePtr == null ? {} : { debugPausePtr: this.debugPausePtr }),
+                })
             }
             const text = this.snapshotText.trim()
             if (text) {
@@ -901,6 +910,7 @@ export default defineComponent({
                 const checkpointOptions = {
                     ...(parentId ? { parentId } : {}),
                     ...(trimmedLabel ? { label: trimmedLabel } : {}),
+                    ...(this.debugPausePtr == null ? {} : { debugPausePtr: this.debugPausePtr }),
                 }
                 const history = this.snapshotHistory ?? createSnapshotHistory()
                 const updatedHistory = this.asyncSession
@@ -1008,7 +1018,7 @@ export default defineComponent({
                 this.debugInfo = markRaw(debugInfo)
                 this.state = 'paused'
                 this.statusText = statusText
-                this.debugPausePtr = this.getNextVisibleSourcePtr(session.debugExecution)
+                this.debugPausePtr = document.debugPausePtr ?? this.getNextVisibleSourcePtr(session.debugExecution)
                 this.flushDebugHighlightSync()
                 this.revealDebugHighlight()
                 return
@@ -1029,7 +1039,7 @@ export default defineComponent({
             this.debugInfo = markRaw(debugInfo)
             this.state = 'paused'
             this.statusText = statusText
-            this.debugPausePtr = this.getNextVisibleSourcePtr(execution)
+            this.debugPausePtr = document.debugPausePtr ?? this.getNextVisibleSourcePtr(execution)
             this.flushDebugHighlightSync()
             this.revealDebugHighlight()
         },
@@ -1065,7 +1075,7 @@ export default defineComponent({
                     this.state = 'paused'
                     this.statusText = statusText
                     this.historyRuntimeDirty = checkpointId !== history.headId
-                    this.debugPausePtr = this.getNextVisibleSourcePtr(session.debugExecution)
+                    this.debugPausePtr = checkpoint.debugPausePtr ?? this.getNextVisibleSourcePtr(session.debugExecution)
                     this.flushDebugHighlightSync()
                     this.revealDebugHighlight()
                     this.syncCheckpointLabelFromSelection()
@@ -1088,7 +1098,7 @@ export default defineComponent({
                 this.state = 'paused'
                 this.statusText = statusText
                 this.historyRuntimeDirty = checkpointId !== history.headId
-                this.debugPausePtr = this.getNextVisibleSourcePtr(execution)
+                this.debugPausePtr = checkpoint.debugPausePtr ?? this.getNextVisibleSourcePtr(execution)
                 this.flushDebugHighlightSync()
                 this.revealDebugHighlight()
                 this.syncCheckpointLabelFromSelection()

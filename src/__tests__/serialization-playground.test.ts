@@ -13,6 +13,7 @@ import {
     deleteSnapshotCheckpointBranch,
     parsePlaygroundSnapshotDocument,
     relabelSnapshotCheckpoint,
+    serializePlaygroundSnapshotDocument,
 } from '../serialization-playground'
 
 const executionSnapshot = {
@@ -30,9 +31,10 @@ const executionSnapshot = {
     programs: [],
 } as any
 
-const createPausedExecution = () => {
-    const [program] = compile('debugger')
+const createPausedExecution = (source = 'debugger') => {
+    const [program] = compile(source)
     let paused = false
+    let debugPtr: number | undefined
     const execution = getExecution(
         program,
         0,
@@ -40,8 +42,9 @@ const createPausedExecution = () => {
         [],
         undefined,
         [],
-        () => () => {
+        () => (ptr?: number) => {
             paused = true
+            debugPtr = ptr
         },
         compile
     )
@@ -54,11 +57,11 @@ const createPausedExecution = () => {
     if (!paused) {
         throw new Error('pause guard exceeded')
     }
-    return execution
+    return { execution, debugPtr }
 }
 
 const createSerializedHistoryDocument = () => {
-    const execution = createPausedExecution()
+    const { execution } = createPausedExecution()
     const history = appendExecutionSnapshotCheckpoint(
         createSnapshotHistory(),
         execution,
@@ -107,12 +110,54 @@ test('parsePlaygroundSnapshotDocument recognizes snapshot history documents', ()
 })
 
 test('parsePlaygroundSnapshotDocument recognizes execution snapshots', () => {
-    const execution = createPausedExecution()
+    const { execution } = createPausedExecution()
     const serialized = serializeExecutionSnapshot(snapshotExecution(execution, {
         hostRegistry: createHostRegistry([['globalThis', globalThis]]),
     }))
     const parsed = parsePlaygroundSnapshotDocument(serialized)
     expect(parsed.kind).toBe('execution')
+})
+
+test('serializePlaygroundSnapshotDocument preserves raw snapshot debug pause pointers', () => {
+    const source = `const before = 1\ndebugger\nconst after = 2\n`
+    const { execution, debugPtr } = createPausedExecution(source)
+    expect(typeof debugPtr).toBe('number')
+
+    const serialized = serializePlaygroundSnapshotDocument({
+        kind: 'execution',
+        snapshot: snapshotExecution(execution, {
+            hostRegistry: createHostRegistry([['globalThis', globalThis]]),
+        }),
+        debugPausePtr: debugPtr,
+    })
+    const parsed = parsePlaygroundSnapshotDocument(serialized)
+    expect(parsed.kind).toBe('execution')
+    if (parsed.kind !== 'execution') {
+        throw new Error('expected execution document')
+    }
+    expect(parsed.debugPausePtr).toBe(debugPtr)
+})
+
+test('serializeSnapshotHistory preserves checkpoint debug pause pointers', () => {
+    const source = `const before = 1\ndebugger\nconst after = 2\n`
+    const { execution, debugPtr } = createPausedExecution(source)
+    expect(typeof debugPtr).toBe('number')
+
+    const history = appendExecutionSnapshotCheckpoint(
+        createSnapshotHistory(),
+        execution,
+        { hostRegistry: createHostRegistry([['globalThis', globalThis]]) },
+        { id: 'root', debugPausePtr: debugPtr }
+    )
+    const parsed = parsePlaygroundSnapshotDocument(serializeSnapshotHistory(history))
+    expect(parsed.kind).toBe('history')
+    if (parsed.kind !== 'history') {
+        throw new Error('expected history document')
+    }
+    expect(parsed.history.checkpoints[0]).toMatchObject({
+        id: 'root',
+        debugPausePtr: debugPtr,
+    })
 })
 
 test('relabelSnapshotCheckpoint updates or clears checkpoint labels', () => {
