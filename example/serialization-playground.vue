@@ -157,30 +157,13 @@ import {
     relabelSnapshotCheckpoint,
     serializePlaygroundSnapshotDocument,
 } from '../src/serialization-playground'
+import { SERIALIZATION_PLAYGROUND_EXAMPLE_SOURCE } from '../src/serialization-playground-example'
 
 type VmStatus = 'idle' | 'running' | 'paused' | 'done' | 'error'
 
 type VmExecution = ReturnType<typeof getExecution>
 
-const defaultSource = `const events = []
-
-function record(value) {
-    events.push(value)
-    log(events.join(' -> '))
-}
-
-async function main() {
-    record('start')
-    vmSleep(2).then(() => {
-        record('later timer')
-    })
-    await vmSleep(1)
-    debugger
-    record('first after restore')
-}
-
-main()
-`
+const defaultSource = SERIALIZATION_PLAYGROUND_EXAMPLE_SOURCE
 
 function emptyDebugInfo(): DebugInfo {
     return {

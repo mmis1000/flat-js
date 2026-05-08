@@ -4,17 +4,24 @@ import {
     appendExecutionSnapshotCheckpoint,
     createHostRegistry,
     createSnapshotHistory,
+    restoreVmAsyncSession,
     serializeExecutionSnapshot,
     serializeSnapshotHistory,
     snapshotExecution,
     type SnapshotHistory,
 } from '../serialization'
 import {
+    continueVmAsyncSession,
     deleteSnapshotCheckpointBranch,
     parsePlaygroundSnapshotDocument,
     relabelSnapshotCheckpoint,
     serializePlaygroundSnapshotDocument,
 } from '../serialization-playground'
+import {
+    buildSerializationPlaygroundExampleSnapshotDocument,
+    createSerializationPlaygroundExampleHostRegistry,
+    createSerializationPlaygroundExampleVmGlobal,
+} from '../serialization-playground-example'
 
 const executionSnapshot = {
     version: 1,
@@ -158,6 +165,36 @@ test('serializeSnapshotHistory preserves checkpoint debug pause pointers', () =>
         id: 'root',
         debugPausePtr: debugPtr,
     })
+})
+
+test('buildSerializationPlaygroundExampleSnapshotDocument creates a restorable paused async snapshot', () => {
+    const { snapshotText, debugPausePtr } = buildSerializationPlaygroundExampleSnapshotDocument()
+    expect(debugPausePtr).toBeGreaterThan(0)
+
+    const parsed = parsePlaygroundSnapshotDocument(snapshotText)
+    expect(parsed.kind).toBe('vmAsyncSession')
+    if (parsed.kind !== 'vmAsyncSession') {
+        throw new Error('expected vmAsyncSession document')
+    }
+    expect(parsed.debugPausePtr).toBe(debugPausePtr)
+    expect(parsed.snapshot.paused).toBe(true)
+
+    const logs: string[] = []
+    const log = (value: unknown) => logs.push(String(value))
+    const vmGlobal = createSerializationPlaygroundExampleVmGlobal()
+    const restored = restoreVmAsyncSession(parsed.snapshot, {
+        hostRegistry: createSerializationPlaygroundExampleHostRegistry(log, vmGlobal),
+        compileFunction: compile,
+    })
+
+    expect(continueVmAsyncSession(restored).paused).toBe(false)
+    expect(logs).toEqual(['start -> first after restore'])
+    expect(restored.advanceTime(1).settledTimers).toBe(1)
+    expect(continueVmAsyncSession(restored).paused).toBe(false)
+    expect(logs).toEqual([
+        'start -> first after restore',
+        'start -> first after restore -> later timer',
+    ])
 })
 
 test('relabelSnapshotCheckpoint updates or clears checkpoint labels', () => {

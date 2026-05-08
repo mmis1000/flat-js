@@ -22,7 +22,7 @@
     "build-example": "npm run build && node ./lib/cli.js --strip-runtime --merge-opcodes-from ./src/__tests__/fixures/jquery.js --merge-opcodes-from ./src/__tests__/fixures/bad-code.js ./src/__tests__/fixures/loader.js > ./example/loader.js && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/bad-code.js > ./example/bad-code.bin.gz && node ./lib/cli.js --bin --gzip ./src/__tests__/fixures/jquery.js > ./example/jquery.bin.gz",
     "build-example:opcode-kitchen-sink": "npm run build && node ./lib/cli.js --strip-runtime ./src/__tests__/fixures/opcode-kitchen-sink.js > ./example/opcode-kitchen-sink-loader.js",
     "build-example:self-contained-vm": "npm run build && node ./lib/cli.js --strip-runtime ./example/self-contained-vm-demo-source.mjs > ./example/self-contained-vm-demo-inner.js && node ./lib/cli.js --strip-runtime ./example/self-contained-vm-demo-inner.js > ./example/self-contained-vm-demo.js",
-    "build-example:serialization-playground": "npm run build && webpack --config webpack.config-serialization-playground.js",
+    "build-example:serialization-playground": "npm run build && node ./scripts/build-serialization-playground-snapshot.js && webpack --config webpack.config-serialization-playground.js",
     "serve-web": "npx serve dist-web"
   },
   "author": "",
