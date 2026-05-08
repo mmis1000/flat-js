@@ -105,8 +105,10 @@ module.exports = (dev = false) => ({
     },
     devtool: 'source-map',
     devServer: {
-      contentBase: path.join(__dirname, 'dist-web'),
+      static: {
+        directory: path.join(__dirname, 'dist-web'),
+      },
       compress: true,
-      port: 9000
+      port: 9000,
     }
 })
