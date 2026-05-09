@@ -90,7 +90,7 @@
                         :disabled="state === 'running'"
                     >
                     <button type="button" :disabled="state !== 'paused'" @click="saveCheckpoint">Checkpoint</button>
-                    <button type="button" :disabled="!selectedCheckpointId || state === 'running'" @click="loadSelectedCheckpoint">Load Checkpoint</button>
+                    <button type="button" :disabled="!selectedCheckpointId || state === 'running'" @click="loadSelectedCheckpoint()">Load Checkpoint</button>
                     <button type="button" :disabled="!selectedCheckpointId || state === 'running'" @click="renameSelectedCheckpoint">Rename</button>
                     <button type="button" :disabled="!selectedCheckpointId || state === 'running'" @click="deleteSelectedCheckpoint">Delete Branch</button>
                 </div>
@@ -361,6 +361,7 @@ const hostInput = () => window.prompt('input()') ?? ''
 
 const hostRegistry = createHostRegistry([
     ['vmGlobal', vmGlobal],
+    ['globalThis', vmGlobal],
     ['log', hostLog],
     ['input', hostInput],
 ])

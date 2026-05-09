@@ -125,6 +125,7 @@ lib/
 dist-web/
 example/*.json
 !example/serialization-playground-snapshot.json
+!example/serialization-playground-checkpoint-history.json
 example/*.bin
 example/*.bin.gz
 example/*.js

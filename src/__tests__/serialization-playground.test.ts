@@ -1,9 +1,13 @@
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+
 import { compile } from '../compiler'
 import { Fields, getExecution } from '../runtime'
 import {
     appendExecutionSnapshotCheckpoint,
     createHostRegistry,
     createSnapshotHistory,
+    restoreExecutionCheckpoint,
     restoreVmAsyncSession,
     serializeExecutionSnapshot,
     serializeSnapshotHistory,
@@ -18,7 +22,9 @@ import {
     serializePlaygroundSnapshotDocument,
 } from '../serialization-playground'
 import {
+    buildSerializationPlaygroundCheckpointHistoryExampleDocument,
     buildSerializationPlaygroundExampleSnapshotDocument,
+    createSerializationPlaygroundCheckpointHistoryExampleHostRegistry,
     createSerializationPlaygroundExampleHostRegistry,
     createSerializationPlaygroundExampleVmGlobal,
 } from '../serialization-playground-example'
@@ -195,6 +201,62 @@ test('buildSerializationPlaygroundExampleSnapshotDocument creates a restorable p
         'start -> first after restore',
         'start -> first after restore -> later timer',
     ])
+})
+
+test('buildSerializationPlaygroundCheckpointHistoryExampleDocument creates a restorable checkpoint history chain', () => {
+    const { historyText, checkpointIds, debugPausePtrs } = buildSerializationPlaygroundCheckpointHistoryExampleDocument()
+    expect(checkpointIds).toEqual(['root-checkpoint', 'after-first-continue', 'after-second-continue'])
+    expect(debugPausePtrs.every(ptr => ptr > 0)).toBe(true)
+
+    const parsed = parsePlaygroundSnapshotDocument(historyText)
+    expect(parsed.kind).toBe('history')
+    if (parsed.kind !== 'history') {
+        throw new Error('expected history document')
+    }
+    expect(parsed.history.headId).toBe('after-second-continue')
+    expect(parsed.history.checkpoints.map(checkpoint => checkpoint.id)).toEqual(checkpointIds)
+    expect(parsed.history.checkpoints.map(checkpoint => checkpoint.label)).toEqual([
+        'root checkpoint',
+        'after first continue',
+        'after second continue',
+    ])
+    expect(parsed.history.checkpoints.map(checkpoint => checkpoint.debugPausePtr)).toEqual(debugPausePtrs)
+
+    const logs: string[] = []
+    const log = (value: unknown) => logs.push(String(value))
+    const vmGlobal = createSerializationPlaygroundExampleVmGlobal()
+    const restoredRoot = restoreExecutionCheckpoint(parsed.history, 'root-checkpoint', {
+        hostRegistry: createSerializationPlaygroundCheckpointHistoryExampleHostRegistry(log, vmGlobal),
+        compileFunction: compile,
+    })
+    for (let guard = 0; guard < 10_000; guard++) {
+        const result = restoredRoot[Fields.step](true)
+        if (result[Fields.done]) {
+            break
+        }
+    }
+
+    expect(logs).toEqual([
+        'root checkpoint -> after first continue',
+        'root checkpoint -> after first continue -> after second continue',
+        'root checkpoint -> after first continue -> after second continue -> done',
+    ])
+})
+
+test('checkpoint history example host registry resolves globalThis alias used by the browser fixture', () => {
+    const vmGlobal = createSerializationPlaygroundExampleVmGlobal()
+    const hostRegistry = createSerializationPlaygroundCheckpointHistoryExampleHostRegistry(() => {}, vmGlobal)
+
+    expect(hostRegistry.getId(vmGlobal)).toBe('globalThis')
+    expect(hostRegistry.getValue('globalThis')).toBe(vmGlobal)
+})
+
+test('serialization playground checkpoint button invokes loadSelectedCheckpoint without passing PointerEvent', () => {
+    const vueSource = readFileSync(resolve(__dirname, '../../example/serialization-playground.vue'), 'utf8')
+
+    expect(vueSource).toContain('@click="loadSelectedCheckpoint()"')
+    expect(vueSource).not.toContain('@click="loadSelectedCheckpoint"')
+    expect(vueSource).toContain("['globalThis', vmGlobal]")
 })
 
 test('relabelSnapshotCheckpoint updates or clears checkpoint labels', () => {

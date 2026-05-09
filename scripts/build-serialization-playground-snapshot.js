@@ -1,9 +1,19 @@
 const fs = require('fs')
 const path = require('path')
-const { buildSerializationPlaygroundExampleSnapshotText } = require('../lib/serialization-playground-example')
+const {
+    buildSerializationPlaygroundCheckpointHistoryExampleText,
+    buildSerializationPlaygroundExampleSnapshotText,
+} = require('../lib/serialization-playground-example')
 
-const OUTPUT_PATH = path.resolve(__dirname, '..', 'example', 'serialization-playground-snapshot.json')
+const SNAPSHOT_OUTPUT_PATH = path.resolve(__dirname, '..', 'example', 'serialization-playground-snapshot.json')
+const CHECKPOINT_HISTORY_OUTPUT_PATH = path.resolve(__dirname, '..', 'example', 'serialization-playground-checkpoint-history.json')
 
-const snapshotText = buildSerializationPlaygroundExampleSnapshotText()
-fs.writeFileSync(OUTPUT_PATH, `${snapshotText}\n`)
-console.log(`Wrote ${path.relative(path.resolve(__dirname, '..'), OUTPUT_PATH)}`)
+const outputs = [
+    [SNAPSHOT_OUTPUT_PATH, buildSerializationPlaygroundExampleSnapshotText()],
+    [CHECKPOINT_HISTORY_OUTPUT_PATH, buildSerializationPlaygroundCheckpointHistoryExampleText()],
+]
+
+for (const [outputPath, text] of outputs) {
+    fs.writeFileSync(outputPath, `${text}\n`)
+    console.log(`Wrote ${path.relative(path.resolve(__dirname, '..'), outputPath)}`)
+}
