@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
+    <title>Flat JS generated loader demo</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f7f9fb;
+            color: #17212b;
+        }
+        main {
+            max-width: 760px;
+            margin: 48px auto;
+            padding: 0 24px;
+        }
+        nav {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin: 0 0 24px;
+        }
+        a {
+            color: #075e9f;
+        }
+        .demo {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid #d8e1ea;
+        }
+        code {
+            background: #e8eef5;
+            border-radius: 4px;
+            padding: 2px 5px;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <nav aria-label="Project links">
+            <a href="./index.html">Examples home</a>
+            <a href="../">Web debugger</a>
+            <a href="https://github.com/mmis1000/flat-js" rel="noopener noreferrer">GitHub repository</a>
+        </nav>
+        <h1>Generated loader demo</h1>
+        <p>This page loads generated Flat JS browser output from <code>loader.js</code>, then runs the bundled bytecode examples.</p>
+        <section class="demo">
+            <h2>Generated loader</h2>
+            <p>Open the browser console to inspect the loader run.</p>
+        </section>
+    </main>
+    <script src="./loader.js"></script>
+</body>
+</html>
